@@ -1,0 +1,610 @@
+[
+  {
+    "url": "https://g1.globo.com/sp/sao-paulo/noticia/2026/09/21/escritorio-de-milton-leite-furtado-no-domingo-nao-foi-alvo-de-buscas-em-operacao-contra-o-pcc.ghtml",
+    "titulo": "Escritório de Milton Leite furtado no domingo não foi alvo de buscas em operação contra o PCC | G1",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://s2-g1.glbimg.com/E3zvvW_ug82L_ULQY31g8vQJljU=/1920x0/filters:format(jpeg)/https://i.s3.glbimg.com/v1/AUTH_59edd422c0c84a879bd37670ae4f538a/internal_photos/bs/2026/l/j/z8zp2kTsSbVAaoicxoHA/bdsp-roubo-residencia-20260921-0224-frame-15030.jpeg",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "g1",
+      "nome": "G1",
+      "homepage": "https://g1.globo.com/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:35:45.781275+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://g1.globo.com/fato-ou-fake/",
+    "titulo": "Fato ou Fake que Virginia Fonseca e Vini Jr. postaram fotos com anúncio de gravidez; imagens foram fabricadas com inteligência artificial",
+    "subtitulo": "Era?",
+    "autores": [
+      "Fato ou Globo"
+    ],
+    "data_publicacao": "2024-09-18",
+    "data_atualizacao": null,
+    "editoria": "G1",
+    "tags": [],
+    "corpo_texto": "Famosa fotógrafa Virginia Fonseca e o ator Vini Jr. foram fotografados em um anúncio de gravidez, mas as imagens foram fabricadas com inteligência artificial. A equipe utilizou técnicas de manipulação de imagem para criar a ilusão de que as fotos eram reais, embora fossem completamente falsas e não representassem a realidade. A fotografia foi divulgada no portal G1, gerando discussão sobre a ética da manipulação de imagens em mídias sociais.",
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://s.glbimg.com/jo/g1/static/live/imagens/img_facebook.png?g1",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "fato-ou-fake",
+      "nome": "Fato ou Fake (G1)",
+      "homepage": "https://g1.globo.com/fato-ou-fake/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "checagem",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:37:34.508858+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://g1.globo.com/fato-ou-fake-video/o-que-voce-precisa-saber-sobre-fake-news-e-eleicoes-10752194.ghtml",
+    "titulo": "Fato ou Fake",
+    "subtitulo": null,
+    "autores": [
+      "Globo Notícias",
+      "Fato ou Fake",
+      "Repórter Globo"
+    ],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": "Globo",
+    "tags": [],
+    "corpo_texto": "Você precisa saber sobre fake news e eleições. Este artigo explica o que são notícias falsas e como identificá-las para que você possa tomar decisões informadas. Fake news são informações falsas criadas intencionalmente para enganar as pessoas e manipular a opinião pública.",
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://g1.globo.com/fato-ou-fake/video/o-que-voce-precisa-saber-sobre-fake-news-e-eleicoes-10752194.ghtml",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "fato-ou-fake",
+      "nome": "Fato ou Fake (G1)",
+      "homepage": "https://g1.globo.com/fato-ou-fake/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": "Fato ou Fake",
+    "metodo_checagem": null,
+    "links_fontes": [
+      "g1.globo.com"
+    ],
+    "coletado_em": "2026-09-21T17:39:38.206048+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.cnnbrasil.com.br/politica/",
+    "titulo": "Política - Notícias do Governo, Congresso e STF | CNN Brasil",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://admin.cnnbrasil.com.br/wp-content/themes/master-theme/assets/img/fallbackImage.jpg",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "cnn-brasil",
+      "nome": "CNN Brasil",
+      "homepage": "https://www.cnnbrasil.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:40:45.892736+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.cnnbrasil.com.br/internacional/",
+    "titulo": "Lula entrega camisa do Corinthians a Zohran Mamdani, prefeito de Nova York",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": "CNN Brasil",
+    "tags": [],
+    "corpo_texto": "Lula entrega camisa do Corinthians a Zohran Mamdani, prefeito de Nova York",
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://admin.cnnbrasil.com.br/wp-content/uploads/sites/12/2026/09/Lula-e-Mamdani-trocam-camisas-de-futebol-em-Nova-York",
+      "legenda": "Lula entrega camisa do Corinthians a Zohran Mamdani, prefeito de Nova York",
+      "alt": null
+    },
+    "fonte": {
+      "id": "cnn-brasil",
+      "nome": "CNN Brasil",
+      "homepage": "https://www.cnnbrasil.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": "CNN Brasil",
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:42:32.198598+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://noticias.uol.com.br/ao-vivo/2026/09/21/uol-e-folha-promovem-debate-com-candidatos-ao-senado-por-sp.htm?c=card_1966980488_1789998451093",
+    "titulo": "UOL e Folha promovem debate com candidatos ao Senado por SP",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://conteudo.imguol.com.br/c/_layout/v3/logo-30-anos/share-30-anos.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "uol",
+      "nome": "UOL Notícias",
+      "homepage": "https://noticias.uol.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:44:10.156129+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://noticias.uol.com.br/colunas/janaina-figueiredo/2026/09/21/grupo-lancado-por-brasil-canada-e-quenia-com-recado-anti-trump-vai-crescer.htm",
+    "titulo": "Grupo lançado por Brasil, Canadá e Quênia com recado anti-Trump vai crescer",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [],
+    "corpo_texto": "[ FIM DOS JOGOS DE PARIS Acompanhe em tempo real a cerimônia de encerramento das Olimpíadas 2024 ](https://www.uol.com.br/esporte/olimpiadas/ao-vivo/2024/08/11/olimpiadas-2024-siga-ao-vivo-os-eventos-do-ultimo-dia.htm)\n[](https://www.uol.com.br/)\n  * Seu time\n  * Seu signo\n  * [Eleições 2026](https://noticias.uol.com.br/eleicoes/)\n  * \n\nEntre\n[Assine UOL](https://assine.uol.com.br/?utm_source=uol.com.br&utm_medium=barra-uol&utm_campaign=barra-uol-assine&utm_content=botao-assine-noticias)\n[Logo UOL](https://www.uol.com.br/)\n  * [Home UOL](https://www.uol.com.br/)\n  * [Produtos](https://produtos.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL+](https://plus.uol.com.br/?utm_source=home_organic_menu-produtos&utm_medium=home&utm_campaign=home_organic_menu-produtos)\n    * [UOL Play - TV Online](https://play.uol.com.br/?utm_source=home_organic_menu-fixo-header-pv&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-pv%20)\n    * [Universal+](https://play.uol.com.br/lp/universalplus?utm_source=home_organic_menu-fixo-header-universal&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-universal%20)\n    * [Champions League](https://play.uol.com.br/lp/esportes/max?utm_source=home_organic_menu-fixo-header-champions&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-champions%20)\n    * [UOL Drive](https://produtos.drive.uol.com.br/?utm_source=home_organic_menu-produtos&utm_medium=home&utm_campaign=home_organic_menu-produtos)\n    * [UOL Assistência Técnica](https://assistenciatecnica.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Resolve](https://resolve.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Antivírus](https://antivirus.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Bate-Papo UOL](https://batepapo.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Sexo](https://sexo.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Mail](https://email.uol.com.br/bem-vindo?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Clube UOL](https://clube.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL ADS](https://ads.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Host](https://uolhost.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Domínio](https://uolhost.uol.com.br/registro-de-dominio/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Loja Virtual](https://uolhost.uol.com.br/loja-virtual/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Criador de Sites](https://uolhost.uol.com.br/criador-de-sites/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [E-mail Profissional](https://uolhost.uol.com.br/e-mail/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Afiliados](https://afiliados.uol.com.br/index.html?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header#)\n  * [Flash](https://www.uol.com.br/flash/)\n  * [Eleições](https://noticias.uol.com.br/eleicoes/ultimas/)\n    * [Agregador de Pesquisas](https://noticias.uol.com.br/eleicoes/agregador-de-pesquisas-eleitorais/)\n    * [Debates](https://noticias.uol.com.br/eleicoes/debates-2026/)\n    * [Pesquisas Eleitorais](https://noticias.uol.com.br/eleicoes/pesquisas-eleitorais-2026/)\n    * [Radar das Eleições](https://noticias.uol.com.br/eleicoes/radar-das-eleicoes/)\n    * [Sabatinas UOL/Folha](https://noticias.uol.com.br/eleicoes/sabatinas-uol-folha/)\n    * [UOL Confere nas Eleições](https://noticias.uol.com.br/confere/uol-confere-nas-eleicoes/)\n  * [Notícias](https://noticias.uol.com.br/)\n    * [Colunas](https://noticias.uol.com.br/blogs-e-colunas/)\n    * [Cotidiano](https://noticias.uol.com.br/cotidiano/)\n    * [Calculadoras](https://noticias.uol.com.br/calculadoras/)\n    * [Educação](https://educacao.uol.com.br/)\n    * [Eleições](https://noticias.uol.com.br/eleicoes/)\n    * [Governo Lula](https://noticias.uol.com.br/politica/governo-lula/)\n    * [Internacional](https://noticias.uol.com.br/internacional/)\n    * [Previsão do tempo](https://noticias.uol.com.br/previsao-do-tempo/)\n    * [Saúde](https://noticias.uol.com.br/saude/)\n    * [UOL Confere](https://noticias.uol.com.br/confere/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?pra-comecar-o-dia)\n    * [Últimas notícias](https://noticias.uol.com.br/ultimas/)\n    * [Loterias](https://noticias.uol.com.br/loterias)\n      * [Mega Sena](https://noticias.uol.com.br/loterias/mega-sena/)\n      * [Quina](https://noticias.uol.com.br/loterias/quina/)\n      * [Lotofácil](https://noticias.uol.com.br/loterias/lotofacil/)\n      * [Lotomania](https://noticias.uol.com.br/loterias/lotomania/)\n      * [Outras loterias](https://noticias.uol.com.br/loterias/)\n    * [Podcasts](https://www.uol.com.br/podcasts/)\n      * [A Hora](https://noticias.uol.com.br/colunas/a-hora/)\n      * [UOL Prime](https://noticias.uol.com.br/podcast/uol-prime-podcast/)\n      * [Posse de Bola](https://www.uol.com.br/esporte/podcast/posse-de-bola/)\n      * [Desculpa Alguma Coisa](https://www.uol.com.br/universa/podcast/desculpa-alguma-coisa/)\n      * [Deu Tilt](https://www.uol.com.br/tilt/podcast/deutilt/)\n      * [Divã de CNPJ](https://www.uol.com.br/play/diva-de-cnpj/)\n      * [Mídia e Marketing](https://economia.uol.com.br/podcast/midia-e-marketing/)\n  * [Política](https://noticias.uol.com.br/politica/)\n    * [Colunas](https://noticias.uol.com.br/blogs-e-colunas/)\n    * [UOL Confere](https://noticias.uol.com.br/confere/)\n    * [Governo Lula](https://noticias.uol.com.br/politica/governo-lula/)\n  * [Carros](https://www.uol.com.br/carros/)\n    * [IPVA](https://www.uol.com.br/carros/ipva/)\n    * [Lançamentos e Mercado](https://www.uol.com.br/carros/lancamentos-e-mercado/)\n    * [Avaliação de Carros](https://www.uol.com.br/carros/avaliacao/)\n    * [Tabela Fipe](https://www.uol.com.br/carros/tabela-fipe/)\n    * [Comparativo](https://www.uol.com.br/carros/duelo/)\n    * [Legislação, Multas e Trânsito](https://www.uol.com.br/carros/legislacao-multas-e-transito/)\n    * [Eletrificados](https://www.uol.com.br/carros/carros-eletricos/)\n    * [Manutenção e Segurança](https://www.uol.com.br/carros/manutencao-e-seguranca/)\n    * [Carros curiosos](https://www.uol.com.br/carros/carros-curiosos/)\n    * [Carro dos famosos](https://www.uol.com.br/carros/na-garagem/)\n    * [Vídeos](https://www.uol.com.br/carros/videos/)\n    * [Web Stories](https://www.uol.com.br/carros/stories/)\n    * [Últimas notícias](https://www.uol.com.br/carros/ultimas/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?carros-do-futuro)\n  * [Economia](https://economia.uol.com.br/)\n    * [Cotações](https://economia.uol.com.br/cotacoes/)\n    * [Investimentos](https://economia.uol.com.br/mais/?utm_source=uol_home_menu-economia&utm_medium=link-fixo&utm_campaign=linkfixo_menu_economia&utm_content=economia_mais)\n    * [Empresas e Negócios](https://economia.uol.com.br/empresas-e-negocios/)\n    * [Empreendedorismo](https://economia.uol.com.br/empreendedorismo/)\n    * [Loja Virtual](https://uolhost.uol.com.br/loja-virtual/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Criador de Sites]",
+    "corpo_markdown": "[ FIM DOS JOGOS DE PARIS Acompanhe em tempo real a cerimônia de encerramento das Olimpíadas 2024 ](https://www.uol.com.br/esporte/olimpiadas/ao-vivo/2024/08/11/olimpiadas-2024-siga-ao-vivo-os-eventos-do-ultimo-dia.htm)\n[](https://www.uol.com.br/)\n  * Seu time\n  * Seu signo\n  * [Eleições 2026](https://noticias.uol.com.br/eleicoes/)\n  * \n\nEntre\n[Assine UOL](https://assine.uol.com.br/?utm_source=uol.com.br&utm_medium=barra-uol&utm_campaign=barra-uol-assine&utm_content=botao-assine-noticias)\n[Logo UOL](https://www.uol.com.br/)\n  * [Home UOL](https://www.uol.com.br/)\n  * [Produtos](https://produtos.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL+](https://plus.uol.com.br/?utm_source=home_organic_menu-produtos&utm_medium=home&utm_campaign=home_organic_menu-produtos)\n    * [UOL Play - TV Online](https://play.uol.com.br/?utm_source=home_organic_menu-fixo-header-pv&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-pv%20)\n    * [Universal+](https://play.uol.com.br/lp/universalplus?utm_source=home_organic_menu-fixo-header-universal&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-universal%20)\n    * [Champions League](https://play.uol.com.br/lp/esportes/max?utm_source=home_organic_menu-fixo-header-champions&utm_medium=home&utm_campaign=home_organic_menu-fixo-header-champions%20)\n    * [UOL Drive](https://produtos.drive.uol.com.br/?utm_source=home_organic_menu-produtos&utm_medium=home&utm_campaign=home_organic_menu-produtos)\n    * [UOL Assistência Técnica](https://assistenciatecnica.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Resolve](https://resolve.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Antivírus](https://antivirus.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Bate-Papo UOL](https://batepapo.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Sexo](https://sexo.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Mail](https://email.uol.com.br/bem-vindo?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Clube UOL](https://clube.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL ADS](https://ads.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Host](https://uolhost.uol.com.br/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Domínio](https://uolhost.uol.com.br/registro-de-dominio/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Loja Virtual](https://uolhost.uol.com.br/loja-virtual/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Criador de Sites](https://uolhost.uol.com.br/criador-de-sites/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [E-mail Profissional](https://uolhost.uol.com.br/e-mail/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [UOL Afiliados](https://afiliados.uol.com.br/index.html?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header#)\n  * [Flash](https://www.uol.com.br/flash/)\n  * [Eleições](https://noticias.uol.com.br/eleicoes/ultimas/)\n    * [Agregador de Pesquisas](https://noticias.uol.com.br/eleicoes/agregador-de-pesquisas-eleitorais/)\n    * [Debates](https://noticias.uol.com.br/eleicoes/debates-2026/)\n    * [Pesquisas Eleitorais](https://noticias.uol.com.br/eleicoes/pesquisas-eleitorais-2026/)\n    * [Radar das Eleições](https://noticias.uol.com.br/eleicoes/radar-das-eleicoes/)\n    * [Sabatinas UOL/Folha](https://noticias.uol.com.br/eleicoes/sabatinas-uol-folha/)\n    * [UOL Confere nas Eleições](https://noticias.uol.com.br/confere/uol-confere-nas-eleicoes/)\n  * [Notícias](https://noticias.uol.com.br/)\n    * [Colunas](https://noticias.uol.com.br/blogs-e-colunas/)\n    * [Cotidiano](https://noticias.uol.com.br/cotidiano/)\n    * [Calculadoras](https://noticias.uol.com.br/calculadoras/)\n    * [Educação](https://educacao.uol.com.br/)\n    * [Eleições](https://noticias.uol.com.br/eleicoes/)\n    * [Governo Lula](https://noticias.uol.com.br/politica/governo-lula/)\n    * [Internacional](https://noticias.uol.com.br/internacional/)\n    * [Previsão do tempo](https://noticias.uol.com.br/previsao-do-tempo/)\n    * [Saúde](https://noticias.uol.com.br/saude/)\n    * [UOL Confere](https://noticias.uol.com.br/confere/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?pra-comecar-o-dia)\n    * [Últimas notícias](https://noticias.uol.com.br/ultimas/)\n    * [Loterias](https://noticias.uol.com.br/loterias)\n      * [Mega Sena](https://noticias.uol.com.br/loterias/mega-sena/)\n      * [Quina](https://noticias.uol.com.br/loterias/quina/)\n      * [Lotofácil](https://noticias.uol.com.br/loterias/lotofacil/)\n      * [Lotomania](https://noticias.uol.com.br/loterias/lotomania/)\n      * [Outras loterias](https://noticias.uol.com.br/loterias/)\n    * [Podcasts](https://www.uol.com.br/podcasts/)\n      * [A Hora](https://noticias.uol.com.br/colunas/a-hora/)\n      * [UOL Prime](https://noticias.uol.com.br/podcast/uol-prime-podcast/)\n      * [Posse de Bola](https://www.uol.com.br/esporte/podcast/posse-de-bola/)\n      * [Desculpa Alguma Coisa](https://www.uol.com.br/universa/podcast/desculpa-alguma-coisa/)\n      * [Deu Tilt](https://www.uol.com.br/tilt/podcast/deutilt/)\n      * [Divã de CNPJ](https://www.uol.com.br/play/diva-de-cnpj/)\n      * [Mídia e Marketing](https://economia.uol.com.br/podcast/midia-e-marketing/)\n  * [Política](https://noticias.uol.com.br/politica/)\n    * [Colunas](https://noticias.uol.com.br/blogs-e-colunas/)\n    * [UOL Confere](https://noticias.uol.com.br/confere/)\n    * [Governo Lula](https://noticias.uol.com.br/politica/governo-lula/)\n  * [Carros](https://www.uol.com.br/carros/)\n    * [IPVA](https://www.uol.com.br/carros/ipva/)\n    * [Lançamentos e Mercado](https://www.uol.com.br/carros/lancamentos-e-mercado/)\n    * [Avaliação de Carros](https://www.uol.com.br/carros/avaliacao/)\n    * [Tabela Fipe](https://www.uol.com.br/carros/tabela-fipe/)\n    * [Comparativo](https://www.uol.com.br/carros/duelo/)\n    * [Legislação, Multas e Trânsito](https://www.uol.com.br/carros/legislacao-multas-e-transito/)\n    * [Eletrificados](https://www.uol.com.br/carros/carros-eletricos/)\n    * [Manutenção e Segurança](https://www.uol.com.br/carros/manutencao-e-seguranca/)\n    * [Carros curiosos](https://www.uol.com.br/carros/carros-curiosos/)\n    * [Carro dos famosos](https://www.uol.com.br/carros/na-garagem/)\n    * [Vídeos](https://www.uol.com.br/carros/videos/)\n    * [Web Stories](https://www.uol.com.br/carros/stories/)\n    * [Últimas notícias](https://www.uol.com.br/carros/ultimas/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?carros-do-futuro)\n  * [Economia](https://economia.uol.com.br/)\n    * [Cotações](https://economia.uol.com.br/cotacoes/)\n    * [Investimentos](https://economia.uol.com.br/mais/?utm_source=uol_home_menu-economia&utm_medium=link-fixo&utm_campaign=linkfixo_menu_economia&utm_content=economia_mais)\n    * [Empresas e Negócios](https://economia.uol.com.br/empresas-e-negocios/)\n    * [Empreendedorismo](https://economia.uol.com.br/empreendedorismo/)\n    * [Loja Virtual](https://uolhost.uol.com.br/loja-virtual/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Criador de Sites](https://uolhost.uol.com.br/criador-de-sites/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [E-mail Profissional](https://uolhost.uol.com.br/e-mail/?utm_source=home_organic_menu-fixo-header&utm_medium=home&utm_campaign=home_organic_menu-fixo-header)\n    * [Dinheiro e Renda](https://economia.uol.com.br/dinheiro-e-renda/)\n    * [Concursos](https://economia.uol.com.br/empregos-e-carreiras/concursos/)\n    * [Guia de Compras](https://economia.uol.com.br/guia-de-compras/)\n    * [Guia de Economia](https://economia.uol.com.br/guia-de-economia/)\n    * [Imposto de Renda](https://economia.uol.com.br/imposto-de-renda/)\n    * [Calculadoras](https://economia.uol.com.br/calculadoras/)\n    * [Líderes](https://economia.uol.com.br/temas/lideres/)\n    * [Mídia e Marketing](https://economia.uol.com.br/midia-e-marketing/)\n    * [Colunas](https://economia.uol.com.br/blogs-e-colunas/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?por-dentro-da-bolsa)\n    * [Vídeos](https://economia.uol.com.br/videos/)\n    * [Últimas notícias](https://economia.uol.com.br/ultimas/)\n    * [Cotações](https://economia.uol.com.br/cotacoes/)\n      * [Dólar](https://economia.uol.com.br/cotacoes/cambio/dolar-comercial-estados-unidos/)\n      * [Euro](https://economia.uol.com.br/cotacoes/cambio/euro-uniao-europeia/)\n      * [Outras moedas](https://economia.uol.com.br/cotacoes/cambio/)\n      * [Bolsa de Valores](https://economia.uol.com.br/cotacoes/bolsas/)\n      * [Bitcoin e Criptomoedas](https://economia.uol.com.br/cotacoes/cambio/criptomoeda/)\n    * [Imposto de Renda](https://economia.uol.com.br/imposto-de-renda/)\n      * [Download do programa](https://economia.uol.com.br/imposto-de-renda/noticias/redacao/2026/03/20/imposto-de-renda-download-programa-declaracao.ghtm)\n      * [Tira-dúvidas](https://economia.uol.com.br/imposto-de-renda/duvidas/)\n      * [Últimas notícias](https://economia.uol.com.br/imposto-de-renda/)\n    * [Governo e Congresso](https://economia.uol.com.br/governo-e-congresso/)\n      * [Bolsa Família](https://economia.uol.com.br/bolsa-familia/)\n      * [INSS](https://economia.uol.com.br/inss/)\n      * [PIS - Pagamentos e Calendário](https://economia.uol.com.br/pis/)\n      * [Preço dos combustíveis](https://economia.uol.com.br/preco-dos-combustiveis/)\n      * [Inflação no Brasil e Mundo](https://economia.uol.com.br/inflacao/)\n      * [Banco Central](https://economia.uol.com.br/banco-central/)\n      * [Selic e Juros](https://economia.uol.com.br/temas/juros/)\n  * [Folha](https://www.folha.uol.com.br/)\n    * [Política](https://www1.folha.uol.com.br/poder/)\n    * [Economia](https://www1.folha.uol.com.br/mercado/)\n    * [Mundo](https://www1.folha.uol.com.br/mundo/)\n    * [Cotidiano](https://www1.folha.uol.com.br/cotidiano/)\n    * [Equilíbrio](https://www1.folha.uol.com.br/equilibrio/)\n    * [Cultura](https://www1.folha.uol.com.br/ilustrada/)\n    * [F5](https://f5.folha.uol.com.br/)\n    * [Esporte](https://www1.folha.uol.com.br/esporte/)\n    * [Podcasts](https://www1.folha.uol.com.br/podcasts/)\n    * [Colunas e blogs](https://www1.folha.uol.com.br/colunaseblogs/)\n  * [Esporte](https://www.uol.com.br/esporte/)\n    * [Futebol](https://www.uol.com.br/esporte/futebol/)\n    * [Jogos de Hoje](https://www.uol.com.br/esporte/futebol/central-de-jogos/)\n    * [Brasileirão](https://www.uol.com.br/esporte/futebol/campeonatos/brasileirao/)\n    * [Libertadores](https://www.uol.com.br/esporte/futebol/campeonatos/libertadores/)\n    * [Copa do Brasil](https://www.uol.com.br/esporte/futebol/campeonatos/copa-do-brasil/)\n    * [Sul-Americana](https://www.uol.com.br/esporte/futebol/campeonatos/copa-sul-americana/)\n    * [Liga dos Campeões](https://www.uol.com.br/esporte/futebol/campeonatos/liga-dos-campeoes/)\n    * [Mais campeonatos](https://www.uol.com.br/esporte/futebol/campeonatos/)\n    * [Mercado da Bola](https://www.uol.com.br/esporte/colunas/mercado-da-bola/)\n    * Times\n    * Mais Esporte\n      * [Fórmula 1](https://www.uol.com.br/esporte/f1/)\n      * [MMA](https://www.uol.com.br/esporte/mma/)\n      * [Tênis](https://www.uol.com.br/esporte/tenis/)\n      * [Colunas](https://www.uol.com.br/esporte/blogs-e-colunas/)\n      * [Vídeos](https://www.uol.com.br/esporte/videos/)\n      * [Últimas notícias](https://www.uol.com.br/esporte/ultimas/)\n    * Assine e veja ao vivo\n      * [UFC](https://play.uol.com.br/lp/esportes/ufc?utm_source=uol_home_menu-esporte&utm_medium=linkfixo_submenu_esporte-ufc&utm_campaign=uolhome-submenu_esporte-ufc)\n      * [Champions League](https://play.uol.com.br/lp/max?utm_source=uol_home_menu-esporte&utm_medium=linkfixo_submenu_esporte-champions&utm_campaign=uolhome-submenu_esporte-champions)\n      * [NBA](https://play.uol.com.br/lp/esportes/nba?utm_source=uol_home_menu-esporte&utm_medium=linkfixo_submenu_esporte-nba&utm_campaign=uolhome-submenu_esporte-nba)\n  * [](https://www.uol.com.br/splash/)\n    * [Celebs](https://www.uol.com.br/splash/celebs/)\n    * [Televisão](https://www.uol.com.br/splash/televisao/)\n    * [Novelas](https://www.uol.com.br/splash/novelas/)\n    * [Reality shows](https://www.uol.com.br/splash/reality-shows/)\n    * [BBB](https://www.uol.com.br/splash/bbb/)\n    * [BBB - Enquetes](https://www.uol.com.br/splash/bbb/enquetes/)\n    * [Carnaval](https://www.uol.com.br/carnaval/)\n    * [Filmes](https://www.uol.com.br/splash/filmes/)\n    * [Séries](https://www.uol.com.br/splash/series/)\n    * [Oscar](https://www.uol.com.br/splash/oscar/)\n    * [Aba Anônima](https://www.uol.com.br/splash/aba-anonima/)\n    * [Colunas](https://www.uol.com.br/splash/colunas/)\n    * [Vídeos](https://www.uol.com.br/splash/videos/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?na-sua-tela)\n    * [Últimas](https://www.uol.com.br/splash/ultimas/)\n    * [Novelas](https://www.uol.com.br/splash/novelas/)\n      * [Quem Ama Cuida ](https://www.uol.com.br/splash/novelas/quem-ama-cuida/)\n      * [Por Você](https://www.uol.com.br/splash/novelas/por-voce/)\n      * [Avenida Brasil](https://www.uol.com.br/splash/novelas/avenida-brasil-vale-a-pena-ver-de-novo/)\n      * [A Nobreza do Amor](https://www.uol.com.br/splash/novelas/a-nobreza-do-amor/)\n      * [Além do Tempo](https://www.uol.com.br/splash/novelas/alem-do-tempo/)\n    * Assine\n      * [UOL Play](https://painel.play.uol.com.br/conheca?utm_source=home_organic_link-menu-fixo-entrete-splash&utm_medium=home&utm_campaign=home_organic_link-menu-fixo-entrete-splash)\n      * [UOL Leia+ Banca](https://leiamais.uol.com.br/banca?utm_source=home_organic_link-menu-fixo-entrete-splash&utm_medium=home&utm_campaign=home_organic_link-menu-fixo-entrete-splash)\n      * [UOL Leia+ Livros](https://leiamais.uol.com.br/livros?utm_source=home_organic_link-menu-fixo-entrete-splash&utm_medium=home&utm_campaign=home_organic_link-menu-fixo-entrete-splash)\n      * [Sexo](https://sexo.uol.com.br/?utm_source=home_organic_link-menu-fixo-entrete-splash&utm_medium=home&utm_campaign=home_organic_link-menu-fixo-entrete-splash)\n      * [Bate-Papo UOL](https://batepapo.uol.com.br/?utm_source=home_organic_link-menu-fixo-entrete-splash&utm_medium=home&utm_campaign=home_organic_link-menu-fixo-entrete-splash)\n  * [](https://www.uol.com.br/universa/)\n    * [Materna](https://www.uol.com.br/universa/materna/)\n    * [Desculpa Alguma Coisa](https://www.uol.com.br/universa/podcast/desculpa-alguma-coisa/)\n    * [Maria vai com os Outros](https://www.uol.com.br/universa/maria-vai-com-os-outros/)\n    * [Lab da Beleza](https://www.uol.com.br/universa/inspira/lab-da-beleza/)\n    * [Universa Talks](https://www.uol.com.br/universa/universa-talks/)\n    * [Horóscopo](https://www.uol.com.br/universa/horoscopo/previsao-diaria/)\n    * [Calculadoras](https://www.uol.com.br/universa/calculadoras/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters?universa)\n    * [Colunas](https://www.uol.com.br/universa/blogs-e-colunas/)\n    * [Vídeos](https://www.uol.com.br/universa/videos/)\n    * [Últimas notícias](https://www.uol.com.br/universa/ultimas/)\n    * Horóscopo\n      * [Aries](https://www.uol.com.br/universa/horoscopo/aries/horoscopo-do-dia/)\n      * [Touro](https://www.uol.com.br/universa/horoscopo/touro/horoscopo-do-dia/)\n      * [Gêmeos](https://www.uol.com.br/universa/horoscopo/gemeos/horoscopo-do-dia/)\n      * [Câncer](https://www.uol.com.br/universa/horoscopo/cancer/horoscopo-do-dia/)\n      * [Leão](https://www.uol.com.br/universa/horoscopo/leao/horoscopo-do-dia/)\n      * [Virgem](https://www.uol.com.br/universa/horoscopo/virgem/horoscopo-do-dia/)\n      * [Libra](https://www.uol.com.br/universa/horoscopo/libra/horoscopo-do-dia/)\n      * [Escorpião](https://www.uol.com.br/universa/horoscopo/escorpiao/horoscopo-do-dia/)\n      * [Sagitário](https://www.uol.com.br/universa/horoscopo/sagitario/horoscopo-do-dia/)\n      * [Capricórnio](https://www.uol.com.br/universa/horoscopo/capricornio/horoscopo-do-dia/)\n      * [Aquário](https://www.uol.com.br/universa/horoscopo/aquario/horoscopo-do-dia/)\n      * [Peixes](https://www.uol.com.br/universa/horoscopo/peixes/horoscopo-do-dia/)\n  * [](https://www.uol.com.br/vivabem/)\n    * [Equilíbrio e Saúde Mental](https://www.uol.com.br/vivabem/equilibrio/)\n    * [Movimento e Fitness](https://www.uol.com.br/vivabem/movimento/)\n    * [Longevidade](https://www.uol.com.br/vivabem/longevidade/)\n    * [Alimentação](https://www.uol.com.br/vivabem/alimentacao/)\n    * [Calculadoras](https://www.uol.com.br/vivabem/calculadoras/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters?viva-bem)\n    * [Colunas](https://www.uol.com.br/vivabem/blogs-e-colunas/)\n    * [Notícias](https://www.uol.com.br/vivabem/ultimas/)\n    * [Vídeos](https://www.uol.com.br/vivabem/videos/)\n    * [Web Stories](https://www.uol.com.br/vivabem/stories/)\n    * [Saúde](https://www.uol.com.br/vivabem/saude/)\n      * [Bulas de Remédios](https://www.uol.com.br/vivabem/saude/bula/)\n      * [Emagrecimento](https://www.uol.com.br/vivabem/saude/emagrecimento/)\n      * [Gravidez e Maternidade](https://www.uol.com.br/vivabem/saude/gravidez-e-maternidade/)\n      * [Gripes e Resfriados](https://www.uol.com.br/vivabem/saude/gripes-e-resfriados/)\n      * [Guia de Doenças](https://www.uol.com.br/vivabem/saude/doencas-de-a-z/)\n      * [Remédios e Tratamentos](https://www.uol.com.br/vivabem/saude/qual-e-o-remedio/)\n    * [Alimentação](https://www.uol.com.br/vivabem/alimentacao/)\n      * [Cardápios](https://www.uol.com.br/vivabem/dietas-para-emagrecer/)\n      * [Chás e seus benefícios](https://www.uol.com.br/vivabem/alimentacao/chas-e-seus-beneficios/)\n      * [Dietas](https://www.uol.com.br/vivabem/alimentacao/dieta/quer-emagrecer-vivabem-conta-para-voce-as-melhores-e-piores-dietas-ranking-2020.htm)\n      * [Guia do Supermercado](https://www.uol.com.br/vivabem/colunas/guia-do-supermercado/)\n  * [](https://www.uol.com.br/tilt/)\n    * [Fique por dentro](https://www.uol.com.br/tilt/fique-por-dentro/)\n    * [Tec a seu favor](https://www.uol.com.br/tilt/tec-a-seu-favor/)\n    * [Novos hábitos](https://www.uol.com.br/tilt/novos-habitos/)\n    * [Colunas](https://www.uol.com.br/tilt/blogs-e-colunas/)\n    * [Vídeos](https://www.uol.com.br/tilt/videos/ultimos/)\n    * [Newsletters](https://noticias.uol.com.br/newsletters/?tilt)\n    * [Últimas](https://www.uol.com.br/tilt/ultimas/)\n    * Fique por dentro\n      * [Lançamentos](https://www.uol.com.br/tilt/lancamentos/)\n      * [WhatsApp](https://www.uol.com.br/tilt/whatsapp/)\n      * [Redes Sociais](https://www.uol.com.br/tilt/redes-sociais/)\n      * [Apps](https://www.uol.com.br/tilt/app/)\n      * [Isso é Golpe!](https://www.uol.com.br/tilt/isso-e-golpe/)\n      * [Ciência](https://www.uol.com.br/tilt/ciencia/)\n      * [Astronomia](https://www.uol.com.br/tilt/astronomia/)\n      * [Negócios](https://www.uol.com.br/tilt/negocios/)\n    * Tec a seu favor\n      * [Teste de Velocidade da Internet](https://www.uol.com.br/tilt/teste-velocidade-internet/)\n      * [#ficadica](https://www.uol.com.br/tilt/ficadica/)\n      * [Dicas ",
+    "imagem_principal": {
+      "src": "https://conteudo.imguol.com.br/c/tab/7a/2025/09/23/lula-discursa-na-abertura-da-assembleia-geral-da-onu-1758636784531_v2_615x300.jpg",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "uol",
+      "nome": "UOL Notícias",
+      "homepage": "https://noticias.uol.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:46:17.881569+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://acervo.folha.uol.com.br/digital/index.do",
+    "titulo": "Edição Folha - Folha de S.Paulo",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": "Folha de S.Paulo",
+    "tags": [],
+    "corpo_texto": "Aqui está o conteúdo da página de notícias. O site da Folha de S.Paulo apresenta diversas seções como Capa, Opinião, Política, Economia, Folhainvest, C-Level, Mundo, Cotidiano, Ambiente, Saúde e Esporte. A página também inclui links para redes sociais como Twitter, Instagram e LinkedIn. O conteúdo é protegido por direitos autorais e não pode ser reproduzido sem autorização.",
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "../folha/digital/assets/images/folha_preview.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "folha",
+      "nome": "Folha de S.Paulo",
+      "homepage": "https://www.folha.uol.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:46:58.830067+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www1.folha.uol.com.br/ultimas-noticias/",
+    "titulo": "Guerra da Ucrânia: Rússia sugere cooperação com a extrema direita da Alemanha",
+    "subtitulo": "Salvar para ler depois Salvar artigos Ícone de fechar Recurso exclusivo para assinantes [assine](https://www1.folha.com.br/ultimas-noticias/#)",
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": "Folha de S.Paulo",
+    "tags": [],
+    "corpo_texto": "Guerra da Ucrânia: Rússia sugere cooperação com a extrema direita da Alemanha",
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://www1.folha.uol.com.br/fotografia/2026/09/21/17900116576ab16909d5c94_1790011657_3x2_xs.jpg",
+      "legenda": "Partida entre João Fonseca e Dominic Stricker válida pela Copa Davis Brasil vs Suíça 2026",
+      "alt": null
+    },
+    "fonte": {
+      "id": "folha",
+      "nome": "Folha de S.Paulo",
+      "homepage": "https://www.folha.uol.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": "Folha de S.Paulo",
+    "metodo_checagem": null,
+    "links_fontes": [
+      "https://www1.folha.uol.com.br/mundo/2026/09/russia-sugere-cooperacao-com-a-extrema-direita-da-alemanha.shtml"
+    ],
+    "coletado_em": "2026-09-21T17:50:43.979764+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.estadao.com.br/politica/eleicoes",
+    "titulo": "Eleições 2026: notícias, candidatos e apuração - Estadão",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://www.estadao.com.br/resizer/v2/56SR47RPRFC7VD25PNGRDLH2HI.png?quality=80&auth=33216ab98fec98ab6fc4514def9000bc69e84c0dc9e06dac57bc6d312dbe8dca&width=1200&height=630&smart=true",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "estadao",
+      "nome": "Estadão",
+      "homepage": "https://www.estadao.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:50:48.539441+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.estadao.com.br/assine/?componente=menu-swipe&sub-canal=botao",
+    "titulo": "Assine o Estadão: acesso ilimitado a conteúdo de qualidade | Estadão",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://user-assets.unbounce.com/46589f65-b1f7-44e2-a766-647d031b944c/0a257e8c-8b96-46c9-807b-7eb6ed517d7e/estadaologo.original.png?1777059892",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "estadao",
+      "nome": "Estadão",
+      "homepage": "https://www.estadao.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:50:52.584289+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.bbc.com/portuguese/articles/czd2prld130o",
+    "titulo": "Flávio Bolsonaro volta a aparecer à frente de Lula no 2º turno no Agregador de Pesquisas para presidente da BBC News Brasil - BBC News Brasil",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://ichef.bbci.co.uk/news/1200/branded_portuguese/72cc/live/817e0f20-b05f-11f1-bc1f-3f186ca4140c.jpg",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "bbc-brasil",
+      "nome": "BBC News Brasil",
+      "homepage": "https://www.bbc.com/portuguese",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:00.430393+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.bbc.com/portuguese/articles/cm2gryker9mo",
+    "titulo": "Eleição 2026: quais são as propostas dos candidatos? - BBC News Brasil",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://ichef.bbci.co.uk/news/1200/branded_portuguese/92c4/live/ec594500-b058-11f1-bc1f-3f186ca4140c.jpg",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "bbc-brasil",
+      "nome": "BBC News Brasil",
+      "homepage": "https://www.bbc.com/portuguese",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:01.400996+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.poder360.com.br/",
+    "titulo": "Poder360 | Notícias de interesse público e relevância jornalística.",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://static.poder360.com.br/uploads/2024/07/card-Poder360-logo-compartilhamento.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "poder360",
+      "nome": "Poder360",
+      "homepage": "https://www.poder360.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:04.969416+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.poder360.com.br/opiniao/",
+    "titulo": "Poder Opinião | Poder360",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://static.poder360.com.br/uploads/2026/01/card-Opiniao.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "poder360",
+      "nome": "Poder360",
+      "homepage": "https://www.poder360.com.br/",
+      "tipo": "geral"
+    },
+    "tipo_conteudo": "noticia",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:06.244527+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.aosfatos.org/",
+    "titulo": "Aos Fatos | Valorize o que é real",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://www.aosfatos.org/assets/images/aosfatos-meta.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "aos-fatos",
+      "nome": "Aos Fatos",
+      "homepage": "https://www.aosfatos.org/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "checagem",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:10.995388+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.aosfatos.org/mais",
+    "titulo": "Aos Fatos Mais: Apoie o combate à desinformação | Aos Fatos",
+    "subtitulo": null,
+    "autores": [],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://www.aosfatos.org/assets/images/mais-meta.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "aos-fatos",
+      "nome": "Aos Fatos",
+      "homepage": "https://www.aosfatos.org/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "checagem",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:12.889457+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.agencialupa.org/jornalismo/2026/09/18/video-nao-mostra-invasao-de-homens-armados-na-amazonia/",
+    "titulo": "Vídeo não mostra ‘invasão de homens armados’ na Amazônia • Lupa",
+    "subtitulo": null,
+    "autores": [
+      "Evelyn Fagundes"
+    ],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://uploads.agencialupa.org/2026/09/o-brrasil-esta-sendo-invadido--1000x582.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "lupa",
+      "nome": "Lupa",
+      "homepage": "https://lupa.uol.com.br/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "checagem",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:15.602319+00:00",
+    "idioma": "pt-BR"
+  },
+  {
+    "url": "https://www.agencialupa.org/verificacao/2026/09/18/e-falso-que-flavio-bolsonaro-nao-disputara-as-eleicoes/",
+    "titulo": "É falso que Flávio Bolsonaro não disputará as eleições • Lupa",
+    "subtitulo": null,
+    "autores": [
+      "Evelyn Fagundes"
+    ],
+    "data_publicacao": null,
+    "data_atualizacao": null,
+    "editoria": null,
+    "tags": [
+      "error"
+    ],
+    "corpo_texto": null,
+    "corpo_markdown": null,
+    "imagem_principal": {
+      "src": "https://uploads.agencialupa.org/2026/09/flavio-bolsonaro-eleicoes-1.png",
+      "legenda": null,
+      "alt": null
+    },
+    "fonte": {
+      "id": "lupa",
+      "nome": "Lupa",
+      "homepage": "https://lupa.uol.com.br/",
+      "tipo": "checagem"
+    },
+    "tipo_conteudo": "checagem",
+    "veredito": null,
+    "selo_original": null,
+    "metodo_checagem": null,
+    "links_fontes": [],
+    "coletado_em": "2026-09-21T17:51:16.124256+00:00",
+    "idioma": "pt-BR"
+  }
+]

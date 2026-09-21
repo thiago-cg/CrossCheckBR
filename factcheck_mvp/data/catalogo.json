@@ -1,0 +1,1918 @@
+{
+  "versao_schema": "1.0.0",
+  "gerado_em": "2026-09-21T18:15:04.842232+00:00",
+  "modelo_llm": null,
+  "llm_base_url": "http://127.0.0.1:8888/v1",
+  "artigo_json_schema": {
+    "$defs": {
+      "FonteNoticia": {
+        "properties": {
+          "id": {
+            "description": "ID do portal, ex: g1, cnn-brasil, fato-ou-fake",
+            "title": "Id",
+            "type": "string"
+          },
+          "nome": {
+            "description": "Nome de exibição do portal",
+            "title": "Nome",
+            "type": "string"
+          },
+          "homepage": {
+            "description": "URL da homepage",
+            "title": "Homepage",
+            "type": "string"
+          },
+          "tipo": {
+            "description": "geral | checagem",
+            "title": "Tipo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "nome",
+          "homepage",
+          "tipo"
+        ],
+        "title": "FonteNoticia",
+        "type": "object"
+      },
+      "ImagemNoticia": {
+        "properties": {
+          "src": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "URL absoluta da imagem principal",
+            "title": "Src"
+          },
+          "legenda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Legenda/crédito, se houver",
+            "title": "Legenda"
+          },
+          "alt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Texto alternativo",
+            "title": "Alt"
+          }
+        },
+        "title": "ImagemNoticia",
+        "type": "object"
+      }
+    },
+    "description": "Contrato canônico de UMA matéria/checagem. Usar como interface entre\no scraper (produtor) e a outra aplicação (consumidora).",
+    "properties": {
+      "url": {
+        "description": "URL canônica da matéria",
+        "title": "Url",
+        "type": "string"
+      },
+      "titulo": {
+        "description": "Título principal (h1)",
+        "title": "Titulo",
+        "type": "string"
+      },
+      "subtitulo": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Linha fina / chapéu",
+        "title": "Subtitulo"
+      },
+      "autores": {
+        "description": "Autores/bylines",
+        "items": {
+          "type": "string"
+        },
+        "title": "Autores",
+        "type": "array"
+      },
+      "data_publicacao": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "ISO-8601, ex: 2026-09-21T10:00:00-03:00",
+        "title": "Data Publicacao"
+      },
+      "data_atualizacao": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "ISO-8601 da atualização, se houver",
+        "title": "Data Atualizacao"
+      },
+      "editoria": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Editoria/seção, ex: política, economia",
+        "title": "Editoria"
+      },
+      "tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Tags",
+        "type": "array"
+      },
+      "corpo_texto": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Texto limpo concatenado",
+        "title": "Corpo Texto"
+      },
+      "corpo_markdown": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Markdown fit gerado pelo Crawl4AI",
+        "title": "Corpo Markdown"
+      },
+      "imagem_principal": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ImagemNoticia"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "fonte": {
+        "$ref": "#/$defs/FonteNoticia"
+      },
+      "tipo_conteudo": {
+        "default": "noticia",
+        "description": "noticia | checagem",
+        "title": "Tipo Conteudo",
+        "type": "string"
+      },
+      "veredito": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Enum normalizado: FATO | FAKE | ENGANOSO | EXAGERADO | INSUSTENTAVEL | VERDADEIRO | FALSO | INCONCLUSIVO | DESCONTEXTUALIZADO",
+        "title": "Veredito"
+      },
+      "selo_original": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Selo literal do portal, ex: 'É #FAKE'",
+        "title": "Selo Original"
+      },
+      "metodo_checagem": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Resumo de como foi checado / links de fonte",
+        "title": "Metodo Checagem"
+      },
+      "links_fontes": {
+        "description": "URLs citadas na checagem",
+        "items": {
+          "type": "string"
+        },
+        "title": "Links Fontes",
+        "type": "array"
+      },
+      "coletado_em": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "ISO-8601 da coleta",
+        "title": "Coletado Em"
+      },
+      "idioma": {
+        "default": "pt-BR",
+        "title": "Idioma",
+        "type": "string"
+      },
+      "classificador": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Motor que decidiu os campos enum (tipo_conteudo/veredito): laya | llm-local | fallback",
+        "title": "Classificador"
+      },
+      "confianca_veredito": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Confiança calibrada (0-1) do veredito, quando via laya",
+        "title": "Confianca Veredito"
+      }
+    },
+    "required": [
+      "url",
+      "titulo",
+      "fonte"
+    ],
+    "title": "ArtigoNoticia",
+    "type": "object"
+  },
+  "portal_json_schema": {
+    "description": "Contrato por portal: como (re)extrair barato sem LLM.",
+    "properties": {
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "nome": {
+        "title": "Nome",
+        "type": "string"
+      },
+      "tipo": {
+        "title": "Tipo",
+        "type": "string"
+      },
+      "homepage": {
+        "title": "Homepage",
+        "type": "string"
+      },
+      "rss": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Rss",
+        "type": "array"
+      },
+      "sitemap": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sitemap"
+      },
+      "editorias": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Editorias",
+        "type": "array"
+      },
+      "article_url_patterns": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Article Url Patterns",
+        "type": "array"
+      },
+      "css_selectors": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Css Selectors",
+        "type": "object"
+      },
+      "estrategia_recomendada": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estrategia Recomendada"
+      },
+      "observacoes": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Observacoes"
+      },
+      "exemplo_urls": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Exemplo Urls",
+        "type": "array"
+      },
+      "responsavel": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Responsável da equipe pela cobertura (ex: Eliane, Gabi)",
+        "title": "Responsavel"
+      },
+      "subsecoes": {
+        "description": "Subseções/editorias especiais (ex: Radar Aos Fatos)",
+        "items": {
+          "type": "string"
+        },
+        "title": "Subsecoes",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "nome",
+      "tipo",
+      "homepage"
+    ],
+    "title": "PortalSchema",
+    "type": "object"
+  },
+  "portais": [
+    {
+      "id": "g1",
+      "nome": "G1",
+      "tipo": "geral",
+      "homepage": "https://g1.globo.com/",
+      "rss": [
+        "https://g1.globo.com/rss/g1/"
+      ],
+      "sitemap": "https://g1.globo.com/sitemap.xml",
+      "editorias": [
+        "política",
+        "economia",
+        "mundo",
+        "brasil",
+        "tecnologia",
+        "saúde",
+        "educação"
+      ],
+      "article_url_patterns": [
+        "/noticia/",
+        "/economia/noticia/",
+        "/politica/noticia/",
+        "/mundo/noticia/",
+        "/tecnologia/noticia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1.content-head__title, h1[itemprop='headline']",
+        "subtitulo": "h2.content-head__subtitle",
+        "autor": ".content-publication-data__from, [itemprop='author']",
+        "data": "time[itemprop='datePublished'], .content-publication-data__updated time",
+        "corpo": ".mc-article-body, div[itemprop='articleBody']",
+        "imagem": ".content-media-figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Globo/G1 tem anti-bot moderado; usar headless + viewport desktop + wait domcontentloaded. Priorizar sitemap/RSS.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "fato-ou-fake",
+      "nome": "Fato ou Fake (G1)",
+      "tipo": "checagem",
+      "homepage": "https://g1.globo.com/fato-ou-fake/",
+      "rss": [
+        "https://g1.globo.com/rss/g1/fato-ou-fake/"
+      ],
+      "sitemap": "https://g1.globo.com/sitemap.xml",
+      "editorias": [
+        "checagem",
+        "desinformação"
+      ],
+      "article_url_patterns": [
+        "/fato-ou-fake/noticia/",
+        "/fato-ou-fake/"
+      ],
+      "css_selectors": {
+        "titulo": "h1.content-head__title",
+        "subtitulo": "h2.content-head__subtitle",
+        "autor": ".content-publication-data__from",
+        "data": "time[itemprop='datePublished']",
+        "corpo": ".mc-article-body, div[itemprop='articleBody']",
+        "veredito_selo": ".content-head__subtitle, .mc-article-body strong:first-child",
+        "imagem": ".content-media-figure img"
+      },
+      "estrategia_recomendada": "LLM local (classificar selo) + JsonCss para corpo",
+      "observacoes": "Veredito costuma vir no chapéu/título ('É #FAKE', 'É FATO'). Extrair selo via LLM com instrução específica.",
+      "exemplo_urls": [],
+      "responsavel": "Guilherme",
+      "subsecoes": []
+    },
+    {
+      "id": "cnn-brasil",
+      "nome": "CNN Brasil",
+      "tipo": "geral",
+      "homepage": "https://www.cnnbrasil.com.br/",
+      "rss": [],
+      "sitemap": "https://www.cnnbrasil.com.br/sitemap.xml",
+      "editorias": [
+        "política",
+        "economia",
+        "nacional",
+        "internacional"
+      ],
+      "article_url_patterns": [
+        "/politica/",
+        "/economia/",
+        "/nacional/",
+        "/internacional/",
+        "/saude/",
+        "/tecnologia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1.single__title, h1",
+        "subtitulo": "p.single__excerpt, h2",
+        "autor": "[rel='author'], .single__author, .author__name",
+        "data": "time[datetime], .single__publish-time",
+        "corpo": ".single__content, article[itemprop='articleBody']",
+        "imagem": "figure.single__media img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy + LLM local p/ autor/data (varia por template)",
+      "observacoes": "SPA/Next.js parcial; às vezes requer scan_full_page ou wait networkidle leve.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "uol",
+      "nome": "UOL Notícias",
+      "tipo": "geral",
+      "homepage": "https://noticias.uol.com.br/",
+      "rss": [],
+      "sitemap": "https://noticias.uol.com.br/sitemap.xml",
+      "editorias": [
+        "política",
+        "cotidiano",
+        "economia",
+        "internacional"
+      ],
+      "article_url_patterns": [
+        "noticias\\.uol\\.com\\.br/.*/\\d{4}/\\d{2}/\\d{2}.*\\.htm"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .text-subtit",
+        "autor": ".p-author, [itemprop='author']",
+        "data": "time[itemprop='datePublished'], .p-date",
+        "corpo": ".text, div[itemprop='articleBody']",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "Metadata + JsonCss; LLM só no markdown fit (economia de tokens)",
+      "observacoes": "Paywall/anti-bot agressivo em parte do conteúdo; respeitar e usar apenas trechos públicos/metadata.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "folha",
+      "nome": "Folha de S.Paulo",
+      "tipo": "geral",
+      "homepage": "https://www.folha.uol.com.br/",
+      "rss": [],
+      "sitemap": "https://www.folha.uol.com.br/sitemap.xml",
+      "editorias": [
+        "poder",
+        "mercado",
+        "mundo",
+        "cotidiano",
+        "ciência"
+      ],
+      "article_url_patterns": [
+        "folha\\.uol\\.com\\.br/.*/202\\d/.*\\.shtml"
+      ],
+      "css_selectors": {
+        "titulo": "h1.c-title, h1",
+        "subtitulo": "h2.c-article__sub, .c-article__standfirst",
+        "autor": ".c-signature, [itemprop='author']",
+        "data": "time[itemprop='datePublished']",
+        "corpo": ".c-news__body, div[itemprop='articleBody']",
+        "imagem": "figure.c-galleries img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "Homepage/listing via JsonCss; artigo completo só se público",
+      "observacoes": "Paywall; crawler deve coletar homepage + metadata aberta, sem burlar paywall.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "estadao",
+      "nome": "Estadão",
+      "tipo": "geral",
+      "homepage": "https://www.estadao.com.br/",
+      "rss": [],
+      "sitemap": "https://www.estadao.com.br/sitemap.xml",
+      "editorias": [
+        "política",
+        "economia",
+        "brasil",
+        "internacional"
+      ],
+      "article_url_patterns": [
+        "estadao\\.com\\.br/.*/.*-noticia"
+      ],
+      "css_selectors": {
+        "titulo": "h1.title, h1",
+        "subtitulo": "h2.subtitle, .lead",
+        "autor": ".author, [itemprop='author']",
+        "data": "time[itemprop='datePublished']",
+        "corpo": ".n--noticia__content, div[itemprop='articleBody']",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCss + metadata",
+      "observacoes": "Paywall parcial; mesmo cuidado da Folha.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "bbc-brasil",
+      "nome": "BBC News Brasil",
+      "tipo": "geral",
+      "homepage": "https://www.bbc.com/portuguese",
+      "rss": [],
+      "sitemap": "https://www.bbc.com/sitemaps/https-portuguese-brazil.xml",
+      "editorias": [
+        "brasil",
+        "internacional",
+        "economia",
+        "ciência"
+      ],
+      "article_url_patterns": [
+        "bbc\\.com/portuguese/articles/",
+        "bbc\\.com/portuguese/.*-\\d+$"
+      ],
+      "css_selectors": {
+        "titulo": "h1[data-testid='headline'], h1",
+        "subtitulo": "p[data-testid='standfirst'], h2",
+        "autor": "[data-testid='byline'], [itemprop='author']",
+        "data": "time[data-testid='timestamp'], time[datetime]",
+        "corpo": "div[data-component='text-block'], main article",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (preferencial)",
+      "observacoes": "HTML semântico e estável; ótimo para JsonCss. Sem paywall.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "poder360",
+      "nome": "Poder360",
+      "tipo": "geral",
+      "homepage": "https://www.poder360.com.br/",
+      "rss": [
+        "https://www.poder360.com.br/feed/"
+      ],
+      "sitemap": "https://www.poder360.com.br/sitemap.xml",
+      "editorias": [
+        "governo",
+        "congresso",
+        "justiça",
+        "economia",
+        "eleições"
+      ],
+      "article_url_patterns": [
+        "poder360\\.com\\.br/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1.entry-title, h1",
+        "subtitulo": ".entry-excerpt, h2",
+        "autor": ".entry-author, [rel='author']",
+        "data": "time.entry-date, time[datetime]",
+        "corpo": ".entry-content, article",
+        "imagem": ".entry-media img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "RSS + JsonCss",
+      "observacoes": "WordPress; estrutura estável e RSS utilizável.",
+      "exemplo_urls": [],
+      "responsavel": null,
+      "subsecoes": []
+    },
+    {
+      "id": "aos-fatos",
+      "nome": "Aos Fatos",
+      "tipo": "checagem",
+      "homepage": "https://www.aosfatos.org/",
+      "rss": [
+        "https://www.aosfatos.org/rss/"
+      ],
+      "sitemap": "https://www.aosfatos.org/sitemap.xml",
+      "editorias": [
+        "checagem",
+        "verificação"
+      ],
+      "article_url_patterns": [
+        "aosfatos\\.org/noticias/",
+        "aosfatos\\.org/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .excerpt",
+        "autor": "[rel='author'], .author",
+        "data": "time[datetime]",
+        "corpo": "article, .post-content",
+        "veredito_selo": ".tag-verdict, .selo, h2",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + JsonCss (corpo)",
+      "observacoes": "Selo de veredito (FALSO, ENGANOSO, VERDADEIRO etc.) — extrair via LLM com taxonomia fechada.",
+      "exemplo_urls": [],
+      "responsavel": "Gabi",
+      "subsecoes": [
+        "Radar Aos Fatos"
+      ]
+    },
+    {
+      "id": "lupa",
+      "nome": "Lupa",
+      "tipo": "checagem",
+      "homepage": "https://lupa.uol.com.br/",
+      "rss": [],
+      "sitemap": "https://lupa.uol.com.br/sitemap.xml",
+      "editorias": [
+        "checagem",
+        "verificação"
+      ],
+      "article_url_patterns": [
+        "lupa\\.uol\\.com\\.br/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .excerpt",
+        "autor": "[rel='author'], .author",
+        "data": "time[datetime]",
+        "corpo": "article, .post-content",
+        "veredito_selo": ".selo-lupa, .veredict, h2",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + JsonCss (corpo)",
+      "observacoes": "Taxonomia própria de selos; normalizar para o enum canônico no pós-processamento.",
+      "exemplo_urls": [],
+      "responsavel": "Eliane",
+      "subsecoes": []
+    },
+    {
+      "id": "fato-ou-boato-tse",
+      "nome": "Fato ou Boato (TSE)",
+      "tipo": "checagem",
+      "homepage": "https://www.justicaeleitoral.jus.br/fato-ou-boato/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "checagem eleitoral",
+        "desinformação"
+      ],
+      "article_url_patterns": [
+        "fato-ou-boato",
+        "justicaeleitoral\\.jus\\.br/.*boato"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .lead",
+        "autor": ".autor, [itemprop='author']",
+        "data": "time[datetime], .data",
+        "corpo": "article, .conteudo, main",
+        "veredito_selo": "h2, .selo, .destaque",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + laya p/ veredito + JsonCss (corpo)",
+      "observacoes": "WAF/Akamai bloqueia curl (403); o crawl com browser real deve passar. Foco em boatos eleitorais.",
+      "exemplo_urls": [],
+      "responsavel": "Eliane",
+      "subsecoes": []
+    },
+    {
+      "id": "comprova",
+      "nome": "Projeto Comprova",
+      "tipo": "checagem",
+      "homepage": "https://projetocomprova.com.br/",
+      "rss": [],
+      "sitemap": "https://projetocomprova.com.br/sitemap.xml",
+      "editorias": [
+        "checagem colaborativa",
+        "eleições"
+      ],
+      "article_url_patterns": [
+        "projetocomprova\\.com\\.br/.+"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .excerpt",
+        "autor": "[rel='author'], .author",
+        "data": "time[datetime]",
+        "corpo": "article, .post-content, main",
+        "veredito_selo": ".selo, .verdict, h2",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + laya p/ veredito + JsonCss (corpo)",
+      "observacoes": "Coalizão de veículos; selo próprio. Cobertura compartilhada Eliane + Guilherme.",
+      "exemplo_urls": [],
+      "responsavel": "Eliane, Guilherme",
+      "subsecoes": []
+    },
+    {
+      "id": "saude-sem-fake",
+      "nome": "Saúde sem Fake News / Saúde com Ciência (Ministério da Saúde)",
+      "tipo": "checagem",
+      "homepage": "https://www.gov.br/saude/pt-br/assuntos/saude-com-ciencia",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "saúde",
+        "vacinas",
+        "desinformação em saúde"
+      ],
+      "article_url_patterns": [
+        "saude-com-ciencia",
+        "gov\\.br/saude/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .lead",
+        "autor": ".autor",
+        "data": "time[datetime], .data",
+        "corpo": "article, #content, main",
+        "veredito_selo": "h2, .destaque",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCss + laya p/ veredito",
+      "observacoes": "Marca 'Saúde sem Fake News' migrada p/ programa 'Saúde com Ciência'. WAF gov.br barra curl; browser real passa. Canal WhatsApp (61) 99289-4640 fora do escopo web.",
+      "exemplo_urls": [],
+      "responsavel": "Gabi",
+      "subsecoes": []
+    },
+    {
+      "id": "rede-saude-fiocruz",
+      "nome": "Rede de Checagem em Saúde (Fiocruz / Canal Saúde)",
+      "tipo": "checagem",
+      "homepage": "https://www.canalsaude.fiocruz.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "saúde",
+        "ciência",
+        "sus"
+      ],
+      "article_url_patterns": [
+        "canalsaude\\.fiocruz\\.br/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2",
+        "autor": ".autor, [rel='author']",
+        "data": "time[datetime]",
+        "corpo": "article, main, .content",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCss + laya p/ veredito",
+      "observacoes": "Em 21/09/2026 a home redirecionava p/ aviso de período eleitoral (conteúdo institucional restrito). Recrawlear após o período.",
+      "exemplo_urls": [],
+      "responsavel": "Gabi",
+      "subsecoes": []
+    },
+    {
+      "id": "e-farsas",
+      "nome": "E-Farsas",
+      "tipo": "checagem",
+      "homepage": "https://www.e-farsas.com/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "boatos",
+        "correntes",
+        "golpes"
+      ],
+      "article_url_patterns": [
+        "e-farsas\\.com/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1.entry-title, h1",
+        "subtitulo": "h2",
+        "autor": ".author, [rel='author']",
+        "data": "time.entry-date, time[datetime]",
+        "corpo": ".entry-content, article",
+        "veredito_selo": "h1, h2, .selo",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCss + laya p/ veredito (título já sinaliza)",
+      "observacoes": "Um dos mais antigos do BR; selo costuma estar no título ('É farsa!', 'Verdadeiro'). WordPress.",
+      "exemplo_urls": [],
+      "responsavel": "Daltro",
+      "subsecoes": []
+    },
+    {
+      "id": "valorinveste-checagem",
+      "nome": "ValorInveste (cobertura anti-golpes)",
+      "tipo": "checagem",
+      "homepage": "https://valorinveste.globo.com/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "golpes financeiros",
+        "fraudes",
+        "finanças pessoais"
+      ],
+      "article_url_patterns": [
+        "valorinveste\\.globo\\.com/.*golpe.*",
+        "valorinveste\\.globo\\.com/.*fraude.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1.content-head__title, h1",
+        "subtitulo": "h2.content-head__subtitle",
+        "autor": ".content-publication-data__from",
+        "data": "time[itemprop='datePublished']",
+        "corpo": ".mc-article-body, div[itemprop='articleBody']",
+        "imagem": ".content-media-figure img"
+      },
+      "estrategia_recomendada": "Busca por golpe|fraude + JsonCss (padrão Globo, igual ao G1)",
+      "observacoes": "Sem seção dedicada de checagem; cobertura anti-golpe diluída ('Olha o golpe!', Minha Casa Minha Vida/Desenrola). Padrões restritos a golpe|fraude.",
+      "exemplo_urls": [],
+      "responsavel": "Daltro",
+      "subsecoes": []
+    },
+    {
+      "id": "uol-confere",
+      "nome": "UOL Confere",
+      "tipo": "checagem",
+      "homepage": "https://noticias.uol.com.br/confere/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "checagem",
+        "verificação"
+      ],
+      "article_url_patterns": [
+        "confere",
+        "noticias\\.uol\\.com\\.br/confere/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .text-subtit",
+        "autor": ".p-author, [itemprop='author']",
+        "data": "time[itemprop='datePublished'], .p-date",
+        "corpo": ".text, div[itemprop='articleBody']",
+        "veredito_selo": "h1, h2, .selo",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + laya p/ veredito + JsonCss (corpo)",
+      "observacoes": "Akamai barra curl (403); browser real deve passar. Mesmo cuidado anti-bot/paywall do UOL.",
+      "exemplo_urls": [],
+      "responsavel": "Tito",
+      "subsecoes": []
+    },
+    {
+      "id": "boatos",
+      "nome": "Boatos.org",
+      "tipo": "checagem",
+      "homepage": "https://www.boatos.org/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "boatos",
+        "whatsapp",
+        "redes sociais"
+      ],
+      "article_url_patterns": [
+        "boatos\\.org/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1.entry-title, h1",
+        "subtitulo": "h2",
+        "autor": ".author, [rel='author']",
+        "data": "time[datetime]",
+        "corpo": ".entry-content, article",
+        "veredito_selo": "h1, .selo",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "JsonCss + laya p/ veredito",
+      "observacoes": "Foco em boatos de WhatsApp/redes; selo frequentemente no título. WordPress.",
+      "exemplo_urls": [],
+      "responsavel": "Tito",
+      "subsecoes": []
+    },
+    {
+      "id": "tatu",
+      "nome": "Agência Tatu (jornalismo de dados)",
+      "tipo": "checagem",
+      "homepage": "https://www.agenciatatu.com.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "dados",
+        "checagem",
+        "transparência"
+      ],
+      "article_url_patterns": [
+        "agenciatatu\\.com\\.br/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "subtitulo": "h2, .excerpt",
+        "autor": "[rel='author'], .author",
+        "data": "time[datetime]",
+        "corpo": "article, .post-content, main",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "laya p/ separar checagem de reportagem de dados + JsonCss",
+      "observacoes": "Agência de jornalismo de dados (não só fact-checking); filtrar peças de verificação no pós-processamento via laya (tipo_conteudo).",
+      "exemplo_urls": [],
+      "responsavel": "Tito",
+      "subsecoes": []
+    },
+    {
+      "id": "estadao-verifica",
+      "nome": "Estadão Verifica",
+      "tipo": "checagem",
+      "homepage": "https://www.estadao.com.br/estadao-verifica/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "checagem",
+        "verificação"
+      ],
+      "article_url_patterns": [
+        "estadao-verifica",
+        "estadao\\.com\\.br/estadao-verifica/.*"
+      ],
+      "css_selectors": {
+        "titulo": "h1.title, h1",
+        "subtitulo": "h2.subtitle, .lead",
+        "autor": ".author, [itemprop='author']",
+        "data": "time[itemprop='datePublished']",
+        "corpo": ".n--noticia__content, div[itemprop='articleBody']",
+        "veredito_selo": "h1, h2, .selo",
+        "imagem": "figure img, meta[property='og:image']"
+      },
+      "estrategia_recomendada": "LLM local (selo) + laya p/ veredito + JsonCss (corpo)",
+      "observacoes": "Paywall parcial do Estadão; coletar listagem + conteúdo público.",
+      "exemplo_urls": [],
+      "responsavel": "Guilherme",
+      "subsecoes": []
+    }
+  ],
+  "css_extraction_schemas": {
+    "g1": {
+      "name": "Artigo — G1",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.content-head__title, h1[itemprop='headline']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.content-head__subtitle",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".content-publication-data__from, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished'], .content-publication-data__updated time",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".mc-article-body, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": ".content-media-figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "fato-ou-fake": {
+      "name": "Artigo — Fato ou Fake (G1)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.content-head__title",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.content-head__subtitle",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".content-publication-data__from",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".mc-article-body, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": ".content-media-figure img",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "cnn-brasil": {
+      "name": "Artigo — CNN Brasil",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.single__title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "p.single__excerpt, h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[rel='author'], .single__author, .author__name",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime], .single__publish-time",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".single__content, article[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure.single__media img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "uol": {
+      "name": "Artigo — UOL Notícias",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .text-subtit",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".p-author, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished'], .p-date",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".text, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "folha": {
+      "name": "Artigo — Folha de S.Paulo",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.c-title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.c-article__sub, .c-article__standfirst",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".c-signature, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".c-news__body, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure.c-galleries img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "estadao": {
+      "name": "Artigo — Estadão",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.subtitle, .lead",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".author, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".n--noticia__content, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "bbc-brasil": {
+      "name": "Artigo — BBC News Brasil",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1[data-testid='headline'], h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "p[data-testid='standfirst'], h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[data-testid='byline'], [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[data-testid='timestamp'], time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "div[data-component='text-block'], main article",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "poder360": {
+      "name": "Artigo — Poder360",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.entry-title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": ".entry-excerpt, h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".entry-author, [rel='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time.entry-date, time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".entry-content, article",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": ".entry-media img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "aos-fatos": {
+      "name": "Artigo — Aos Fatos",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .excerpt",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[rel='author'], .author",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, .post-content",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "lupa": {
+      "name": "Artigo — Lupa",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .excerpt",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[rel='author'], .author",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, .post-content",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "fato-ou-boato-tse": {
+      "name": "Artigo — Fato ou Boato (TSE)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .lead",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".autor, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime], .data",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, .conteudo, main",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "comprova": {
+      "name": "Artigo — Projeto Comprova",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .excerpt",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[rel='author'], .author",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, .post-content, main",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "saude-sem-fake": {
+      "name": "Artigo — Saúde sem Fake News / Saúde com Ciência (Ministério da Saúde)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .lead",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".autor",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime], .data",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, #content, main",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "rede-saude-fiocruz": {
+      "name": "Artigo — Rede de Checagem em Saúde (Fiocruz / Canal Saúde)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".autor, [rel='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, main, .content",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "e-farsas": {
+      "name": "Artigo — E-Farsas",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.entry-title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".author, [rel='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time.entry-date, time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".entry-content, article",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "valorinveste-checagem": {
+      "name": "Artigo — ValorInveste (cobertura anti-golpes)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.content-head__title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.content-head__subtitle",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".content-publication-data__from",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".mc-article-body, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": ".content-media-figure img",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "uol-confere": {
+      "name": "Artigo — UOL Confere",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .text-subtit",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".p-author, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished'], .p-date",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".text, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "boatos": {
+      "name": "Artigo — Boatos.org",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.entry-title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".author, [rel='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".entry-content, article",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "tatu": {
+      "name": "Artigo — Agência Tatu (jornalismo de dados)",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2, .excerpt",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": "[rel='author'], .author",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[datetime]",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": "article, .post-content, main",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    },
+    "estadao-verifica": {
+      "name": "Artigo — Estadão Verifica",
+      "baseSelector": "article, main, body",
+      "fields": [
+        {
+          "name": "titulo",
+          "selector": "h1.title, h1",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "subtitulo",
+          "selector": "h2.subtitle, .lead",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "autor",
+          "selector": ".author, [itemprop='author']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "data",
+          "selector": "time[itemprop='datePublished']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "corpo",
+          "selector": ".n--noticia__content, div[itemprop='articleBody']",
+          "type": "text",
+          "default": ""
+        },
+        {
+          "name": "imagem",
+          "selector": "figure img, meta[property='og:image']",
+          "type": "attribute",
+          "attribute": "src",
+          "default": ""
+        }
+      ]
+    }
+  }
+}
