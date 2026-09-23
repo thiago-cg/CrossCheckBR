@@ -5,12 +5,15 @@ Sem denylist: filtragem só por relevância nas etapas seguintes.
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from . import config
 from .catalogo import Catalogo
+
+log = logging.getLogger("factcheck.serpapi")
 
 ENGINE = "google_news"
 
@@ -25,13 +28,27 @@ def construir_queries(afirmacao: str) -> List[Dict[str, Any]]:
 
 
 class SerpAPIClient:
-    def __init__(self, api_key: str = "", ttl: int | None = None, timeout: int = 25,
+    def __init__(self, api_key: str | None = None, ttl: int | None = None, timeout: int = 25,
                  cache_max: int = 200):
-        self.api_key = api_key or config.SERPAPI_KEY
+        # None = usa env; "" explícito = força desligado (testes offline)
+        self.api_key = config.SERPAPI_KEY if api_key is None else api_key
         self.ttl = config.CACHE_SERPAPI_TTL if ttl is None else ttl
         self.timeout = timeout
         self._cache_max = cache_max
         self._cache: Dict[str, tuple] = {}  # chave -> (expira_em, payload)
+        self._uso_n = 0  # contador escalar diário (sem leak por query distinta)
+        self._dia: str = datetime.now(timezone.utc).date().isoformat()
+        # Observabilidade do skip (round 9): por que a descoberta rendeu zero?
+        self.bloqueios_cap = 0
+        self.erros_rede = 0
+        self.ultimo_motivo = "ok"  # ok|cap|erro|vazio|sem_chave
+
+    @property
+    def uso_hoje(self) -> int:
+        hoje = datetime.now(timezone.utc).date().isoformat()
+        if hoje != self._dia:
+            self._dia, self._uso_n = hoje, 0
+        return self._uso_n
 
     @property
     def ativo(self) -> bool:
@@ -43,12 +60,25 @@ class SerpAPIClient:
     def buscar(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Retorna o JSON bruto ou None (sem chave, timeout, erro). Nunca levanta."""
         if not self.ativo:
+            self.ultimo_motivo = "sem_chave"
             return None
         agora = time.time()
         chave = self._chave(params)
         hit = self._cache.get(chave)
         if hit and hit[0] > agora:
             return hit[1]
+        # Teto diário de custo (check #7): cache-hit não conta, só chamada real
+        hoje = datetime.now(timezone.utc).date().isoformat()
+        if hoje != self._dia:
+            self._dia, self._uso_n = hoje, 0
+        cap = getattr(config, "SERPAPI_DAILY_CAP", 100)
+        if cap and self._uso_n >= cap:
+            self.bloqueios_cap += 1
+            self.ultimo_motivo = "cap"
+            # WARNING de propósito: aparece no bot_err.log (era silêncio total)
+            log.warning("SerpAPI teto diário atingido (%s/%s): descoberta pausada",
+                        self._uso_n, cap)
+            return None
         try:
             import httpx
 
@@ -59,12 +89,17 @@ class SerpAPIClient:
             )
             r.raise_for_status()
             payload = r.json()
+            self._uso_n += 1
             if len(self._cache) >= self._cache_max:  # teto: evita crescimento ilimitado
                 mais_antiga = min(self._cache, key=lambda k: self._cache[k][0])
                 del self._cache[mais_antiga]
             self._cache[chave] = (agora + self.ttl, payload)
+            self.ultimo_motivo = "ok" if (payload or {}).get("news_results") else "vazio"
             return payload
-        except Exception:
+        except Exception as e:
+            self.erros_rede += 1
+            self.ultimo_motivo = "erro"
+            log.warning("SerpAPI falhou: %s", str(e)[:150])
             return None  # SerpAPI é opcional: falha vira etapa "pulada/falha", nunca exceção
 
 

@@ -83,3 +83,20 @@ class Catalogo:
             if conhecido in texto or texto in conhecido:
                 return portal
         return None
+
+    def adicionar(self, portal: Dict[str, Any]) -> bool:
+        """Insere portal em memória (pós-promoção imediata). False se dup/inválido."""
+        if not portal or not portal.get("id") or not portal.get("homepage"):
+            return False
+        if any(p.get("id") == portal["id"] for p in self.portais):
+            return False
+        dom = _dominio(portal.get("homepage", ""))
+        if dom and self.por_dominio(dom):
+            return False
+        self.portais.append(portal)
+        if dom:
+            self._por_dominio.setdefault(dom, portal)
+        nome = (portal.get("nome") or "").strip().lower()
+        if nome:
+            self._por_nome.setdefault(nome, portal)
+        return True

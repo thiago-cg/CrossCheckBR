@@ -37,3 +37,41 @@ def test_pipeline_sem_nada_indeterminada_ou_baixa():
         usar_llm=False))
     assert rel.propensao in ("baixa", "indeterminada")
     assert any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)
+
+
+def test_claim_vago_contido_e_pede_metrica():
+    pipe = Pipeline(Catalogo.carregar(), Indice(), Indice(), serpapi=camada.SerpAPIClient(api_key=""))
+    rel = asyncio.run(pipe.executar(
+        EntradaConsulta(tipo="texto", conteudo="A economia do Brasil só piorou no governo Lula"),
+        usar_llm=False))
+    assert rel.propensao == "indeterminada"
+    assert any("vaga" in lim.lower() for lim in rel.limitacoes), rel.limitacoes
+
+
+def test_claim_com_indicador_nao_e_vago():
+    pipe = Pipeline(Catalogo.carregar(), Indice(), Indice(), serpapi=camada.SerpAPIClient(api_key=""))
+    rel = asyncio.run(pipe.executar(
+        EntradaConsulta(tipo="texto", conteudo="O desemprego piorou e chegou a 9,5% no trimestre passado"),
+        usar_llm=False))
+    assert not any("vaga" in lim.lower() for lim in rel.limitacoes), rel.limitacoes
+
+
+def test_dominio_base_agrupa_grupo_economico():
+    from factcheck_mvp.corroboracao import dominio_base
+    assert dominio_base("https://www.uol.com.br/x") == "uol.com.br"
+    assert dominio_base("https://acervo.folha.uol.com.br/y") == "uol.com.br"
+    assert dominio_base("https://g1.globo.com/z") == "globo.com"
+    assert dominio_base("https://www.bbc.com/portuguese/a") == "bbc.com"
+
+
+def test_mesmo_grupo_conta_1x():
+    from factcheck_mvp.corroboracao import contar_independentes
+    pecas = [
+        {"url": "https://noticias.uol.com.br/a", "titulo": "Economia cresce, diz estudo",
+         "corpo_texto": "texto completamente diferente um"},
+        {"url": "https://www1.folha.uol.com.br/b", "titulo": "Outro ângulo da economia",
+         "corpo_texto": "texto completamente diferente dois"},
+        {"url": "https://www.bbc.com/portuguese/c", "titulo": "Terceira visão",
+         "corpo_texto": "texto completamente diferente tres"},
+    ]
+    assert contar_independentes(pecas)["n"] == 2  # UOL+Folha = 1 grupo
