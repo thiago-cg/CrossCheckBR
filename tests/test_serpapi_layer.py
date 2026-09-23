@@ -26,7 +26,9 @@ def test_normaliza_item():
 
 def test_roteamento_catalogo_sem_bloqueio():
     bruto = json.loads(FIX.read_text(encoding="utf-8"))
-    cat = Catalogo.carregar()
+    # Catálogo isolado (não o production, que cresce via descoberta automática)
+    cat = Catalogo([{"id": "uol", "nome": "UOL", "tipo": "geral",
+                     "homepage": "https://www.uol.com.br/"}])
     por_url = {}
     for item in bruto["news_results"]:
         p = camada.rotear_fonte(camada.normalizar_item(item), cat)
@@ -41,3 +43,33 @@ def test_cliente_sem_chave_desliga():
     c = camada.SerpAPIClient(api_key="")
     assert c.ativo is False
     assert c.buscar({"q": "x"}) is None
+
+
+def test_teto_diario_bloqueia_sem_rede_e_marca_motivo(monkeypatch):
+    import httpx as _hx
+    import factcheck_mvp.config as cfg
+    monkeypatch.setattr(cfg, "SERPAPI_DAILY_CAP", 1)
+    calls = []
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"news_results": [{"link": "https://x.com/a", "title": "T",
+                                      "source": {}}]}
+
+    monkeypatch.setattr(_hx, "get", lambda *a, **k: (calls.append(1), FakeResp())[1])
+    c = camada.SerpAPIClient(api_key="k")
+    assert c.buscar({"q": "a"}) is not None
+    assert c.buscar({"q": "b"}) is None  # teto: nem bate rede
+    assert c.ultimo_motivo == "cap" and c.bloqueios_cap == 1
+    assert len(calls) == 1
+
+
+def test_erro_rede_marca_motivo(monkeypatch):
+    import httpx as _hx
+    monkeypatch.setattr(_hx, "get", lambda *a, **k: (_ for _ in ()).throw(_hx.ConnectError("dns")))
+    c = camada.SerpAPIClient(api_key="k")
+    assert c.buscar({"q": "a"}) is None
+    assert c.ultimo_motivo == "erro" and c.erros_rede == 1

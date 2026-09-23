@@ -42,9 +42,41 @@ def _fallback(texto: str) -> List[Dict[str, str]]:
     return achados
 
 
-def _via_llm(texto: str) -> List[Dict[str, str]]:
+def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
+    """Retorna (padroes, motor real usado) — recibo honesto no failover."""
     import httpx
 
+    # 1) OpenRouter quando há chave (mesmo contrato do fallback regex)
+    try:
+        from . import llm_openrouter
+        from . import config as _cfg
+
+        if _cfg.OPENROUTER_API_KEY:
+            rotulos = ",".join(c[0] for c in _CATALOGO)
+            conteudo, _m = llm_openrouter.chat(
+                [{"role": "user",
+                  "content": _INSTRUCAO.format(rotulos=rotulos)
+                  + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
+                max_tokens=500)
+            bruto = (conteudo or "").strip()
+            if bruto.upper() == "NENHUM":
+                return [], "llm-openrouter"
+            saida = []
+            descs = {c[0]: c[1] for c in _CATALOGO}
+            for linha in bruto.splitlines():
+                if ":" not in linha:
+                    continue
+                chave, evid = linha.split(":", 1)
+                chave = chave.strip("- *\t").lower()
+                if chave in descs:
+                    saida.append({"padrao": chave, "descricao": descs[chave],
+                                  "evidencia": evid.strip()[:160]})
+            if not saida and bruto:
+                # Lixo sem linhas parseáveis: falha p/ tentar local/regex
+                raise RuntimeError("openrouter sem padroes parseaveis")
+            return saida, "llm-openrouter"
+    except Exception:
+        pass
     modelo = config.UNSLOTH_MODEL_NAME
     if not modelo:
         r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", timeout=15)
@@ -73,15 +105,15 @@ def _via_llm(texto: str) -> List[Dict[str, str]]:
         chave = chave.strip("- *\t").lower()
         if chave in descs:
             saida.append({"padrao": chave, "descricao": descs[chave], "evidencia": evid.strip()[:160]})
-    return saida
+    return saida, "llm-local"
 
 
 def analisar_padroes(texto: str, usar_llm: bool = True) -> Dict[str, Any]:
     """Retorna {padroes[], motor}. Fallback regex nunca falha."""
     if usar_llm:
         try:
-            achados = _via_llm(texto)
-            return {"padroes": achados, "motor": "llm-local"}
+            achados, motor = _via_llm(texto)
+            return {"padroes": achados, "motor": motor}
         except Exception:
             pass
     return {"padroes": _fallback(texto), "motor": "regex-deterministico"}

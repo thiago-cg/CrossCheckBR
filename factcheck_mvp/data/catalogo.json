@@ -1051,6 +1051,308 @@
       "exemplo_urls": [],
       "responsavel": "Guilherme",
       "subsecoes": []
+    },
+    {
+      "id": "brasildefato-com-br",
+      "nome": "Brasil de Fato",
+      "tipo": "geral",
+      "homepage": "https://www.brasildefato.com.br/",
+      "rss": [],
+      "sitemap": "https://www.brasildefato.com.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/podcast/",
+        "/podcast/visoespopulares/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.brasildefato.com.br/podcast/visoespopulares/2026/08/05/lula-vs-bolsonaro-um-comparativo-entre-a-economia-nos-dois-governos/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "exame-com",
+      "nome": "Exame",
+      "tipo": "geral",
+      "homepage": "https://exame.com/",
+      "rss": [],
+      "sitemap": "https://exame.com/sitemap.xml",
+      "editorias": [
+        "negocios",
+        "invest",
+        "brasil",
+        "inteligencia-artificial",
+        "revista-exame",
+        "newsletters",
+        "mundo",
+        "esg"
+      ],
+      "article_url_patterns": [
+        "/ciencia/",
+        "/ciencia/carros-eletricos-causam-mais-enjoo-ciencia-explica-por-que-isso-acontece/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://exame.com/ciencia/carros-eletricos-causam-mais-enjoo-ciencia-explica-por-que-isso-acontece/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "autoesporte-globo-com",
+      "nome": "autoesporte",
+      "tipo": "geral",
+      "homepage": "https://autoesporte.globo.com/",
+      "rss": [
+        "https://autoesporte.globo.com/rss/autoesporte"
+      ],
+      "sitemap": null,
+      "editorias": [
+        "carros",
+        "servicos",
+        "setor-automotivo",
+        "assunto",
+        "testes",
+        "motos",
+        "ultimas-noticias",
+        "especiais"
+      ],
+      "article_url_patterns": [
+        "/servicos/",
+        "/servicos/noticia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody'], main, .mc-article-body"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://autoesporte.globo.com/servicos/noticia/2026/06/carro-eletrico-causa-enjoo-entenda-por-que.ghtml"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "oglobo-globo-com",
+      "nome": "O Globo",
+      "tipo": "geral",
+      "homepage": "https://oglobo.globo.com/",
+      "rss": [
+        "https://oglobo.globo.com/rss/oglobo"
+      ],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/saude/",
+        "/saude/noticia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": ".mc-article-body"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://oglobo.globo.com/saude/noticia/2025/11/13/cafe-e-eficaz-no-combate-ao-cancer-de-prostata-diz-nova-pesquisa-brasileira.ghtml"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "olhardigital-com-br",
+      "nome": "Olhar Digital",
+      "tipo": "geral",
+      "homepage": "https://olhardigital.com.br/",
+      "rss": [],
+      "sitemap": "https://olhardigital.com.br/sitemap.xml",
+      "editorias": [
+        "2026",
+        "editorias",
+        "jogos",
+        "author",
+        "tag",
+        "fichas-tecnicas",
+        "assinantes",
+        "exclusivos"
+      ],
+      "article_url_patterns": [
+        "/2026/",
+        "/2026/09/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://olhardigital.com.br/2026/09/09/medicina-e-saude/do-cafe-a-carne-processada-dois-habitos-aparecem-ligados-ao-risco-de-cancer/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "ncnews-com-br",
+      "nome": "NC News",
+      "tipo": "geral",
+      "homepage": "https://ncnews.com.br/",
+      "rss": [
+        "https://ncnews.com.br/feed/"
+      ],
+      "sitemap": "https://ncnews.com.br/sitemap.xml",
+      "editorias": [
+        "2026",
+        "astros",
+        "topico",
+        "instagram",
+        "facebook",
+        "youtube",
+        "twitter",
+        "tiktok"
+      ],
+      "article_url_patterns": [
+        "/2026/",
+        "/2026/09/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody'], main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://ncnews.com.br/2026/09/09/beber-cha-ou-cafe-muito-quente-pode-triplicar-risco-de-cancer-de-esofago-aponta-estudo/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "agoralitoral-com-br",
+      "nome": "Agora Litoral",
+      "tipo": "geral",
+      "homepage": "https://agoralitoral.com.br/",
+      "rss": [
+        "https://agoralitoral.com.br/feed/",
+        "https://agoralitoral.com.br/comments/feed/"
+      ],
+      "sitemap": "https://agoralitoral.com.br/sitemap.xml",
+      "editorias": [
+        "2026",
+        "category",
+        "politica-de-privacidade",
+        "trabalhe-conosco"
+      ],
+      "article_url_patterns": [
+        "/2026/",
+        "/2026/09/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://agoralitoral.com.br/2026/09/10/habitos-alimentares-cafe-quente-e-carne-processada-aumentam-risco-de-cancer/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "nationalgeographicbrasil-com",
+      "nome": "National Geographic",
+      "tipo": "geral",
+      "homepage": "https://www.nationalgeographicbrasil.com/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "animais",
+        "viagem",
+        "historia",
+        "ciencia",
+        "meio-ambiente",
+        "saude",
+        "assunto",
+        "cultura"
+      ],
+      "article_url_patterns": [
+        "/ciencia/",
+        "/ciencia/2025/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.nationalgeographicbrasil.com/ciencia/2025/01/e-seguro-tomar-agua-da-torneira-aqui-o-que-diz-a-ciencia"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "record-r7-com",
+      "nome": "Record",
+      "tipo": "geral",
+      "homepage": "https://record.r7.com/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "domingo-espetacular",
+        "balanco-geral",
+        "cidade-alerta",
+        "acerte-ou-caia",
+        "boom",
+        "balanco-geral-manha",
+        "canta-comigo",
+        "a-fazenda"
+      ],
+      "article_url_patterns": [
+        "/fala-brasil/",
+        "/fala-brasil/video/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-09-22 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://record.r7.com/fala-brasil/video/beber-agua-da-torneira-pode-trazer-riscos-a-saude-mostra-estudo-24022025/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-22"
     }
   ],
   "css_extraction_schemas": {

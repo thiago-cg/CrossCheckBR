@@ -39,12 +39,25 @@ class FonteEvidencia(BaseModel):
     veredito: Optional[str] = None
     selo_original: Optional[str] = None
     confianca: Optional[float] = None
+    # Deep crawl (check #2): prova de corpo lido, não só manchete
+    trecho_corpo: Optional[str] = None
+    corpo_lido: bool = False
+    # Clareza lado-a-lado (check #1): data + quote + tipo p/ tabela
+    data_pub: Optional[str] = None
+    quote: Optional[str] = None
+    tipo_conteudo: Optional[str] = None  # noticia|checagem|opiniao|satira
+    # LLM-juiz: resumo da peça frente à afirmação + termômetro (-100..+100)
+    resumo_juiz: Optional[str] = None
+    score_juiz: Optional[int] = None
+    # Relevância julgada: True/False = veredito do juiz (ou do fallback lexical);
+    # None = não julgado (índice sem LLM, teto esgotado). False nunca é "útil".
+    relevante: Optional[bool] = None
 
 
 class SinalAnalise(BaseModel):
     """Um motor, um resultado. O agregador nunca vê texto livre, só sinais."""
 
-    motor: str = Field(..., description="laya | modelo-fake | llm-padroes | corroboracao | veredito-existente")
+    motor: str = Field(..., description="llm-juiz | laya | modelo-fake | llm-padroes | corroboracao | veredito-existente")
     rotulo: str
     valor: str
     confianca: Optional[float] = Field(default=None, ge=0.0, le=1.0)
@@ -72,4 +85,7 @@ class RelatorioChecagem(BaseModel):
     perguntas_guia: List[str] = Field(default_factory=list)
     consulta: EntradaConsulta
     gerado_em: str = Field(default_factory=agora_iso)
-    versao: str = "mvp-0.1.0"
+    versao: str = "mvp-0.2.0"
+    # Clareza em segundos (check #1): header + why sempre preenchidos pelo pipeline
+    header: str = ""
+    why_1linha: str = ""

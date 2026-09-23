@@ -1,7 +1,9 @@
-"""Testes de implicação com laya (noul): o texto SUSTENTA ou REFUTA a afirmação?
+"""Testes de implicação via LLM-juiz: o texto SUSTENTA ou REFUTA?
 
-Uma chamada `predict` avalia as 2 perguntas num único forward pass (~ms).
-Preferência laya: decisão calibrada, sem geração de texto.
+Fluxo (juiz_llm): 1 LLM resume a peça frente à afirmação + 1 juiz em lote dá
+o termômetro (-100..+100). Jev NÃO é usado aqui — ficou restrito à
+classificação de schema em descoberta_site. Sem chave/falha: fallback lexical
+honesto (nunca 0/1, teto < 0.6).
 """
 from __future__ import annotations
 
@@ -9,64 +11,69 @@ import logging
 from typing import Any, Dict
 
 from . import config
+from . import juiz_llm
 
 log = logging.getLogger("factcheck.implicacao")
 
-try:
-    import laya as _laya
 
-    LAYA_OK = True
-except Exception:  # pragma: no cover
-    _laya = None  # type: ignore
-    LAYA_OK = False
+def _fallback_lexico(fonte: str, afirmacao: str) -> Dict[str, Any]:
+    """Fallback honesto sem LLM: overlap lexical, nunca 0/1."""
+    import re as _re
+    import unicodedata as _ud
 
-_ROUTER_INST = None
-_PREDICT_LOCK = None  # inferência torch raramente é thread-safe; serializa
+    def _toks(s: str):
+        s = _ud.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+        toks = set(_re.findall(r"[a-z0-9]{4,}", s))
+        stop = {"para", "como", "mais", "muito", "sobre", "entre", "quando",
+                "foram", "serao", "sera", "pode", "podem", "isso", "esta", "este"}
+        return {t for t in toks if t not in stop}
 
-
-def _get_router():
-    global _ROUTER_INST, _PREDICT_LOCK
-    if _ROUTER_INST is None:
-        if not LAYA_OK:
-            raise RuntimeError("laya não instalado")
-        import threading
-
-        # Default CPU: seguro em toda máquina (MPS/CUDA quebram ou variam);
-        # LAYA_DEVICE=cuda|mps só com teste local. Ver README.
-        dispositivo = config.LAYA_DEVICE or "cpu"
-        _ROUTER_INST = _laya.Router(preload=False, device=dispositivo)
-        _PREDICT_LOCK = threading.Lock()
-        log.info("laya Router pronto (device=%s)", dispositivo)
-    return _ROUTER_INST, _PREDICT_LOCK
-
-
-_PERGUNTAS = {
-    "sustenta": {"type": "noul", "instructions": "O texto confirma a afirmação como verdadeira?"},
-    "refuta": {"type": "noul", "instructions": "O texto nega a afirmação ou a declara falsa?"},
-}
+    tf, ta = _toks(fonte), _toks(afirmacao)
+    if not tf or not ta:
+        return {"sustenta": 0.0, "refuta": 0.0, "relevante": False, "erro": "fallback-lexico vazio"}
+    inter = len(tf & ta) / max(1, len(ta))
+    if inter < 0.34:  # loop 2: barra matches vagos (ex gravidez vs bets)
+        return {"sustenta": 0.0, "refuta": 0.0, "relevante": False,
+                "erro": "fallback-lexico overlap baixo"}
+    neg = bool(_re.search(r"\b(falso|falsa|fake|enganoso|mentira|desmente|nega|boato|golpe)\b",
+                          fonte or "", _re.I))
+    # Loop 3/4: lexical NUNCA crava veredito >=0.6 (evita veredito fantasma
+    # sem LLM): sus teto 0.5, ref teto 0.55 — nenhum cruza a barreira 0.6.
+    sus = round(min(0.5, 0.15 + 0.5 * inter), 4)
+    ref = round(min(0.55, 0.5 * inter + 0.2), 4) if neg else 0.0  # inter>=0.34 garantido
+    relevante = max(sus, ref) >= config.RELEVANCIA_MIN
+    return {"sustenta": sus, "refuta": ref, "relevante": relevante,
+            "erro": None, "motor": "lexico-fallback"}
 
 
 def implicacao(texto_fonte: str, afirmacao: str) -> Dict[str, Any]:
-    """Retorna {sustenta, refuta, relevante, erro}. Nunca levanta exceção."""
-    saida: Dict[str, Any] = {"sustenta": 0.0, "refuta": 0.0, "relevante": False, "erro": None}
+    """Retorna {sustenta, refuta, relevante, resumo, score, erro, motor}.
+
+    1 resumo LLM + juiz-termômetro (lote de 1). Nunca levanta exceção.
+    """
+    saida: Dict[str, Any] = {"sustenta": 0.0, "refuta": 0.0, "relevante": False,
+                             "resumo": "", "score": None, "erro": None}
     afirmacao = (afirmacao or "").strip()[:500]
     fonte = (texto_fonte or "").strip()[:2000]
-    estado = f"AFIRMAÇÃO: {afirmacao}\nTEXTO: {fonte}"
     if len(afirmacao) < 10 or len(fonte) < 30:
         saida["erro"] = "texto insuficiente"
         return saida
-    try:
-        roteador, trava = _get_router()
-        model_override = None if config.LAYA_MODEL == "auto" else config.LAYA_MODEL
-        with trava:
-            res = roteador.predict({"afirmacao": afirmacao, "texto": estado}, _PERGUNTAS,
-                                   model=model_override)
-        ans = res.get("answers", {})
-        sus = float((ans.get("sustenta") or {}).get("noul", 0.0) or 0.0)
-        ref = float((ans.get("refuta") or {}).get("noul", 0.0) or 0.0)
-        saida.update(sustenta=round(sus, 4), refuta=round(ref, 4))
-        saida["relevante"] = max(sus, ref) >= config.RELEVANCIA_MIN
-    except Exception as e:  # inferência não pode quebrar o pipeline
-        saida["erro"] = str(e)[:200]
-        log.warning("laya implicação falhou: %s", e)
+    r = juiz_llm.resumir(fonte, afirmacao)
+    saida["resumo"] = r.get("resumo", "")
+    if r.get("erro") and not r.get("resumo"):
+        fb = _fallback_lexico(fonte, afirmacao)
+        saida.update(sustenta=fb["sustenta"], refuta=fb["refuta"],
+                     relevante=fb["relevante"], score=None, motor=fb.get("motor"))
+        saida["erro"] = (r.get("erro") or "") + " | fallback-lexico"
+        return saida
+    t = juiz_llm.termometro([r.get("resumo", "")], afirmacao)[0]
+    saida.update(sustenta=t["sustenta"], refuta=t["refuta"],
+                 relevante=t["relevante"], score=t["score"], motor="llm-juiz")
+    erros = [e for e in (r.get("erro"), t.get("erro")) if e]
+    saida["erro"] = " | ".join(erros) if erros else None
+    if t.get("erro"):  # juiz falhou: lexical honesto no lugar do termômetro
+        fb = _fallback_lexico(fonte, afirmacao)
+        saida.update(sustenta=fb["sustenta"], refuta=fb["refuta"],
+                     relevante=fb["relevante"], score=None, motor=fb.get("motor"))
+        saida["erro"] = ((saida["erro"] or "") + " | fallback-lexico").strip(" |")
     return saida

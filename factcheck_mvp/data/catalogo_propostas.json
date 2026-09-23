@@ -1,0 +1,33 @@
+{
+ "versao_schema": "1.0.0",
+ "propostas": [
+  {
+   "id": "brasildefato-com-br",
+   "nome": "Brasil de Fato",
+   "tipo": "geral",
+   "homepage": "https://www.brasildefato.com.br/",
+   "dominio": "brasildefato.com.br",
+   "rss": [],
+   "sitemap": "https://www.brasildefato.com.br/sitemap.xml",
+   "editorias": [],
+   "article_url_patterns": [
+    "/podcast/",
+    "/podcast/visoespopulares/"
+   ],
+   "css_selectors": {
+    "titulo": "h1",
+    "corpo": "article"
+   },
+   "titulo_exemplo": "",
+   "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+   "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False.",
+   "exemplo_urls": [
+    "https://www.brasildefato.com.br/podcast/visoespopulares/2026/08/05/lula-vs-bolsonaro-um-comparativo-entre-a-economia-nos-dois-governos/"
+   ],
+   "responsavel": null,
+   "subsecoes": [],
+   "status": "pendente",
+   "coletado_em": "2026-09-22T01:58:37.984761+00:00"
+  }
+ ]
+}
