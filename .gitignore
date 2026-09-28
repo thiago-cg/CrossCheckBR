@@ -9,3 +9,4 @@ __pycache__/
 output*/
 *.log
 .crawl4ai/
+avaliacao/resultados/
