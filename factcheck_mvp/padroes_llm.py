@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, List
 
 from . import config
+from .blindagem import AVISO, delimitar
 
 _CATALOGO = [
     ("apelo_urgencia", "apelo a urgência/compartilhamento",
@@ -55,8 +56,8 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
             rotulos = ",".join(c[0] for c in _CATALOGO)
             conteudo, _m = llm_openrouter.chat(
                 [{"role": "user",
-                  "content": _INSTRUCAO.format(rotulos=rotulos)
-                  + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
+                  "content": _INSTRUCAO.format(rotulos=rotulos) + " " + AVISO
+                  + "\n\nTEXTO:\n" + delimitar((texto or "")[:4000])}],
                 max_tokens=500)
             bruto = (conteudo or "").strip()
             if bruto.upper() == "NENHUM":
@@ -88,8 +89,8 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
     rotulos = ",".join(c[0] for c in _CATALOGO)
     payload = {"model": modelo,
                "messages": [{"role": "user",
-                             "content": _INSTRUCAO.format(rotulos=rotulos)
-                             + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
+                             "content": _INSTRUCAO.format(rotulos=rotulos) + " " + AVISO
+                             + "\n\nTEXTO:\n" + delimitar((texto or "")[:4000])}],
                "temperature": 0.0, "max_tokens": 500}
     r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload, timeout=60)
     r.raise_for_status()

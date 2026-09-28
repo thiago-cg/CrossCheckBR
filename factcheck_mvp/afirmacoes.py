@@ -9,6 +9,7 @@ import re
 from typing import List
 
 from . import config
+from .blindagem import AVISO, delimitar
 from .schemas import Afirmacao
 
 _INSTRUCAO = (
@@ -51,7 +52,8 @@ def _via_llm(texto: str, max_n: int) -> tuple[List[Afirmacao], str]:
         if _cfg.OPENROUTER_API_KEY:
             conteudo, modelo_real = llm_openrouter.chat(
                 [{"role": "user",
-                  "content": _INSTRUCAO.format(n=max_n) + '\n\nTEXTO:\n"""\n' + texto[:4000] + '\n"""'}],
+                  "content": _INSTRUCAO.format(n=max_n) + " " + AVISO
+                  + "\n\nTEXTO:\n" + delimitar(texto[:4000])}],
                 max_tokens=600)
             if conteudo.strip().upper() == "VAZIO":
                 return [], f"openrouter:{modelo_real}"
@@ -76,7 +78,8 @@ def _via_llm(texto: str, max_n: int) -> tuple[List[Afirmacao], str]:
         "model": modelo,
         "messages": [{"role": "user",
                       # Delimitador: o texto do usuário nunca vira instrução.
-                      "content": _INSTRUCAO.format(n=max_n) + '\n\nTEXTO:\n"""\n' + texto[:4000] + '\n"""'}],
+                      "content": _INSTRUCAO.format(n=max_n) + " " + AVISO
+                      + "\n\nTEXTO:\n" + delimitar(texto[:4000])}],
         "temperature": 0.0,
         "max_tokens": 600,
     }

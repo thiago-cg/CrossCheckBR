@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 
 from . import config
 from . import llm_openrouter
+from .blindagem import AVISO, delimitar
 
 log = logging.getLogger("factcheck.juiz")
 
@@ -49,7 +50,8 @@ def resumir(fonte_texto: str, afirmacao: str) -> Dict[str, Any]:
     try:
         texto, modelo = llm_openrouter.chat(
             [{"role": "user",
-              "content": f"{_RESUMO_INSTRUCAO}\n\nAFIRMAÇÃO:\n{afirmacao}\n\nNOTÍCIA:\n{fonte}"}],
+              "content": f"{_RESUMO_INSTRUCAO} {AVISO}\n\nAFIRMAÇÃO:\n{delimitar(afirmacao)}"
+                         f"\n\nNOTÍCIA:\n{delimitar(fonte)}"}],
             max_tokens=config.JUIZ_RESUMO_MAX_TOKENS or 300,
             timeout_s=config.OPENROUTER_TIMEOUT_S)
         texto = (texto or "").strip()
@@ -113,7 +115,8 @@ def termometro(resumos: List[str], afirmacao: str) -> List[Dict[str, Any]]:
         bloco = "\n".join(f"[{s}] {resumos[i][:600]}" for s, i in seq_de_orig.items())
         texto, _ = llm_openrouter.chat(
             [{"role": "user",
-              "content": f"{_JUIZ_INSTRUCAO}\n\nAFIRMAÇÃO:\n{afirmacao}\n\nRESUMOS:\n{bloco}"}],
+              "content": f"{_JUIZ_INSTRUCAO} {AVISO}\n\nAFIRMAÇÃO:\n{delimitar(afirmacao)}"
+                         f"\n\nRESUMOS:\n{delimitar(bloco)}"}],
             max_tokens=800,
             timeout_s=config.OPENROUTER_TIMEOUT_S)
         parsed = _parse_juiz(texto, len(pend))
