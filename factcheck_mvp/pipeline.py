@@ -619,6 +619,36 @@ class Pipeline:
         return self._relatorio(entrada, prop, agg["justificativa"], sinais,
                                fontes_ord[: config.MAX_EVIDENCIAS * 2], etapas, limitacoes)
 
+    async def executar_com_cache(self, entrada: EntradaConsulta, progresso: Progresso = _nada,
+                                 usar_llm: bool = True) -> RelatorioChecagem:
+        """`executar` com cache TTL: a mesma notícia mandada por N pessoas não
+        refaz busca/LLM N vezes (economiza o teto diário de SerpAPI e LLM)."""
+        import time
+        import unicodedata
+
+        ttl = config.RESULT_CACHE_TTL
+        if ttl <= 0:
+            return await self.executar(entrada, progresso, usar_llm)
+        norm = unicodedata.normalize("NFKC", entrada.conteudo or "").lower()
+        chave = (entrada.tipo, " ".join(norm.split()), usar_llm)
+        cache: Dict[tuple, tuple] = self.__dict__.setdefault("_cache_rel", {})
+        agora = time.time()
+        hit = cache.get(chave)
+        if hit and agora - hit[0] < ttl:
+            return hit[1].model_copy(deep=True)
+        rel = await self.executar(entrada, progresso, usar_llm)
+        # Resultado degradado (falha/teto/SerpAPI fora) não fica preso no cache.
+        degradado = any(e.status == "falha" for e in rel.etapas) or any(
+            k in (l or "").lower() for l in rel.limitacoes
+            for k in ("teto", "falhou", "pausada", "fallback"))
+        if degradado:
+            return rel
+        cache[chave] = (agora, rel.model_copy(deep=True))
+        if len(cache) > max(1, config.RESULT_CACHE_MAX):
+            for k in sorted(cache, key=lambda k: cache[k][0])[: len(cache) - config.RESULT_CACHE_MAX]:
+                cache.pop(k, None)
+        return rel
+
     @staticmethod
     def _relatorio(entrada, propensao, justificativa, sinais, fontes, etapas, limitacoes):
         # Loop 3: header conta fontes úteis (não-genéricas E não julgadas-irrelevantes);

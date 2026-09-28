@@ -118,7 +118,7 @@ async def checar(entrada: EntradaConsulta, request: Request):
         raise HTTPException(status_code=429, detail="muitas checagens; tente de novo em instantes")
     try:
         async with asyncio.timeout(180):
-            return await pipeline().executar(entrada)
+            return await pipeline().executar_com_cache(entrada)
     except (asyncio.TimeoutError, TimeoutError):
         raise HTTPException(status_code=504, detail="checagem excedeu o tempo; tente um texto mais curto")
     except HTTPException:
@@ -175,7 +175,7 @@ async def checar_web(request: Request, conteudo: str = Form(...)):
         return HTMLResponse(_render_html(conteudo), status_code=400)
     try:
         async with asyncio.timeout(180):
-            rel = await pipeline().executar(entrada)
+            rel = await pipeline().executar_com_cache(entrada)
         return HTMLResponse(_render_html(conteudo, rel))
     except Exception:
         log.exception("falha no pipeline web")

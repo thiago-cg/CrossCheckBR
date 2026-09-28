@@ -268,7 +268,7 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 await aviso.edit_text(RUMOR_MSG[:400])
         except Exception:
             pass
-        rel = await pipe.executar(entrada, progresso=progresso)
+        rel = await pipe.executar_com_cache(entrada, progresso=progresso)
         if entrada.tipo == "link" and not texto_extra:
             rel.limitacoes.append("Link fora dos portais monitorados ou inacessível: analisei o endereço como referência; envie o texto para checagem completa.")
         await aviso.edit_text(formatar(rel))

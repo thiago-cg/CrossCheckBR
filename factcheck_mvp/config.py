@@ -65,6 +65,9 @@ FAKE_MODEL_PATH = _get("FAKE_MODEL_PATH")  # vazio = mock explícito (RF08 até 
 # por formato (curto → fake). Confiança baixa: é um sinal a mais, não o principal.
 FAKE_MODEL_MIN_PALAVRAS = _int("FAKE_MODEL_MIN_PALAVRAS", 80)
 FAKE_MODEL_CONFIANCA = _float("FAKE_MODEL_CONFIANCA", 0.5)
+# Cache de relatórios completos (mesmo texto repetido não refaz busca/LLM).
+RESULT_CACHE_TTL = _int("RESULT_CACHE_TTL", 1800)
+RESULT_CACHE_MAX = _int("RESULT_CACHE_MAX", 256)
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
 DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
