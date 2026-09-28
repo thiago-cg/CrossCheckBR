@@ -541,13 +541,20 @@ class Pipeline:
         await avisar("Rodando o modelo de detecção e a análise de padrões…")
         try:
             det = await asyncio.to_thread(self.detector.analisar, texto_base[:5000])
-            conf_modelo = 0.4 if det.get("mock") else 0.85  # mock pesa pouco e declara
-            sinais.append(SinalAnalise(motor="modelo-fake",
-                                       rotulo=f"modelo {det['modelo']}{' (PLACEHOLDER)' if det.get('mock') else ''}",
-                                       valor=str(det["prob_fake"]), confianca=conf_modelo))
-            if det.get("mock"):
-                limitacoes.append("Modelo de detecção ainda é um placeholder (RF08 parcial).")
-            etapa("modelo", "ok", f"prob_fake={det['prob_fake']} ({det['modelo']}).")
+            if det.get("aplicavel") is False:
+                # Manchete/frase curta: o modelo erra por formato; não opina.
+                etapa("modelo", "pulada", f"{det.get('motivo', 'texto curto')} ({det['modelo']}).")
+                limitacoes.append("Modelo de detecção não opina em texto curto (erra por formato); "
+                                  "envie o texto completo para incluí-lo.")
+            else:
+                # mock pesa pouco e declara; o real é sinal auxiliar (peso baixo)
+                conf_modelo = 0.4 if det.get("mock") else config.FAKE_MODEL_CONFIANCA
+                sinais.append(SinalAnalise(motor="modelo-fake",
+                                           rotulo=f"modelo {det['modelo']}{' (PLACEHOLDER)' if det.get('mock') else ''}",
+                                           valor=str(det["prob_fake"]), confianca=conf_modelo))
+                if det.get("mock"):
+                    limitacoes.append("Modelo de detecção ainda é um placeholder (RF08 parcial).")
+                etapa("modelo", "ok", f"prob_fake={det['prob_fake']} ({det['modelo']}).")
         except Exception as e:
             etapa("modelo", "falha", str(e)[:200])
             limitacoes.append("Modelo de detecção indisponível nesta consulta.")

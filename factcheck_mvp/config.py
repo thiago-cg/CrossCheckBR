@@ -61,6 +61,10 @@ MAX_AFIRMACOES = _int("MAX_AFIRMACOES", 3)
 MAX_EVIDENCIAS = _int("MAX_EVIDENCIAS", 5)
 CACHE_SERPAPI_TTL = _int("CACHE_SERPAPI_TTL", 3600)
 FAKE_MODEL_PATH = _get("FAKE_MODEL_PATH")  # vazio = mock explícito (RF08 até o modelo real)
+# Modelo real só opina em texto longo: em manchete solta o BERTimbau v6 erra
+# por formato (curto → fake). Confiança baixa: é um sinal a mais, não o principal.
+FAKE_MODEL_MIN_PALAVRAS = _int("FAKE_MODEL_MIN_PALAVRAS", 80)
+FAKE_MODEL_CONFIANCA = _float("FAKE_MODEL_CONFIANCA", 0.5)
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
 DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
