@@ -95,7 +95,7 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
     r.raise_for_status()
     bruto = (r.json()["choices"][0]["message"]["content"] or "").strip()
     if bruto.upper() == "NENHUM":
-        return []
+        return [], "llm-local"
     saida = []
     descs = {c[0]: c[1] for c in _CATALOGO}
     for linha in bruto.splitlines():
