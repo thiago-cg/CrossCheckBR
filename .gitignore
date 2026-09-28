@@ -1,6 +1,7 @@
 .env
 .venv/
 bot.lock
+feedback.jsonl
 modelos/
 __pycache__/
 .pytest_cache/

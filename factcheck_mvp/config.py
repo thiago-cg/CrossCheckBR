@@ -68,6 +68,8 @@ FAKE_MODEL_CONFIANCA = _float("FAKE_MODEL_CONFIANCA", 0.5)
 # Cache de relatórios completos (mesmo texto repetido não refaz busca/LLM).
 RESULT_CACHE_TTL = _int("RESULT_CACHE_TTL", 1800)
 RESULT_CACHE_MAX = _int("RESULT_CACHE_MAX", 256)
+# Feedback 👍/👎 do bot (JSONL local; vira dado rotulado p/ calibrar pesos).
+FEEDBACK_PATH = _get("FEEDBACK_PATH", "")
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
 DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)

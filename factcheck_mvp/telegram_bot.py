@@ -10,8 +10,9 @@ import logging
 import re
 from urllib.parse import urlparse
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
+                          MessageHandler, filters)
 
 from . import config
 from .pipeline import Pipeline
@@ -101,7 +102,9 @@ AJUDA = (
     "Devolvo propensão (baixa/média/alta), % do modelo, evidências com links e o passo a passo. "
     "Nunca digo que algo 'é falso' ou 'é verdade' — ajudo você a avaliar.\n\n"
     "Privacidade: o texto é comparado com bases públicas de checagem e notícias "
-    "(inclui consulta web externa). Não envie dados pessoais."
+    "(inclui consulta web externa). Não envie dados pessoais. Se você avaliar a "
+    "resposta (👍/👎), guardamos o texto consultado e a avaliação — sem seu nome "
+    "nem ID — para melhorar o sistema."
 )
 
 MIDIA_MSG = (
@@ -117,6 +120,37 @@ LINK_SEM_TEXTO_MSG = (
     "página bloqueada). Copie e cole aqui o título e o texto da notícia que eu "
     "faço a checagem completa."
 )
+
+FEEDBACK_UP, FEEDBACK_DOWN = "fb:up", "fb:down"
+
+
+def _teclado_feedback(chave: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("👍 Ajudou", callback_data=f"{FEEDBACK_UP}:{chave}"),
+        InlineKeyboardButton("👎 Não ajudou", callback_data=f"{FEEDBACK_DOWN}:{chave}"),
+    ]])
+
+
+def _caminho_feedback():
+    from pathlib import Path as _P
+
+    return _P(config.FEEDBACK_PATH) if config.FEEDBACK_PATH else \
+        _P(__file__).resolve().parent.parent / "feedback.jsonl"
+
+
+def registrar_feedback(registro: dict, voto: str) -> bool:
+    """Acrescenta 1 linha JSONL (sem user id). Nunca levanta."""
+    import json
+    import time
+
+    try:
+        linha = {"ts": int(time.time()), "voto": voto, **registro}
+        with open(_caminho_feedback(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(linha, ensure_ascii=False) + "\n")
+        return True
+    except Exception:
+        log.exception("falha ao gravar feedback")
+        return False
 
 
 def classificar_entrada(texto: str) -> EntradaConsulta:
@@ -280,7 +314,14 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             pass
         rel = await pipe.executar_com_cache(entrada, progresso=progresso)
-        await aviso.edit_text(formatar(rel))
+        # Guarda a consulta p/ o 👍/👎 (memória limitada; só o necessário).
+        pend = context.application.bot_data.setdefault("feedback_pend", {})
+        chave = f"{aviso.chat_id}-{aviso.message_id}"
+        pend[chave] = {"tipo": entrada.tipo, "conteudo": entrada.conteudo[:5000],
+                       "propensao": rel.propensao, "header": rel.header}
+        while len(pend) > 500:
+            pend.pop(next(iter(pend)))
+        await aviso.edit_text(formatar(rel), reply_markup=_teclado_feedback(chave))
     except Exception:
         uid = update.effective_user.id if update.effective_user else "?"
         log.exception("falha na checagem (user=%s)", uid)  # detalhe só no servidor
@@ -288,6 +329,27 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await aviso.edit_text("Não consegui concluir. Tente de novo em instantes.")
         except Exception:
             pass
+
+
+async def _feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    if not q or not q.data:
+        return
+    try:
+        _, voto, chave = q.data.split(":", 2)
+    except ValueError:
+        await q.answer()
+        return
+    registro = context.application.bot_data.get("feedback_pend", {}).pop(chave, None)
+    if registro is None:
+        await q.answer("Avaliação já registrada ou expirada.")
+    else:
+        registrar_feedback(registro, "util" if voto == "up" else "nao_util")
+        await q.answer("Obrigado pela avaliação!")
+    try:
+        await q.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -301,6 +363,7 @@ def main() -> None:
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
     app.bot_data["pipeline"] = fabrica()
     app.add_handler(CommandHandler("start", _start))
+    app.add_handler(CallbackQueryHandler(_feedback, pattern=r"^fb:"))
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.ATTACHMENT
                                    | filters.VOICE | filters.AUDIO, _midia))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _checar))
