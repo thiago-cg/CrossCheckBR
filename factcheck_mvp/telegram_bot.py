@@ -106,7 +106,9 @@ AJUDA = (
 
 MIDIA_MSG = (
     "Ainda não analiso fotos, vídeos nem áudios (RF03). "
-    "Envie o texto, o título ou o link da notícia que eu checo para você."
+    "Envie o texto, o título ou o link da notícia que eu checo para você.\n\n"
+    "Enquanto isso, dá para checar uma imagem você mesmo: faça uma busca reversa "
+    "(Google Lens ou images.google.com) para ver onde e quando ela apareceu antes."
 )
 
 
@@ -299,7 +301,8 @@ def main() -> None:
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
     app.bot_data["pipeline"] = fabrica()
     app.add_handler(CommandHandler("start", _start))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.ATTACHMENT, _midia))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.ATTACHMENT
+                                   | filters.VOICE | filters.AUDIO, _midia))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _checar))
     log.info("bot no ar. /start para ajuda.")
     app.run_polling()
