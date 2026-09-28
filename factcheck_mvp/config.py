@@ -63,6 +63,15 @@ CACHE_SERPAPI_TTL = _int("CACHE_SERPAPI_TTL", 3600)
 FAKE_MODEL_PATH = _get("FAKE_MODEL_PATH")  # vazio = mock explícito (RF08 até o modelo real)
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
+# Estratégia no orgânico: `agente` (padrão: roteador + ondas + crítico),
+# `simples` (crua + dirigida leve), `avancada` (crua + filtro hosts) ou
+# `ambas` (p/ A/B). Motor news legado via SERP_ENGINE=google_news.
+SERP_ENGINE = _get("SERP_ENGINE", "google")
+SERP_ESTRATEGIA = _get("SERP_ESTRATEGIA", "agente")
+# Teto global de buscas do agente por /checar (onda 1 + onda 2).
+AGENTE_MAX_BUSCAS = _int("AGENTE_MAX_BUSCAS", 8)
+# Hosts extras de checagem além do padrão (separados por vírgula).
+SERP_SITES_EXTRAS = _get("SERP_SITES_EXTRAS", "")
 DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
 DEEP_CRAWL_TIMEOUT_S = _int("DEEP_CRAWL_TIMEOUT_S", 15)
 DEEP_CRAWL_MAX_BYTES = _int("DEEP_CRAWL_MAX_BYTES", 500000)

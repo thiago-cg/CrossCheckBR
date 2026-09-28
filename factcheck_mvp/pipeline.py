@@ -304,25 +304,67 @@ class Pipeline:
             async def _buscar_query(af_texto: str, q: Dict[str, Any]) -> List[Dict[str, Any]]:
                 bruto = await asyncio.to_thread(self.serpapi.buscar, q)
                 saida = []
-                for item in (bruto or {}).get("news_results", [])[:6]:
-                    parcial = rotear_fonte(normalizar_item(item), self.catalogo)
+                eng = self.serpapi.engine_de(q)
+                for item in (bruto or {}).get(self.serpapi.result_key(q), [])[:6]:
+                    parcial = rotear_fonte(normalizar_item(item, engine=eng),
+                                           self.catalogo)
                     parcial["_afirmacao"] = af_texto
                     saida.append(parcial)
+                if eng == "google":
+                    # Outro campo útil do JSON orgânico: top_stories (frescor).
+                    # Sem snippet em geral: vale menos que organic_results.
+                    for item in (bruto or {}).get("top_stories", [])[:4]:
+                        parcial = rotear_fonte(normalizar_item(item, engine=eng,
+                                                               top_story=True),
+                                               self.catalogo)
+                        parcial["_afirmacao"] = af_texto
+                        saida.append(parcial)
                 return saida
 
-            consultas = [(af.texto, q) for af in afs[: config.MAX_AFIRMACOES] for q in construir_queries(af.texto)]
-            try:
-                blocos = await asyncio.wait_for(
-                    asyncio.gather(*[_buscar_query(t, q) for t, q in consultas]), timeout=60)
-                for b in blocos:
-                    descobertas += b
-            except asyncio.TimeoutError:
-                limitacoes.append("Descoberta web atingiu o teto de 60s (resultado parcial).")
-            vistos, unicas = set(), []
-            for d in descobertas:
-                if d["url"] and d["url"] not in vistos:
-                    vistos.add(d["url"])
-                    unicas.append(d)
+            if (getattr(config, "SERP_ESTRATEGIA", "") or "").strip().lower() == "agente":
+                # Agente: roteador + ondas + crítico (orquestra os motores;
+                # ignora SERP_ENGINE). O resto do fluxo (triagem→juiz→sinais)
+                # segue idêntico sobre `unicas`.
+                from . import agente as _ag
+                import threading as _th
+                await avisar("Agente de busca: planejando ondas…")
+                _ev_cancel = _th.Event()
+                try:
+                    unicas, traco = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _ag.descobrir,
+                            [af.texto for af in afs[: config.MAX_AFIRMACOES]],
+                            self.serpapi, self.catalogo, None, _ev_cancel),
+                        timeout=60)  # 60 (estático) + 120 (juiz) < 180 (API)
+                except asyncio.TimeoutError:
+                    # wait_for cancela a espera, não a thread: o evento faz a
+                    # órfã parar entre buscas em vez de torrar a cota diária.
+                    _ev_cancel.set()
+                    unicas, traco = [], {"buscas_usadas": 0, "ondas": 0, "unicos": 0,
+                                         "n_secao_checagem": 0, "decisoes": ["teto 60s"]}
+                    limitacoes.append("Agente de busca atingiu o teto de 60s (resultado parcial).")
+                etapa("descoberta-agente",
+                      "ok" if unicas else "parcial",
+                      f"Agente: {traco.get('buscas_usadas', 0)} busca(s) em "
+                      f"{traco.get('ondas', 0)} onda(s), {traco.get('unicos', 0)} "
+                      f"peça(s) únicas ({traco.get('n_secao_checagem', 0)} em seção-checagem). "
+                      + " | ".join([d for d in traco.get("decisoes", [])][:4]),
+                      [d.get("url", "") for d in unicas[:5]])
+            else:
+                consultas = [(af.texto, q) for af in afs[: config.MAX_AFIRMACOES]
+                             for q in construir_queries(af.texto)]
+                try:
+                    blocos = await asyncio.wait_for(
+                        asyncio.gather(*[_buscar_query(t, q) for t, q in consultas]), timeout=60)
+                    for b in blocos:
+                        descobertas += b
+                except asyncio.TimeoutError:
+                    limitacoes.append("Descoberta web atingiu o teto de 60s (resultado parcial).")
+                vistos, unicas = set(), []
+                for d in descobertas:
+                    if d["url"] and d["url"] not in vistos:
+                        vistos.add(d["url"])
+                        unicas.append(d)
 
             # Triagem lexical barata das manchetes (0..1); o juiz decide a
             # relevância — o Jev não participa mais do julgamento.
@@ -399,7 +441,8 @@ class Pipeline:
                 trecho = (corp.trecho_corpo if corp and corp.corpo_lido else "") or ""
                 if trecho and _eh_generica(d.get("url", ""), d.get("titulo", ""), trecho):
                     continue  # corpo de homepage/seção será descartado; poupa o teto
-                texto_j = (trecho[:2000] if trecho else (d.get("titulo", "") or "")[:2000])
+                texto_j = (trecho[:2000] if trecho
+                           else ((d.get("_snippet") or d.get("titulo", "") or "")[:2000]))
                 if len(texto_j.strip()) < 30 and not trecho:
                     continue
                 pares_ser.append((texto_j, d.get("_afirmacao", "")))
