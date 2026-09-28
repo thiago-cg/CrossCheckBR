@@ -110,6 +110,13 @@ MIDIA_MSG = (
 )
 
 
+LINK_SEM_TEXTO_MSG = (
+    "Não consegui ler esse link (site fora dos portais monitorados, paywall ou "
+    "página bloqueada). Copie e cole aqui o título e o texto da notícia que eu "
+    "faço a checagem completa."
+)
+
+
 def classificar_entrada(texto: str) -> EntradaConsulta:
     import re as _re
     t = (texto or "").strip()
@@ -256,11 +263,13 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
     try:
-        texto_extra = ""
         if entrada.tipo == "link":
             texto_extra = _texto_link(entrada.conteudo, pipe.catalogo) or ""
-            if texto_extra:
-                entrada = EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto_extra}"[:20000])
+            if not texto_extra:
+                # Plano B: sem o conteúdo, a checagem seria só sobre o endereço.
+                await aviso.edit_text(LINK_SEM_TEXTO_MSG)
+                return
+            entrada = EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto_extra}"[:20000])
         # Aviso de rumor de 2ª mão (usa a mesma regex do pipeline, sem drift)
         try:
             from .pipeline import RUMOR_RE as _RR
@@ -269,8 +278,6 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             pass
         rel = await pipe.executar_com_cache(entrada, progresso=progresso)
-        if entrada.tipo == "link" and not texto_extra:
-            rel.limitacoes.append("Link fora dos portais monitorados ou inacessível: analisei o endereço como referência; envie o texto para checagem completa.")
         await aviso.edit_text(formatar(rel))
     except Exception:
         uid = update.effective_user.id if update.effective_user else "?"
