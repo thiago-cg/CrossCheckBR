@@ -9,7 +9,7 @@ FIX = Path(__file__).parent / "fixtures" / "serpapi_bets.json"
 
 
 def test_queries_pt_br():
-    qs = camada.construir_queries("bets são proibidas no brasil")
+    qs = camada.construir_queries("bets são proibidas no brasil", engine="google_news")
     assert len(qs) == 2
     assert all(q["hl"] == "pt-br" and q["gl"] == "br" for q in qs)
     assert "checagem" in qs[1]["q"]
@@ -73,3 +73,187 @@ def test_erro_rede_marca_motivo(monkeypatch):
     c = camada.SerpAPIClient(api_key="k")
     assert c.buscar({"q": "a"}) is None
     assert c.ultimo_motivo == "erro" and c.erros_rede == 1
+
+
+# --- Motor google orgânico: simples vs avançada ---
+
+def test_simples_duas_queries_sem_operador_site():
+    qs = camada.construir_queries("vacina causa autismo", engine="google", estrategia="simples")
+    assert len(qs) == 2
+    assert all(q["engine"] == "google" and q["hl"] == "pt-br" for q in qs)
+    assert "site:" not in qs[0]["q"] and "site:" not in qs[1]["q"]
+    assert "checagem" in qs[1]["q"] or "falso" in qs[1]["q"]
+
+
+def test_avancada_duas_buscas_todos_os_hosts_sem_inurl():
+    # Decisão live 23/09/2026: cadeia (site:inurl:) em OR retorna zero no
+    # Google — o filtro avançado é 1 bloco site: puro com todos os hosts.
+    qs = camada.construir_queries("vacina causa autismo", engine="google", estrategia="avancada")
+    assert len(qs) == 2  # teto: 2 buscas por afirmação
+    crua, filtro = qs
+    assert "site:" not in crua["q"] and "inurl:" not in crua["q"]
+    for s in camada.sites_checagem():
+        assert f"site:{s['host']}" in filtro["q"], f"host sem cobertura: {s['host']}"
+    assert "inurl:" not in filtro["q"]
+
+
+def test_secao_checagem_dedicado_vs_geral():
+    E = camada.eh_secao_checagem
+    assert E("https://lupa.uol.com.br/jornalismo/2026/01/01/x") is True
+    assert E("https://www.aosfatos.org/noticias/temer-lula-bets/") is True
+    assert E("https://www.e-farsas.com/artigos/x") is True
+    assert E("https://g1.globo.com/fato-ou-fake/noticia/x.ghtml") is True
+    assert E("https://g1.globo.com/politica/noticia/x.ghtml") is False
+    assert E("https://www.estadao.com.br/estadao-verifica/x/") is True
+    assert E("https://www.estadao.com.br/brasil/x/") is False
+    assert E("https://www.gov.br/saude/pt-br/assuntos/saude-com-ciencia/x") is True
+    assert E("https://www.gov.br/economia/pt-br/x") is False
+    assert E("https://exame.com/economia/x") is False
+    assert E("") is False
+    # Segmento exato: /radar/ vale, /radar-meteorologico não.
+    assert E("https://www.aosfatos.org/radar/x") is True
+    assert E("https://www.aosfatos.org/noticias/radar-meteorologico-x") is True  # host dedicado
+    assert E("https://g1.globo.com/fato-ou-fake-x/y") is False
+
+
+def test_extras_preservam_host_sem_corromper(monkeypatch):
+    import factcheck_mvp.config as cfg
+    monkeypatch.setattr(cfg, "SERP_SITES_EXTRAS", "webdobem.com, www.outro.org")
+    hosts = [s["host"] for s in camada.sites_checagem()]
+    assert "webdobem.com" in hosts  # lstrip("www.") corrompia p/ ebdobem.com
+    assert "outro.org" in hosts
+
+
+def test_extras_url_completa_vira_host(monkeypatch):
+    import factcheck_mvp.config as cfg
+    monkeypatch.setattr(cfg, "SERP_SITES_EXTRAS", "https://www.exemplo.com/caminho?x=1")
+    hosts = [s["host"] for s in camada.sites_checagem()]
+    assert "exemplo.com" in hosts
+
+
+def test_construir_queries_agente_levanta():
+    import pytest
+    with pytest.raises(ValueError):
+        camada.construir_queries("x", engine="google", estrategia="agente")
+
+
+def test_vazio_nao_cola_no_cache(monkeypatch):
+    import httpx as _hx
+    calls = []
+
+    class FakeResp:
+        def __init__(self, p):
+            self._p = p
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._p
+
+    cargas = [{}, {"organic_results": [{"link": "https://x.com/a", "title": "T"}]}]
+    monkeypatch.setattr(_hx, "get",
+                        lambda *a, **k: (calls.append(1), FakeResp(cargas[min(len(calls) - 1, 1)]))[1])
+    c = camada.SerpAPIClient(api_key="k")
+    q = {"q": "a", "engine": "google", "hl": "pt-br", "gl": "br", "num": 10}
+    assert c.buscar(q) == {}
+    assert c.buscar(q) is not None  # vazio não cacheou: rebateu a rede
+    assert len(calls) == 2
+
+
+def test_roteador_scholar_nao_cai_no_google():
+    qs = camada.construir_queries("ibuprofeno dengue", engine="google_scholar")
+    assert len(qs) == 1 and qs[0]["engine"] == "google_scholar"
+
+
+def test_avancada_valida_e_limita_hosts():
+    sites = [{"host": f"h{i}.exemplo.com", "paths": []} for i in range(30)]
+    sites.append({"host": "http://evil .com", "paths": []})
+    qs = camada.construir_queries_avancada("x", sites=sites)
+    filtro = qs[1]["q"]
+    assert filtro.count("site:") == 20
+    assert "evil" not in filtro
+
+
+def test_scholar_ano_nao_resumo_inteiro():
+    n = camada.normalizar_item({
+        "title": "T", "link": "https://scielo.org/x",
+        "publication_info": {"summary": "Autor - J Med, 2024"},
+        "inline_links": {"cited_by": {"total": 7}},
+    }, engine="google_scholar")
+    assert n["data_publicacao"] == "2024"
+    assert n["_scholar_pub"] == "Autor - J Med, 2024"
+    assert n["_citacoes"] == 7
+
+
+def test_fonte_displayed_sem_scheme():
+    n = camada.normalizar_item({
+        "link": "https://lupa.uol.com.br/x", "title": "T",
+        "displayed_link": "https://lupa.uol.com.br › jornalismo",
+    }, engine="google")
+    assert n["fonte"]["nome"] == "lupa.uol.com.br"
+
+
+def test_roteador_mantem_news_e_respeita_estrategia():
+    news = camada.construir_queries("x", engine="google_news")
+    assert all(q["engine"] == "google_news" for q in news)
+    ambas = camada.construir_queries("x", engine="google", estrategia="ambas")
+    simples = camada.construir_queries("x", engine="google", estrategia="simples")
+    assert len(ambas) > len(simples) and all(q["engine"] == "google" for q in ambas)
+
+
+def test_normaliza_organic_com_snippet_e_fonte_displayed():
+    n = camada.normalizar_item({
+        "link": "https://lupa.uol.com.br/jornalismo/2026/01/01/falso-x",
+        "title": "É falso que X",
+        "snippet": "Verificamos e é falso…",
+        "displayed_link": "https://lupa.uol.com.br › jornalismo",
+        "date": "há 2 dias",
+        "position": 3,
+    }, engine="google")
+    assert n["url"].startswith("https://lupa.uol.com.br")
+    assert n["_snippet"] == "Verificamos e é falso…"
+    assert "lupa.uol.com.br" in n["fonte"]["nome"]
+    assert n["corpo_texto"] is None and n["veredito"] is None
+    assert n["_engine"] == "google" and n["_top_story"] is False
+
+
+def test_normaliza_top_story_sem_snippet():
+    n = camada.normalizar_item({
+        "title": "T", "link": "https://x.com/a",
+        "source": {"name": "G1"},
+    }, engine="google", top_story=True)
+    assert n["_top_story"] is True and n["_snippet"] is None
+    assert n["fonte"]["nome"] == "G1"
+
+
+def test_cliente_respeita_engine_por_query_e_result_key(monkeypatch):
+    import httpx as _hx
+    vistos = []
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    cargas = [{}, {"organic_results": [{"link": "https://x.com/a", "title": "T"}]}]
+
+    def fake_get(url, params=None, timeout=None):
+        vistos.append(dict(params or {}))
+        return FakeResp(cargas[min(len(vistos) - 1, 1)])
+
+    monkeypatch.setattr(_hx, "get", fake_get)
+    c = camada.SerpAPIClient(api_key="k")  # default do env (google)
+    out = c.buscar({"q": "a", "engine": "google_news", "hl": "pt-br", "gl": "br"})
+    assert vistos[0]["engine"] == "google_news"  # override por query vence
+    assert c.ultimo_motivo == "vazio"  # news_results ausente
+    out2 = c.buscar({"q": "a", "engine": "google", "hl": "pt-br", "gl": "br", "num": 10})
+    assert vistos[1]["engine"] == "google" and out2 is not None
+    assert c.result_key({"engine": "google"}) == "organic_results"
+    assert c.result_key({"engine": "google_news"}) == "news_results"
+    assert c.ultimo_motivo == "ok"  # organic_results presente

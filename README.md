@@ -7,6 +7,9 @@ Chatbot (Telegram, com API preparada para web futura) que recebe **texto, títul
 ```
 [1 recebe] → [2 afirmações] → [3 índice de vereditos] → [4 descoberta fresca]
 → [5 implicação laya] → [6 corroboração] → [7 sinais] → [agregador] → resposta + recibo
+
+(Etapa 4 com `SERP_ESTRATEGIA=agente`: emite `descoberta-agente` antes da
+`descoberta` — 8 etapas no recibo em vez de 7.)
 ```
 
 1. **Recebimento** — só texto/título/link (fotos e vídeos recebem orientação, não análise).

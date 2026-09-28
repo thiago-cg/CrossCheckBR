@@ -73,6 +73,8 @@ def saude():
     p = pipeline()
     return {"ok": True, "portais": len(p.catalogo), "vereditos": len(p.idx_ver),
             "noticias": len(p.idx_not), "serpapi": p.serpapi.ativo,
+            "serpapi_engine": p.serpapi.engine_default,
+            "serpapi_estrategia": getattr(config, "SERP_ESTRATEGIA", "agente"),
             "serpapi_uso_hoje": p.serpapi.uso_hoje,
             "serpapi_cap": getattr(config, "SERPAPI_DAILY_CAP", 100),
             "versao": "mvp-0.2.0"}
