@@ -161,3 +161,16 @@ def test_descoberta_status_distingue_falhou_de_rodou():
     assert _descoberta_status([etapa, ok, fb]) == "parcial"
     assert _descoberta_status([{"tipo": "etapa", "dados": {"nome": "descoberta", "status": "pulada"}}]) == "pulada"
     assert abs(_busca_indisponivel({"descoberta": {"falhou": 0.4, "pulada": 0.2}}) - 0.6) < 1e-9
+
+
+def test_descoberta_status_ignora_descoberta_catalogo():
+    from eval.run import _descoberta_status
+    catalogo_ok = {"tipo": "etapa", "dados": {"nome": "descoberta-catalogo", "status": "ok"}}
+    descoberta_pulada = {"tipo": "etapa", "dados": {"nome": "descoberta", "status": "pulada"}}
+    descoberta_ok = {"tipo": "etapa", "dados": {"nome": "descoberta", "status": "ok"}}
+    agente_ok = {"tipo": "etapa", "dados": {"nome": "descoberta-agente", "status": "ok"}}
+    ok = {"tipo": "http", "dados": {"url": "https://serpapi.com/search.json?q=x", "status": 200}}
+    assert _descoberta_status([catalogo_ok, descoberta_pulada]) == "pulada"
+    assert _descoberta_status([descoberta_ok, catalogo_ok, ok]) == "rodou"
+    assert _descoberta_status([agente_ok, ok]) == "rodou"
+    assert _descoberta_status([catalogo_ok]) == "ausente"

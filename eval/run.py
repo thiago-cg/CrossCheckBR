@@ -188,9 +188,13 @@ def _descoberta_status(eventos: List[Dict[str, Any]]) -> str:
 
     `falhou` = a descoberta tentou buscar mas TODAS as buscas foram recusadas (cota da SerpAPI,
     timeout): o caso não mede a qualidade da busca/juiz. `parcial` = algumas falharam.
+
+    Só contam as etapas de busca web real: `descoberta` e `descoberta-agente`.
+    `descoberta-catalogo` (proposta de catálogo) é ignorada.
     """
+    nomes = ("descoberta", "descoberta-agente")
     sts = [e["dados"].get("status") for e in eventos
-           if e.get("tipo") == "etapa" and str(e["dados"].get("nome", "")).startswith("descoberta")]
+           if e.get("tipo") == "etapa" and str(e["dados"].get("nome", "")) in nomes]
     if not sts:
         return "ausente"
     if all(s == "pulada" for s in sts):
