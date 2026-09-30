@@ -275,6 +275,12 @@ async def avaliar_caso(pipe: Any, caso: Dict[str, Any], timeout: float, modo: st
                               and "serpapi.com" in str(e["dados"].get("url", ""))
                               and e["dados"].get("cache") == "live")
     res["http_miss"] = sum(1 for e in eventos if e.get("tipo") == "http" and e["dados"].get("cache") == "miss")
+    n_llm_miss = sum(1 for e in eventos if e.get("tipo") == "llm" and e["dados"].get("cache") == "miss")
+    n_or_http_miss = sum(1 for e in eventos if e.get("tipo") == "http"
+                         and "openrouter.ai" in str(e["dados"].get("url", ""))
+                         and e["dados"].get("cache") == "miss")
+    res["llm_miss"] = n_llm_miss if n_llm_miss else n_or_http_miss
+    res["nao_reproduzido"] = bool(modo == "replay" and res["llm_miss"] > 0)
     return res
 
 
@@ -448,10 +454,11 @@ def _baselines_triviais(rs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
 
 
 def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
-    rodados = [r for r in res if not r.get("nao_rodado")]
+    rodados = [r for r in res if not r.get("nao_rodado") and not r.get("nao_reproduzido")]
     m = _bloco(rodados)
     n = len(rodados) or 1
-    m["n_nao_rodados"] = len(res) - len(rodados)
+    m["n_nao_rodados"] = sum(1 for r in res if r.get("nao_rodado"))
+    m["n_nao_reproduzidos"] = sum(1 for r in res if r.get("nao_reproduzido"))
     m["n_erros_execucao"] = sum(1 for r in rodados if r.get("erro"))
     m["por_rotulo"] = {rot: _bloco([r for r in rodados if r["rotulo"] == rot])
                        for rot in ROTULOS if any(r["rotulo"] == rot for r in rodados)}
@@ -476,6 +483,7 @@ def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
     desc_st = Counter(r.get("descoberta") for r in rodados)
     m["descoberta"] = {k: round(v / n, 4) for k, v in desc_st.items()}
     m["http_miss_total"] = sum(r.get("http_miss", 0) for r in rodados)
+    m["llm_miss_total"] = sum(int(r.get("llm_miss") or 0) for r in res if not r.get("nao_rodado"))
     rec = _recall_por_rotulo(rodados)
     m["recall_por_rotulo"] = rec
     m["acuracia_balanceada"] = round(sum(v["recall"] for v in rec.values()) / len(rec), 4) if rec else None
@@ -500,10 +508,12 @@ def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def comparar(res: List[Dict[str, Any]], baseline: Dict[str, Any]) -> Dict[str, Any]:
     """Delta vs baseline sobre os ids em comum (casos novos não distorcem)."""
-    base_casos = {c["id"]: c for c in baseline.get("casos", []) if not c.get("nao_rodado")}
-    comuns = [r for r in res if not r.get("nao_rodado") and r["id"] in base_casos]
+    base_casos = {c["id"]: c for c in baseline.get("casos", []) if not c.get("nao_rodado")
+                  and not c.get("nao_reproduzido")}
+    comuns = [r for r in res if not r.get("nao_rodado") and not r.get("nao_reproduzido")
+              and r["id"] in base_casos]
     if not comuns:
-        return {"n_comuns": 0}
+        return {"n_comuns": 0, "n_nao_reproduzidos": sum(1 for r in res if r.get("nao_reproduzido"))}
     base_comuns = [base_casos[r["id"]] for r in comuns]
     atual = _bloco_completo(comuns)
     antes = _bloco_completo([{"rotulo": c.get("rotulo"), "nivel": c.get("nivel"),
@@ -567,7 +577,8 @@ def resumo_texto(meta: Dict[str, Any], m: Dict[str, Any], delta: Optional[Dict[s
     sm = (tri.get("sempre_media") or {})
     gd = m.get("erro_grave_por_direcao") or {}
     L = [f"EVAL {meta['nome'] or ''} | modo={meta['modo']} split={meta['split']} n={m.get('n', 0)}"
-         f" (não rodados {m.get('n_nao_rodados', 0)}) | env={meta['env']}",
+         f" (não rodados {m.get('n_nao_rodados', 0)}, não reproduzidos {m.get('n_nao_reproduzidos', 0)})"
+         f" | env={meta['env']}",
          f"  acerto={m.get('acerto')} acerto+parcial={m.get('acerto_com_parcial')} "
          f"erro_grave={m.get('erro_grave')} ({m.get('n_erro_grave')}) indeterminada={m.get('taxa_indeterminada')}",
          f"  balanceada={m.get('acuracia_balanceada')} (sempre_alta={sa.get('acuracia_balanceada')} "
@@ -577,7 +588,8 @@ def resumo_texto(meta: Dict[str, Any], m: Dict[str, Any], delta: Optional[Dict[s
          f"sempre_media acerto={sm.get('acerto')} grave={sm.get('n_erro_grave')}",
          f"  niveis={m.get('niveis')} descoberta={m.get('descoberta')}",
          f"  llm/caso={m.get('llm_chamadas_por_caso')} p50={_fmt_s(m.get('latencia_p50_ms'))} "
-         f"p95={_fmt_s(m.get('latencia_p95_ms'))} erros_exec={m.get('n_erros_execucao')} http_miss={m.get('http_miss_total')}",
+         f"p95={_fmt_s(m.get('latencia_p95_ms'))} erros_exec={m.get('n_erros_execucao')} "
+         f"http_miss={m.get('http_miss_total')} llm_miss={m.get('llm_miss_total')}",
          f"  fallback(frac casos)={m.get('taxa_fallback_por_onde')}",
          f"  serpapi: {m.get('serpapi', {}).get('live_no_eval')} busca(s) live neste eval "
          f"({_saldo(m.get('serpapi', {}))})"]
@@ -606,10 +618,10 @@ def relatorio_md(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str, An
          f"- env: `{meta['env']}` · casos: {meta['arquivos_casos']} · filtros: tags={meta['filtro_tag']} ids={meta['ids']}",
          f"- SerpAPI: {m['serpapi']['live_no_eval']} busca(s) live neste eval ({_saldo(m['serpapi'])})",
          "", "## Métricas", "", "| métrica | valor |", "|---|---|"]
-    for k in ("n", "n_nao_rodados", "acerto", "acerto_com_parcial", "acuracia_balanceada",
+    for k in ("n", "n_nao_rodados", "n_nao_reproduzidos", "acerto", "acerto_com_parcial", "acuracia_balanceada",
               "cobertura", "auc_ordinal", "erro_grave", "n_erro_grave",
               "taxa_indeterminada", "llm_chamadas_por_caso", "latencia_p50_ms", "latencia_p95_ms",
-              "n_erros_execucao", "http_miss_total"):
+              "n_erros_execucao", "http_miss_total", "llm_miss_total"):
         L.append(f"| {k} | {m.get(k)} |")
     L += ["", f"- níveis: `{m.get('niveis')}`", f"- descoberta web: `{m.get('descoberta')}`",
           f"- fallback (fração de casos) por onde: `{m.get('taxa_fallback_por_onde')}`",
@@ -653,10 +665,14 @@ def relatorio_md(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str, An
         if r.get("nao_rodado"):
             L.append(f"| – | {r['id']} | {r['rotulo']} | não rodado | | | | {r.get('motivo')} |")
             continue
+        if r.get("nao_reproduzido"):
+            L.append(f"| ⊘ | {r['id']} | {r['rotulo']} | {r['nivel']} | {'/'.join(r['esperado'])} | "
+                     f"{r['n_fallbacks']} | {r['descoberta']} | `{r['run_id']}` |")
+            continue
         marca = "✅" if r["ok"] else ("🟡" if r["parcial"] else ("🛑" if r["grave"] else "❌"))
         L.append(f"| {marca} | {r['id']} | {r['rotulo']} | {r['nivel']} | {'/'.join(r['esperado'])} | "
                  f"{r['n_fallbacks']} | {r['descoberta']} | `{r['run_id']}` |")
-    errados = [r for r in res if not r.get("nao_rodado") and not r["ok"]]
+    errados = [r for r in res if not r.get("nao_rodado") and not r.get("nao_reproduzido") and not r["ok"]]
     if errados:
         L += ["", "## Para investigar (errados)", ""]
         for r in errados:
@@ -683,7 +699,7 @@ def salvar_baseline(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str,
                     caminho: Path = BASELINE) -> None:
     caminho.write_text(json.dumps({"meta": meta, "metricas": m,
                                    "casos": [{k: r.get(k) for k in ("id", "rotulo", "nivel", "ok", "parcial",
-                                                                    "grave", "nao_rodado", "run_id")}
+                                                                    "grave", "nao_rodado", "nao_reproduzido", "llm_miss", "run_id")}
                                              for r in res]}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 

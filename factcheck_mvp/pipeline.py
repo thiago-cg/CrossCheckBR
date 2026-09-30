@@ -525,8 +525,11 @@ class Pipeline:
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
+        for ai in list(por_af):
+            por_af[ai] = sorted(por_af[ai], key=lambda pi: (str(pecas[pi].get("url") or ""), pi))
         itens_por_af: Dict[int, List[Dict[str, Any]]] = {}
-        for ai, pis in por_af.items():
+        for ai in sorted(por_af):
+            pis = por_af[ai]
             alvo = afs[ai].alvo()
             itens = []
             for pi in pis:
