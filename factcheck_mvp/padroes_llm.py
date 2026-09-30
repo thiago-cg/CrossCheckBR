@@ -1,4 +1,8 @@
-"""RF10: padrões de desinformação no texto.
+"""RF10: padrões de linguagem no texto — SINAL DE ESTILO, fora do nível.
+
+Desde a fase 2 os padrões não entram na decisão (não indicam veracidade: "É falso
+que X" e "X" têm o mesmo estilo). Aparecem no relatório como "sinais de estilo do
+texto (não indicam veracidade)".
 
 Preferência laya não se aplica (é geração de lista explicada) -> LLM local,
 com fallback DETERMINÍSTICO por regex (funciona até sem modelo).
@@ -8,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from . import config
+from . import llm, telemetria
 
 _CATALOGO = [
     ("apelo_urgencia", "apelo a urgência/compartilhamento",
@@ -42,59 +46,10 @@ def _fallback(texto: str) -> List[Dict[str, str]]:
     return achados
 
 
-def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
-    """Retorna (padroes, motor real usado) — recibo honesto no failover."""
-    import httpx
-
-    # 1) OpenRouter quando há chave (mesmo contrato do fallback regex)
-    try:
-        from . import llm_openrouter
-        from . import config as _cfg
-
-        if _cfg.OPENROUTER_API_KEY:
-            rotulos = ",".join(c[0] for c in _CATALOGO)
-            conteudo, _m = llm_openrouter.chat(
-                [{"role": "user",
-                  "content": _INSTRUCAO.format(rotulos=rotulos)
-                  + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
-                max_tokens=500)
-            bruto = (conteudo or "").strip()
-            if bruto.upper() == "NENHUM":
-                return [], "llm-openrouter"
-            saida = []
-            descs = {c[0]: c[1] for c in _CATALOGO}
-            for linha in bruto.splitlines():
-                if ":" not in linha:
-                    continue
-                chave, evid = linha.split(":", 1)
-                chave = chave.strip("- *\t").lower()
-                if chave in descs:
-                    saida.append({"padrao": chave, "descricao": descs[chave],
-                                  "evidencia": evid.strip()[:160]})
-            if not saida and bruto:
-                # Lixo sem linhas parseáveis: falha p/ tentar local/regex
-                raise RuntimeError("openrouter sem padroes parseaveis")
-            return saida, "llm-openrouter"
-    except Exception:
-        pass
-    modelo = config.UNSLOTH_MODEL_NAME
-    if not modelo:
-        r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", timeout=15)
-        r.raise_for_status()
-        itens = r.json().get("data", [])
-        modelo = itens[0]["id"] if itens else ""
-        if not modelo:
-            raise RuntimeError("sem modelo local")
-    rotulos = ",".join(c[0] for c in _CATALOGO)
-    payload = {"model": modelo,
-               "messages": [{"role": "user",
-                             "content": _INSTRUCAO.format(rotulos=rotulos)
-                             + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
-               "temperature": 0.0, "max_tokens": 500}
-    r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload, timeout=60)
-    r.raise_for_status()
-    bruto = (r.json()["choices"][0]["message"]["content"] or "").strip()
-    if bruto.upper() == "NENHUM":
+def _parse(bruto: str) -> List[Dict[str, str]]:
+    """Linhas 'PADRAO: trecho' -> lista. 'NENHUM' (com ou sem pontuação) = lista vazia válida."""
+    bruto = (bruto or "").strip()
+    if re.sub(r"[^a-z]", "", bruto.lower()) in ("nenhum", "nenhuma", "none"):
         return []
     saida = []
     descs = {c[0]: c[1] for c in _CATALOGO}
@@ -102,10 +57,24 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
         if ":" not in linha:
             continue
         chave, evid = linha.split(":", 1)
-        chave = chave.strip("- *\t").lower()
+        chave = chave.strip("- *\t`").lower()
         if chave in descs:
             saida.append({"padrao": chave, "descricao": descs[chave], "evidencia": evid.strip()[:160]})
-    return saida, "llm-local"
+    if not saida and bruto:
+        raise RuntimeError("resposta sem padrões parseáveis")
+    return saida
+
+
+def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
+    """Retorna (padroes, motor real usado) — sempre uma TUPLA (bug C5: `return []`)."""
+    rotulos = ",".join(c[0] for c in _CATALOGO)
+    res = llm.chat_texto(
+        [{"role": "user", "content": _INSTRUCAO.format(rotulos=rotulos)
+          + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
+        finalidade="padroes", max_tokens=1500)
+    if not res.ok:
+        raise RuntimeError(res.erro or "LLM indisponível")
+    return _parse(res.texto), f"{res.motor}:{res.modelo}"
 
 
 def analisar_padroes(texto: str, usar_llm: bool = True) -> Dict[str, Any]:
@@ -114,6 +83,6 @@ def analisar_padroes(texto: str, usar_llm: bool = True) -> Dict[str, Any]:
         try:
             achados, motor = _via_llm(texto)
             return {"padroes": achados, "motor": motor}
-        except Exception:
-            pass
-    return {"padroes": _fallback(texto), "motor": "regex-deterministico"}
+        except Exception as e:
+            telemetria.fallback("padroes", f"{type(e).__name__}: {e}")
+    return {"padroes": _fallback(texto), "motor": "fallback-regex"}

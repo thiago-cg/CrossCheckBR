@@ -9,3 +9,7 @@ uvicorn>=0.29
 pytest>=8.0
 rank-bm25>=0.2.2
 python-multipart>=0.0.9
+lxml>=5.0            # ingestor: parse de RSS/Atom (recover=True)
+nltk>=3.8            # índice de checagens: stopwords PT + RSLPStemmer (recurso 'rslp'; fallback sem stemming)
+trafilatura>=2.0     # extracao.py: corpo principal em cascata (JSON-LD -> trafilatura -> seletor -> regex)
+beautifulsoup4>=4.12 # extracao.py: nível seletor do catálogo + recorte p/ ReaderLM (já vem com crawl4ai)

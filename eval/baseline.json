@@ -1,0 +1,388 @@
+{
+ "meta": {
+  "timestamp": "20260928-170220",
+  "nome": "antes",
+  "modo": "record",
+  "split": "dev",
+  "filtro_tag": null,
+  "ids": null,
+  "env": {
+   "INDICE_CHECAGENS": "0"
+  },
+  "paralelo": 3,
+  "timeout_caso_s": 400.0,
+  "max_buscas_serpapi": null,
+  "arquivos_casos": [
+   "eval/casos.jsonl"
+  ],
+  "git": "ed1d168+dirty",
+  "n_casos": 12
+ },
+ "metricas": {
+  "n": 12,
+  "acerto": 0.3333,
+  "acerto_com_parcial": 0.3333,
+  "n_erro_grave": 4,
+  "erro_grave": 0.3333,
+  "taxa_indeterminada": 0.4167,
+  "niveis": {
+   "baixa": 7,
+   "indeterminada": 5
+  },
+  "n_nao_rodados": 0,
+  "n_erros_execucao": 0,
+  "por_rotulo": {
+   "falso": {
+    "n": 7,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 4,
+    "erro_grave": 0.5714,
+    "taxa_indeterminada": 0.4286,
+    "niveis": {
+     "baixa": 4,
+     "indeterminada": 3
+    }
+   },
+   "verdadeiro": {
+    "n": 4,
+    "acerto": 0.75,
+    "acerto_com_parcial": 0.75,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 0.25,
+    "niveis": {
+     "baixa": 3,
+     "indeterminada": 1
+    }
+   },
+   "sem_evidencia": {
+    "n": 1,
+    "acerto": 1.0,
+    "acerto_com_parcial": 1.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 1.0,
+    "niveis": {
+     "indeterminada": 1
+    }
+   }
+  },
+  "por_tag": {
+   "adversarial": {
+    "n": 8,
+    "acerto": 0.25,
+    "acerto_com_parcial": 0.25,
+    "n_erro_grave": 2,
+    "erro_grave": 0.25,
+    "taxa_indeterminada": 0.5,
+    "niveis": {
+     "baixa": 4,
+     "indeterminada": 4
+    }
+   },
+   "caixa": {
+    "n": 1,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 1.0,
+    "niveis": {
+     "indeterminada": 1
+    }
+   },
+   "curto": {
+    "n": 1,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 1,
+    "erro_grave": 1.0,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 1
+    }
+   },
+   "dengue": {
+    "n": 3,
+    "acerto": 0.3333,
+    "acerto_com_parcial": 0.3333,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 0.6667,
+    "niveis": {
+     "indeterminada": 2,
+     "baixa": 1
+    }
+   },
+   "eleicoes": {
+    "n": 1,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 1,
+    "erro_grave": 1.0,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 1
+    }
+   },
+   "institucional": {
+    "n": 1,
+    "acerto": 1.0,
+    "acerto_com_parcial": 1.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 1
+    }
+   },
+   "negacao": {
+    "n": 2,
+    "acerto": 1.0,
+    "acerto_com_parcial": 1.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 2
+    }
+   },
+   "politica": {
+    "n": 2,
+    "acerto": 0.5,
+    "acerto_com_parcial": 0.5,
+    "n_erro_grave": 1,
+    "erro_grave": 0.5,
+    "taxa_indeterminada": 0.5,
+    "niveis": {
+     "baixa": 1,
+     "indeterminada": 1
+    }
+   },
+   "relato": {
+    "n": 1,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 1.0,
+    "niveis": {
+     "indeterminada": 1
+    }
+   },
+   "satira": {
+    "n": 1,
+    "acerto": 0.0,
+    "acerto_com_parcial": 0.0,
+    "n_erro_grave": 1,
+    "erro_grave": 1.0,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 1
+    }
+   },
+   "saude": {
+    "n": 9,
+    "acerto": 0.3333,
+    "acerto_com_parcial": 0.3333,
+    "n_erro_grave": 2,
+    "erro_grave": 0.2222,
+    "taxa_indeterminada": 0.4444,
+    "niveis": {
+     "baixa": 5,
+     "indeterminada": 4
+    }
+   },
+   "vacina": {
+    "n": 2,
+    "acerto": 0.5,
+    "acerto_com_parcial": 0.5,
+    "n_erro_grave": 1,
+    "erro_grave": 0.5,
+    "taxa_indeterminada": 0.0,
+    "niveis": {
+     "baixa": 2
+    }
+   },
+   "vago": {
+    "n": 1,
+    "acerto": 1.0,
+    "acerto_com_parcial": 1.0,
+    "n_erro_grave": 0,
+    "erro_grave": 0.0,
+    "taxa_indeterminada": 1.0,
+    "niveis": {
+     "indeterminada": 1
+    }
+   }
+  },
+  "destaque_indice": {},
+  "taxa_fallback_por_onde": {
+   "openrouter.chat": 1.0,
+   "juiz": 1.0,
+   "descoberta-site.jev": 0.9167,
+   "padroes": 0.5833,
+   "afirmacoes": 0.0833,
+   "juiz.lexico-top3": 0.0833
+  },
+  "fallbacks_total_por_onde": {
+   "openrouter.chat": 240,
+   "juiz": 120,
+   "descoberta-site.jev": 17,
+   "padroes": 7,
+   "afirmacoes": 1,
+   "juiz.lexico-top3": 1
+  },
+  "descartes_por_motivo": {
+   "corpo curto/JS/paywall": 13,
+   "fora do catalogo": 9,
+   "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1082)": 2,
+   "HTTP 403 para https://noticias.uol.com.br/comprova/ultimas-noticias/2020/10/29/vacina-de-covid-19-nao-causa-cancer-danos": 1,
+   "HTTP 403 para https://www.drogasil.com.br/search?w=ibuprofeno": 1,
+   "HTTP 403 para https://apnews.com/article/2022-midterm-elections-voting-presidential-conspiracy-theories-colorado-53c90f7": 1,
+   "HTTP 403 para https://www.sjp.pr.gov.br/sjpcontradengue/": 1,
+   "HTTP 403 para https://www.qconcursos.com/questoes-de-concursos/questoes/f4d59222-43": 1,
+   "HTTP 403 para https://economia.uol.com.br/noticias/estadao-conteudo/2026/05/13/genialquaest-para-46-economia-piorou-nos-": 1,
+   "HTTP 403 para https://www.legisquebec.gouv.qc.ca/fr/document/lc/n-1.1/20021023?langCont=en": 1
+  },
+  "llm_chamadas_total": 24,
+  "llm_chamadas_por_caso": 2.0,
+  "latencia_p50_ms": 39944.5,
+  "latencia_p95_ms": 56259.7,
+  "latencia_media_ms": 39080.9,
+  "descoberta": {
+   "rodou": 1.0
+  },
+  "http_miss_total": 0,
+  "serpapi": {
+   "live_no_eval": 33,
+   "usadas_total": 36,
+   "restantes": null,
+   "orcamento": null,
+   "usadas_antes": 3
+  }
+ },
+ "casos": [
+  {
+   "id": "cafe_cura_cancer",
+   "rotulo": "falso",
+   "nivel": "baixa",
+   "ok": false,
+   "parcial": false,
+   "grave": true,
+   "nao_rodado": null,
+   "run_id": "20260928-170220-fae353"
+  },
+  {
+   "id": "cafe_cura_cancer_caixa",
+   "rotulo": "falso",
+   "nivel": "indeterminada",
+   "ok": false,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170220-4f7b79"
+  },
+  {
+   "id": "cafe_nao_cura_cancer",
+   "rotulo": "verdadeiro",
+   "nivel": "baixa",
+   "ok": true,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170220-6f2efc"
+  },
+  {
+   "id": "vacina_altera_dna",
+   "rotulo": "falso",
+   "nivel": "baixa",
+   "ok": false,
+   "parcial": false,
+   "grave": true,
+   "nao_rodado": null,
+   "run_id": "20260928-170248-05d34b"
+  },
+  {
+   "id": "falso_que_vacina_dna",
+   "rotulo": "verdadeiro",
+   "nivel": "baixa",
+   "ok": true,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170252-fb9a49"
+  },
+  {
+   "id": "ibuprofeno_cura_dengue",
+   "rotulo": "falso",
+   "nivel": "indeterminada",
+   "ok": false,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170316-c7c1a7"
+  },
+  {
+   "id": "ibuprofeno_piora_dengue",
+   "rotulo": "verdadeiro",
+   "nivel": "indeterminada",
+   "ok": false,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170331-691fa9"
+  },
+  {
+   "id": "relato_cafe",
+   "rotulo": "falso",
+   "nivel": "indeterminada",
+   "ok": false,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170332-754d8b"
+  },
+  {
+   "id": "urnas_fraudadas_2022",
+   "rotulo": "falso",
+   "nivel": "baixa",
+   "ok": false,
+   "parcial": false,
+   "grave": true,
+   "nao_rodado": null,
+   "run_id": "20260928-170354-89773c"
+  },
+  {
+   "id": "dengue_aedes",
+   "rotulo": "verdadeiro",
+   "nivel": "baixa",
+   "ok": true,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170355-f15e11"
+  },
+  {
+   "id": "economia_piorou",
+   "rotulo": "sem_evidencia",
+   "nivel": "indeterminada",
+   "ok": true,
+   "parcial": false,
+   "grave": false,
+   "nao_rodado": null,
+   "run_id": "20260928-170409-680c76"
+  },
+  {
+   "id": "satira_feriado",
+   "rotulo": "falso",
+   "nivel": "baixa",
+   "ok": false,
+   "parcial": false,
+   "grave": true,
+   "nao_rodado": null,
+   "run_id": "20260928-170426-646585"
+  }
+ ]
+}

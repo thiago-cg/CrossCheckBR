@@ -1,9 +1,9 @@
 """Contratos + neutralidade da redação (RF12/RNF02)."""
 import pytest
 
-from factcheck_mvp.agregador import FRASES_BINARIAS, agregar
-from factcheck_mvp.schemas import EntradaConsulta, RelatorioChecagem
-from factcheck_mvp.schemas import SinalAnalise
+from factcheck_mvp.agregador import EXPRESSOES_PROIBIDAS, FRASES_BINARIAS, verificar_neutralidade
+from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
+from factcheck_mvp.schemas import Afirmacao, EntradaConsulta, FonteEvidencia, RelatorioChecagem
 
 
 def test_entrada_rejeita_vazia():
@@ -16,57 +16,35 @@ def test_entrada_tipos():
         assert EntradaConsulta(tipo=tipo, conteudo="conteúdo válido aqui").tipo == tipo
 
 
-def _sinais(*tuplas):
-    return [SinalAnalise(motor=m, rotulo=r, valor=v, confianca=c) for m, r, v, c in tuplas]
+def test_afirmacao_compat_e_alvo():
+    a = Afirmacao(texto="Café não cura câncer", nucleo="Café cura câncer", polaridade="nega")
+    assert a.alvo() == "Café cura câncer"
+    assert Afirmacao(texto="X acontece").alvo() == "X acontece" and Afirmacao(texto="y").polaridade == "afirma"
 
 
-def test_sem_sinais_indeterminada():
-    out = agregar([])
-    assert out["propensao"] == "indeterminada"
+def _dec(classe, n, veredito=None, pol="afirma"):
+    itens = [ItemEvidencia(url=f"https://s{i}.com/x", cluster=f"s{i}", classe=classe, motor="llm-juiz:x",
+                           curada=True, corpo_lido=True, veredito=veredito, veiculo="Fato ou Fake")
+             for i in range(n)]
+    return decidir(Evidencias(afirmacoes=[AfirmacaoDecisao(texto="x", polaridade=pol)], itens=itens))
 
 
-@pytest.mark.parametrize("sinais,esperada", [
-    ([("veredito-existente", "v", "FALSO", 0.9)], "alta"),
-    ([("veredito-existente", "v", "VERDADEIRO", 0.9)], "baixa"),
-    ([("modelo-fake", "m", "0.85", 0.8)], "alta"),
-    ([("modelo-fake", "m", "0.10", 0.8)], "baixa"),
-])
-def test_agregador_extremos(sinais, esperada):
-    assert agregar(_sinais(*sinais))["propensao"] == esperada
+@pytest.mark.parametrize("dec", [_dec("REFUTA", 3), _dec("SUSTENTA", 3), _dec("REFUTA", 1, "FALSO"),
+                                 _dec("RELATA_SEM_ENDOSSO", 2, "VERDADEIRO"), _dec("NAO_TRATA", 2),
+                                 _dec("REFUTA", 2, pol="nega")])
+def test_justificativa_nunca_binaria_nem_opinativa(dec):
+    texto = f"{dec.justificativa()} {dec.why_1linha()} {dec.header()}".lower()
+    assert not any(f in texto for f in FRASES_BINARIAS), texto
+    assert verificar_neutralidade(texto) == [] and not any(e in texto for e in EXPRESSOES_PROIBIDAS)
 
 
-def test_justificativa_nunca_binaria():
-    combos = [
-        [("veredito-existente", "v", "FALSO", 0.9)],
-        [("veredito-existente", "v", "VERDADEIRO", 0.9)],
-        [("corroboracao", "c", "cobertura ampla", 0.8), ("modelo-fake", "m", "0.9", 0.7)],
-        [("llm-padroes", "p", "encontrados: apelo_urgencia", 0.6)],
-    ]
-    for c in combos:
-        texto = agregar(_sinais(*c))["justificativa"].lower()
-        assert not any(f in texto for f in FRASES_BINARIAS), texto
-
-
-def test_justificativa_sem_expressoes_proibidas():
-    from factcheck_mvp.agregador import EXPRESSOES_PROIBIDAS, agregar, verificar_neutralidade
-    out = agregar(_sinais(("veredito-existente", "v", "FALSO", 0.9),
-                          ("corroboracao", "c", "cobertura ampla", 0.8)))
-    assert verificar_neutralidade(out["justificativa"]) == []
-    assert not any(e in out["justificativa"].lower() for e in EXPRESSOES_PROIBIDAS)
-
-
-def test_cobertura_ampla_pesa_mesmo_com_valor_neutro():
-    # Bug real (resposta Lula/economia): rotulo "cobertura ampla" + valor neutro
-    # pesava 0 — o 0.75 exibido não contava. Agora direção lê rótulo+valor.
-    from factcheck_mvp.agregador import _direcao, agregar
-    s = _sinais(("corroboracao", "cobertura ampla",
-                 "informação presente em 3+ veículos independentes", 0.75))[0]
-    assert _direcao(s) == -0.5
-    out = agregar([s])
-    assert out["score"] < 0, out
-
-
-def test_relatorio_serializa():
-    rel = RelatorioChecagem(propensao="media", justificativa="j",
-                            consulta=EntradaConsulta(tipo="texto", conteudo="algum texto aqui"))
-    assert rel.model_dump()["versao"].startswith("mvp-")
+def test_relatorio_serializa_com_decisao_e_postura():
+    dec = _dec("REFUTA", 3)
+    rel = RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(),
+                            consulta=EntradaConsulta(tipo="texto", conteudo="algum texto aqui"),
+                            fontes=[FonteEvidencia(url="https://a", postura="REFUTA", citacao="x",
+                                                   citacao_verificada=True, relevante=True)],
+                            decisao=dec.to_dict())
+    d = rel.model_dump()
+    assert d["versao"].startswith("mvp-") and d["decisao"]["nivel"] == "alta"
+    assert d["fontes"][0]["postura"] == "REFUTA"

@@ -7,3 +7,15 @@ __pycache__/
 output*/
 *.log
 .crawl4ai/
+# Modelos locais pesados (BERTimbau 400MB+): nunca commitar; ligar via FAKE_MODEL_PATH
+bertimbau-*/
+*.safetensors
+*.bin
+# Telemetria (traces por execução) e resultados de eval (versionar só eval/baseline.json)
+runs/
+eval/resultados/*/
+eval/serpapi_uso.json.lock
+# Cassetes de replay (HTTP+LLM gravados): centenas de MB e HTML de terceiros — regravar com `eval.run --modo record`
+eval/cassettes/
+# Contador local de uso da SerpAPI (estado de máquina)
+eval/serpapi_uso.json

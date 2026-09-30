@@ -6,12 +6,13 @@ Chave só via env local (.env, nunca logada, nunca no recibo).
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, List, Tuple
 
-from . import config
+from . import config, replay, telemetria
 
 log = logging.getLogger("factcheck.llm_openrouter")
 _URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -42,8 +43,6 @@ def _provider() -> Dict[str, Any]:
 
 
 def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) -> str:
-    import httpx
-
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY ausente")
     payload: Dict[str, Any] = {"model": modelo, "messages": messages,
@@ -51,15 +50,17 @@ def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) ->
     prov = _provider()
     if prov:
         payload["provider"] = prov  # fallbacks p/ outros providers do MESMO modelo seguem ativos
-    r = httpx.post(
-        _URL,
+    esforco = os.getenv("OPENROUTER_REASONING_EFFORT", "").strip()
+    if esforco:  # low|medium|high: limita o raciocínio (que conta nos max_tokens)
+        payload["reasoning"] = {"effort": esforco}
+    r = replay.llm_post(
+        _URL, payload,
         headers={
             "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
             "HTTP-Referer": "https://crosscheckbr.local",
             "X-Title": "CrossCheckBR-MVP",
         },
-        json=payload,
-        timeout=timeout_s,
+        timeout=timeout_s, motor="openrouter",
     )
     r.raise_for_status()
     data = r.json()
@@ -76,17 +77,19 @@ def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) ->
 
 
 def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
-         timeout_s: int = 0) -> Tuple[str, str]:
+         timeout_s: int = 0, modelos: List[str] | None = None) -> Tuple[str, str]:
     """Retorna (texto, modelo_usado). Tenta primary -> fallback. Respeita cap diário.
 
     Resposta vazia (200 com conteúdo vazio, comum no StreamLake) ganha 1 retry
     no MESMO modelo antes de cair p/ o próximo — evita queimar o fallback à toa.
     """
     if _cap_estourado():
+        telemetria.fallback("openrouter.chat", "teto LLM diário atingido")
         raise RuntimeError("teto LLM diário atingido")
     mt = max_tokens or config.OPENROUTER_MAX_TOKENS
     ts = timeout_s or config.OPENROUTER_TIMEOUT_S
-    modelos = [m for m in (config.OPENROUTER_MODEL, config.OPENROUTER_FALLBACK_MODEL) if m]
+    if not modelos:  # `modelos` = ordem própria da chamada (ex.: modelo do juiz); vazio = padrão global
+        modelos = [m for m in (config.OPENROUTER_MODEL, config.OPENROUTER_FALLBACK_MODEL) if m]
     ultimo_erro: Exception | None = None
     for modelo in modelos:
         for tentativa in range(2):
@@ -104,6 +107,7 @@ def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
                     continue
                 break
         log.warning("openrouter falhou model=%s: %s", modelo, str(ultimo_erro)[:150])
+        telemetria.fallback("openrouter.chat", ultimo_erro, modelo=modelo)
     raise RuntimeError(f"openrouter primary+fallback falharam: {ultimo_erro}")
 
 
@@ -114,23 +118,21 @@ def decisions(model: str, state: Any, questions: Dict[str, Any],
     Mesmo cap diário do chat. Sem provider.order StreamLake (Jev é TypeSafe).
     Nunca envia a chave no log. Levanta em erro/HTTP não-2xx (caller tem fallback).
     """
-    import httpx
-
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY ausente")
     if _cap_estourado():
         raise RuntimeError("teto LLM diário atingido")
     payload: Dict[str, Any] = {"model": model, "state": state, "questions": questions}
-    r = httpx.post(
-        _URL_DECISIONS,
+    r = replay.llm_post(
+        _URL_DECISIONS, payload,
         headers={
             "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
             "HTTP-Referer": "https://crosscheckbr.local",
             "X-Title": "CrossCheckBR-MVP",
             "Content-Type": "application/json",
         },
-        json=payload,
-        timeout=timeout_s or config.JEV_TIMEOUT_S,
+        timeout=timeout_s or config.JEV_TIMEOUT_S, motor="openrouter-decisions",
+        extrair=lambda d: str((d or {}).get("answers")),
     )
     if r.status_code >= 400:
         # corpo pode embutir validação; trunca p/ não vazar payload gigante

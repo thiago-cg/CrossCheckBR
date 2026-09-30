@@ -499,7 +499,11 @@
       "observacoes": "Veredito costuma vir no chapéu/título ('É #FAKE', 'É FATO'). Extrair selo via LLM com instrução específica.",
       "exemplo_urls": [],
       "responsavel": "Guilherme",
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "Fato ou Fake",
+        "g1 Fato ou Fake"
+      ]
     },
     {
       "id": "cnn-brasil",
@@ -564,7 +568,13 @@
       "observacoes": "Paywall/anti-bot agressivo em parte do conteúdo; respeitar e usar apenas trechos públicos/metadata.",
       "exemplo_urls": [],
       "responsavel": null,
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases": [
+        "uol.com.br"
+      ],
+      "aliases_nome": [
+        "UOL"
+      ]
     },
     {
       "id": "folha",
@@ -595,7 +605,12 @@
       "observacoes": "Paywall; crawler deve coletar homepage + metadata aberta, sem burlar paywall.",
       "exemplo_urls": [],
       "responsavel": null,
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "Folha",
+        "Folha de S. Paulo",
+        "Folha de São Paulo"
+      ]
     },
     {
       "id": "estadao",
@@ -625,7 +640,10 @@
       "observacoes": "Paywall parcial; mesmo cuidado da Folha.",
       "exemplo_urls": [],
       "responsavel": null,
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "O Estado de S. Paulo"
+      ]
     },
     {
       "id": "bbc-brasil",
@@ -656,7 +674,13 @@
       "observacoes": "HTML semântico e estável; ótimo para JsonCss. Sem paywall.",
       "exemplo_urls": [],
       "responsavel": null,
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases": [
+        "bbc.co.uk/portuguese"
+      ],
+      "aliases_nome": [
+        "BBC Brasil"
+      ]
     },
     {
       "id": "poder360",
@@ -752,7 +776,15 @@
       "observacoes": "Taxonomia própria de selos; normalizar para o enum canônico no pós-processamento.",
       "exemplo_urls": [],
       "responsavel": "Eliane",
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases": [
+        "agencialupa.org",
+        "piaui.folha.uol.com.br/lupa"
+      ],
+      "aliases_nome": [
+        "Agência Lupa",
+        "Lupa"
+      ]
     },
     {
       "id": "fato-ou-boato-tse",
@@ -811,7 +843,10 @@
       "observacoes": "Coalizão de veículos; selo próprio. Cobertura compartilhada Eliane + Guilherme.",
       "exemplo_urls": [],
       "responsavel": "Eliane, Guilherme",
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "Comprova"
+      ]
     },
     {
       "id": "saude-sem-fake",
@@ -901,7 +936,10 @@
       "observacoes": "Um dos mais antigos do BR; selo costuma estar no título ('É farsa!', 'Verdadeiro'). WordPress.",
       "exemplo_urls": [],
       "responsavel": "Daltro",
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "Efarsas"
+      ]
     },
     {
       "id": "valorinveste-checagem",
@@ -991,7 +1029,10 @@
       "observacoes": "Foco em boatos de WhatsApp/redes; selo frequentemente no título. WordPress.",
       "exemplo_urls": [],
       "responsavel": "Tito",
-      "subsecoes": []
+      "subsecoes": [],
+      "aliases_nome": [
+        "Boatos"
+      ]
     },
     {
       "id": "tatu",
@@ -1353,6 +1394,238 @@
       "subsecoes": [],
       "origem_catalogo": "descoberta-automatica",
       "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "hnscpm-org-br",
+      "nome": "Ações importantes que ajudam a combater a dengue",
+      "tipo": "geral",
+      "homepage": "https://www.hnscpm.org.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "servicos",
+        "blog",
+        "hospital",
+        "internacao",
+        "convenios",
+        "portal-transparencia",
+        "politica-de-privacidade",
+        "doacao"
+      ],
+      "article_url_patterns": [
+        "/blog/",
+        "/blog/acoes-importantes-que-ajudam-combater-dengue/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.hnscpm.org.br/blog/acoes-importantes-que-ajudam-combater-dengue"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "difusora95-com-br",
+      "nome": "Entenda as fases da dengue e os sintomas relacionados a cada uma - Rádio Difusor",
+      "tipo": "geral",
+      "homepage": "https://difusora95.com.br/",
+      "rss": [],
+      "sitemap": "https://difusora95.com.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/noticias/",
+        "/noticias/entenda-as-fases-da-dengue-e-os-sintomas-relacionados-a-cada-uma/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://difusora95.com.br/noticias/entenda-as-fases-da-dengue-e-os-sintomas-relacionados-a-cada-uma/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "tocantins-jornalopcao-com-br",
+      "nome": "Jornal Opção | Tocantins",
+      "tipo": "geral",
+      "homepage": "https://tocantins.jornalopcao.com.br/",
+      "rss": [
+        "https://tocantins.jornalopcao.com.br/feed/"
+      ],
+      "sitemap": "https://tocantins.jornalopcao.com.br/sitemap.xml",
+      "editorias": [
+        "noticias",
+        "bastidores",
+        "categoria",
+        "colunas-e-blogs",
+        "cidades",
+        "politica",
+        "author",
+        "tocantins"
+      ],
+      "article_url_patterns": [
+        "/noticias/",
+        "/noticias/governo-derruba-506-sites-de-apostas-apos-mp-que-proibiu-bets-no-brasil-600733/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://tocantins.jornalopcao.com.br/noticias/governo-derruba-506-sites-de-apostas-apos-mp-que-proibiu-bets-no-brasil-600733/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "bandab-com-br",
+      "nome": "Banda B",
+      "tipo": "geral",
+      "homepage": "https://www.bandab.com.br/",
+      "rss": [
+        "https://www.bandab.com.br/feed/",
+        "https://www.bandab.com.br/web-stories/feed/"
+      ],
+      "sitemap": "https://www.bandab.com.br/sitemap.xml",
+      "editorias": [
+        "esporte",
+        "variedades",
+        "cultura",
+        "radio",
+        "ultimas-noticias",
+        "curitiba",
+        "tags",
+        "regiao-metropolitana-de-curitiba"
+      ],
+      "article_url_patterns": [
+        "/economia/",
+        "/economia/pt-aprensenta-projeto-para-proibir-bets-no-brasil-setor-rendeu-r-995-bi-em-impostos-em-2025/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody'], main, .post-content"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.bandab.com.br/economia/pt-aprensenta-projeto-para-proibir-bets-no-brasil-setor-rendeu-r-995-bi-em-impostos-em-2025/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "folhamax-com",
+      "nome": "Aliado de Lula, senador de MT quer proibir bets no Brasil | FOLHAMAX | ltimas Notcias de Cuiab e Mato Grosso",
+      "tipo": "geral",
+      "homepage": "https://www.folhamax.com/",
+      "rss": [
+        "https://www.folhamax.com/rss.php"
+      ],
+      "sitemap": null,
+      "editorias": [
+        "politica",
+        "policia",
+        "mundo",
+        "cidades",
+        "opiniao",
+        "economia",
+        "entrelinhas",
+        "cultura"
+      ],
+      "article_url_patterns": [
+        "/politica/",
+        "/politica/aliado-de-lula-senador-de-mt-quer-proibir-bets-no-brasil/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.folhamax.com/politica/aliado-de-lula-senador-de-mt-quer-proibir-bets-no-brasil/567244"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "sbtnews-sbt-com-br",
+      "nome": "SBT News",
+      "tipo": "geral",
+      "homepage": "https://sbtnews.sbt.com.br/",
+      "rss": [],
+      "sitemap": "https://sbtnews.sbt.com.br/sitemap.xml",
+      "editorias": [
+        "noticia",
+        "noticias",
+        "colunas",
+        "videos",
+        "colunistas",
+        "programas",
+        "autores"
+      ],
+      "article_url_patterns": [
+        "/noticia/",
+        "/noticia/economia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://sbtnews.sbt.com.br/noticia/economia/governo-bloqueia-14-bets-por-falta-de-medidas-de-seguranca"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
+    },
+    {
+      "id": "coracaoevida-com-br",
+      "nome": "Coração &amp; Vida",
+      "tipo": "geral",
+      "homepage": "https://coracaoevida.com.br/",
+      "rss": [],
+      "sitemap": "https://coracaoevida.com.br/sitemap_index.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/cafe-reduz-em-ate-26-risco-de-cancer-colorretal-diz-pesquisa/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-09-28 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://coracaoevida.com.br/cafe-reduz-em-ate-26-risco-de-cancer-colorretal-diz-pesquisa/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-09-28"
     }
   ],
   "css_extraction_schemas": {

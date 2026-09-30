@@ -187,7 +187,8 @@ def formatar(rel: RelatorioChecagem) -> str:
         for i, f in enumerate(uteis[:3], 1):
             selo = f" [selo: {f.veredito}]" if f.veredito else ""
             corpo = "📄 corpo lido" if getattr(f, "corpo_lido", False) else "📰 só título"
-            term = f" 🌡{f.score_juiz:+d}" if getattr(f, "score_juiz", None) is not None else ""
+            term = (f" [{f.postura}]" if getattr(f, "postura", None) else
+                    f" 🌡{f.score_juiz:+d}" if getattr(f, "score_juiz", None) is not None else "")
             linhas.append(f"{i}. {f.portal_nome or 'web'}{selo} ({corpo}{term}): {f.titulo[:90]}")
             if getattr(f, "quote", None):
                 linhas.append(f"   “{f.quote[:140]}”")
@@ -206,7 +207,8 @@ def formatar(rel: RelatorioChecagem) -> str:
             else:
                 linhas.append(f"Modelo de detecção: {s.valor} ({s.rotulo}).")
             break
-    outros = [f"{s.motor} {s.confianca:.2f}" for s in rel.sinais if s.motor != "modelo-fake"]
+    outros = [f"{s.motor} {s.confianca:.2f}" for s in rel.sinais
+              if s.motor != "modelo-fake" and s.confianca is not None]  # estilo (confiança None) fora
     if outros:
         linhas.append("Sinais (confiança): " + "; ".join(outros[:6]) + ".")
     linhas.append("")
