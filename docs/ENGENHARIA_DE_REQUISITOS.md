@@ -5,7 +5,7 @@
 | **Produto** | Crosscheck BR — checagem cruzada de fatos em larga escala |
 | **Repositório principal** | `thiago-cg/CrossCheckBR` |
 | **Repositório do modelo e dos dados** | `thiago-cg/FakenewsBR` |
-| **Versão do sistema** | `mvp-0.2.0` |
+| **Versão do sistema** | `mvp-0.2.0`, código da `main` em `17fc2bd` (pull request nº 4) |
 | **Data deste documento** | 30 de setembro de 2026 |
 | **Equipe** | Thiago Correia Gonzaga, Gabriella Oliveira de Souza Dias, Maria Eduarda Denis Duarte Marques, Guilherme Silva Dutra, Eliane Orlandin do Carmo, Daltro Oliveira Vinuto |
 
@@ -16,8 +16,9 @@ código. As situações usam três valores:
 - **Parcial**: implementado, com uma lacuna descrita no próprio requisito.
 - **Pendente**: ainda não implementado.
 
-Os itens marcados com **†** estão na branch `melhorias/revisao-arquitetura`,
-em revisão, e ainda não foram integrados à branch principal.
+Este documento descreve a branch `main` depois do pull request nº 4
+(telemetria, avaliação e núcleo de decisão). Os itens marcados com **†** existem
+só na branch `melhorias/revisao-arquitetura`, ainda não integrada (P01).
 
 **Onde está cada informação.** Cada dado fica em um único lugar; os demais
 pontos apontam para ele.
@@ -52,18 +53,23 @@ avaliação.
 > probabilístico e não emite veredito. Ele nunca afirma que algo "é falso" ou
 > "é verdade". O objetivo é dar à pessoa os elementos para que ela mesma avalie.
 
-A avaliação combina quatro tipos de sinal:
+A avaliação vem só de evidência sobre a **veracidade** da afirmação:
 
-1. **Checagens existentes**: o que as agências de checagem já publicaram sobre
-   a afirmação.
-2. **Corroboração**: em quantos veículos de comunicação independentes a
-   informação aparece, e se eles concordam entre si.
-3. **Modelo próprio de aprendizado de máquina**: um classificador treinado
-   com textos rotulados em português, que estima a probabilidade de o texto
-   ser desinformação.
-4. **Padrões textuais**: marcas típicas de desinformação no texto, como apelo
-   à urgência e fonte vaga, identificadas por um modelo de linguagem ou por
-   regras fixas.
+1. **Checagens existentes**: o selo que uma agência de checagem já deu à
+   afirmação, lido de forma tipada (por exemplo, "Distorcido" vira
+   "enganoso"), e só quando a página trata da afirmação.
+2. **Postura das fontes**: cada notícia encontrada é julgada como
+   "sustenta", "refuta", "relata sem endossar" ou "não trata", com um trecho
+   citado que o sistema confere no texto da fonte. Veículos que republicam o
+   mesmo conteúdo contam como um só.
+
+Dois sinais aparecem na resposta, mas **não entram na avaliação** (RN11),
+porque medem o estilo do texto e não a veracidade:
+
+3. **Modelo próprio de aprendizado de máquina**: estima a probabilidade de o
+   texto ser desinformação a partir do estilo.
+4. **Padrões textuais**: marcas típicas de desinformação, como apelo à
+   urgência e fonte vaga.
 
 ### 1.2 Objetivos sociais e de negócio
 
@@ -108,22 +114,29 @@ números medidos; onde não há medição, isso está dito. As metas são
 <div class="cc-kpis">
 <div class="cc-kpi"><span class="cc-kpi-rotulo">IND01 · Transparência</span><span class="cc-kpi-valor">100%</span><span class="cc-kpi-texto">Respostas com fontes, etapas e limitações. Garantido por construção e por teste automatizado. Meta: 100%.</span></div>
 <div class="cc-kpi"><span class="cc-kpi-rotulo">IND02 · Neutralidade</span><span class="cc-kpi-valor">100%</span><span class="cc-kpi-texto">Respostas sem conclusão binária e sem termos partidários, nos testes automatizados. Meta: 100%.</span></div>
-<div class="cc-kpi"><span class="cc-kpi-rotulo">IND03 · Cobertura</span><span class="cc-kpi-valor">0,5%</span><span class="cc-kpi-texto">Consultas que não terminam em "indeterminada", sem busca e sem modelo de linguagem (1 de 200). Meta: acima de 60% com tudo ligado.</span></div>
+<div class="cc-kpi"><span class="cc-kpi-rotulo">IND03 · Cobertura</span><span class="cc-kpi-valor">61%</span><span class="cc-kpi-texto">Casos da avaliação que não terminam em "indeterminada" (43 de 70). Meta: acima de 60%.</span></div>
 </div>
 
 Os três indicadores acima não se repetem na tabela. Os números do modelo
 ficam só na [seção 4.2](#42-métricas-de-avaliação-fora-de-produção).
 
+Os valores de IND03 a IND05 vêm da avaliação da equipe em `eval/`: 70 casos
+de desenvolvimento (12 escritos pela equipe e 58 tirados de checagens com
+ClaimReview), iteração 2, com busca e modelo de linguagem ligados. A própria
+equipe registra que esses números foram reconstruídos dos registros de
+execução de uma rodada interrompida, e não de uma rodada completa
+(`eval/ITERACOES.md`).
+
 | Indicador | O que mede | Como medir | Valor atual | Meta proposta |
 |---|---|---|---|---|
-| IND04 · Acerto entre as decididas | Propensão alta para alegações falsas ou enganosas, baixa para verdadeiras | `avaliacao/avaliar_golden.py` † | Não medido com os módulos ligados | Acima de 85% |
-| IND05 · Erro grave | Propensão baixa em alegação falsa, ou alta em alegação verdadeira | Mesmo script † | Não medido com os módulos ligados | Abaixo de 5% |
-| IND06 · Checagem original encontrada | A checagem da agência aparece entre as fontes | Mesmo script † | 0% sem busca na internet | Acima de 70% |
+| IND04 · Acerto | Propensão alta para alegações falsas ou enganosas, baixa para verdadeiras | `eval/run.py` | 29% (20 de 70); cerca de 56% contando "média" em alegação falsa como acerto parcial | Acima de 85% |
+| IND05 · Erro grave | Propensão baixa em alegação falsa, ou alta em alegação verdadeira | `eval/run.py` | 4,3% (3 de 70). Era 33% (4 de 12) antes do núcleo de decisão | Abaixo de 5% |
+| IND06 · Checagem original encontrada | A checagem da agência aparece entre as fontes | `eval/run.py` (a medir) | Não medido | Acima de 70% |
 | IND07 · Estabilidade da resposta | A mesma notícia, em versão curta e longa, recebe a mesma propensão | Conjunto de estabilidade (planejado) | Não medido; instabilidade observada em testes manuais | Acima de 90% |
 | IND08 · Qualidade do modelo | Medida F1 macro, pior grupo e calibração | Avaliação do FakenewsBR | Ver [seção 4.2](#42-métricas-de-avaliação-fora-de-produção) | Ver requisitos de qualidade na [seção 4.2](#42-métricas-de-avaliação-fora-de-produção) |
-| IND09 · Utilidade percebida | Proporção de avaliações positivas nos botões de avaliação | `feedback.jsonl` † | Sem dados: o recurso ainda não foi usado em produção | Acima de 70% |
+| IND09 · Utilidade percebida | Proporção de avaliações positivas nos botões de avaliação | `feedback.jsonl` † | Sem dados: o recurso não está na `main` | Acima de 70% |
 | IND10 · Retenção | Pessoas que voltam a consultar em até 30 dias | Registro de uso (pendente) | Sem medição | A definir |
-| IND11 · Tempo de resposta | Tempo entre o envio e a resposta completa | Registro por etapa (pendente) | Ver [RNF06](ENGENHARIA_DE_PRODUTO_DE_IA.md#rnf06--responder-dentro-dos-limites-de-tempo-e-de-custo) | Ver RNF06 |
+| IND11 · Tempo de resposta | Tempo entre o envio e a resposta completa | Telemetria por execução (`runs/`) | Ver [RNF06](ENGENHARIA_DE_PRODUTO_DE_IA.md#rnf06--responder-dentro-dos-limites-de-tempo-e-de-custo) | Ver RNF06 |
 | IND12 · Desistência de compartilhar | Pessoas que dizem ter desistido de compartilhar após a resposta | Pergunta opcional após a resposta (pendente) | Sem medição | A definir |
 | IND13 · Abertura de fontes | Respostas em que a pessoa abre ao menos uma fonte | Contagem de cliques nos endereços (pendente) | Sem medição | A definir |
 
@@ -147,15 +160,14 @@ ficam só na [seção 4.2](#42-métricas-de-avaliação-fora-de-produção).
 **Limitações conhecidas**
 
 1. **O sistema não emite veredito.** A resposta é uma estimativa de propensão.
-2. **O modelo próprio só opina em textos com 80 palavras ou mais** (RN04). †
-   Em textos curtos ele erra por causa do formato: ver o acerto por tamanho
-   na [seção 4.2](#42-métricas-de-avaliação-fora-de-produção).
-3. **Sem o modelo de linguagem, a relevância das fontes é medida por palavras
-   em comum.** Nessa condição o sistema pode exibir fontes sem relação com a
-   notícia e variar a propensão conforme o tamanho do texto (pendências P02
-   e P03).
-4. **A base local de checagens é uma amostra.** O índice completo depende da
-   execução periódica do coletor (P08).
+2. **O modelo próprio não entra na avaliação** (RN11). Ele mede o estilo do
+   texto e erra muito em textos curtos: ver o acerto por tamanho na
+   [seção 4.2](#42-métricas-de-avaliação-fora-de-produção).
+3. **Sem o modelo de linguagem não há julgamento das fontes**, e a resposta é
+   "indeterminada" (RN12).
+4. **Notícias verdadeiras tendem a terminar em "média"**, e afirmações
+   compostas ("X, mas foi ele que criou") perdem o sentido ao serem divididas
+   (P18, P19).
 5. **Portais com acesso pago ou proteção contra robôs** limitam a leitura do
    conteúdo (RN07).
 6. **Privacidade**: o texto enviado é comparado com bases públicas e
@@ -291,8 +303,7 @@ Regras de escrita:
   1. Cada afirmação é buscada no índice de checagens.
   2. A busca na internet inclui uma consulta dirigida a checagens.
   3. O selo original da agência é preservado e exibido.
-- **Situação**: Parcial. O catálogo tem 13 plataformas de checagem e o
-  índice local tem 22 checagens de amostra. O índice completo depende de P08.
+- **Situação**: Parcial. O índice de checagens é alimentado por RSS e ClaimReview de 8 agências (`ingestor.py`), com selos tipados por tabela (`selos.py`), e é um atalho opcional (`INDICE_CHECAGENS`). O caminho principal é a busca aberta. O histórico anterior aos feeds depende de P08.
 
 #### RF05 — Consultar os principais veículos de comunicação
 
@@ -302,11 +313,8 @@ Regras de escrita:
      guardados por uma hora.
   2. O conteúdo das três fontes mais próximas é lido, não apenas o título.
   3. A falta da chave de busca não interrompe a resposta: o sistema segue
-     apenas com o índice local e registra a limitação.
-- **Situação**: Parcial. O catálogo tem 16 veículos gerais: 7 com curadoria
-  da equipe e 9 incluídos por descoberta automática, com curadoria pendente
-  (lista na [seção 5.3](#53-canais-de-notícias)). Faltam 34 para a meta de 50
-  (P10).
+     apenas com o índice de checagens e registra a limitação.
+- **Situação**: Parcial. O catálogo tem 23 veículos gerais: 7 com curadoria da equipe e 16 incluídos por descoberta automática, vários com nome errado (lista na [seção 5.3](#53-canais-de-notícias); P05). Faltam 27 para a meta de 50 (P10).
 
 #### RF06 — Comparar as informações das fontes
 
@@ -316,8 +324,7 @@ Regras de escrita:
      como uma única fonte (RN03).
   2. Selos diferentes entre agências são apontados como divergência.
   3. Datas diferentes para o mesmo fato são apontadas como divergência.
-- **Situação**: Parcial. Os critérios 1 e 2 estão atendidos. O critério 3 não
-  dispara por um defeito conhecido (P06).
+- **Situação**: Atendido. A corroboração é por postura: um voto por grupo de fontes independentes (`corroboracao.py`, `decisao.py`), e datas e selos divergentes entre grupos são apontados.
 
 ### 2.3 Módulo de Análise Inteligente
 
@@ -327,12 +334,10 @@ Regras de escrita:
 - **Critérios de aceitação**:
   1. O modelo analisa o texto da pessoa, uma vez por consulta.
   2. O modelo só opina em textos com 80 palavras ou mais (RN04); abaixo
-     disso, a etapa é registrada como "pulada", com o motivo.
+     disso, a etapa é registrada como "pulada", com o motivo. †
   3. Sem o modelo configurado, o sistema usa um substituto identificado como
      tal, cujo número não é exibido como medição.
-- **Situação**: Atendido †. Na branch principal está ativo apenas o
-  substituto (P01). A especificação do modelo está na
-  [seção 4.1](#41-especificação-da-tarefa).
+- **Situação**: Parcial. O modelo BERTimbau calibrado está na `main` (`FAKE_MODEL_PATH`); o critério 2 depende de P01. Desde o pull request nº 4, a probabilidade não entra na avaliação (RN11). A especificação do modelo está na [seção 4.1](#41-especificação-da-tarefa).
 
 #### RF09 — Exibir a estimativa de confiança do modelo
 
@@ -341,7 +346,7 @@ Regras de escrita:
   1. A probabilidade é calibrada antes de ser exibida.
   2. O valor aparece acompanhado do nome do modelo.
   3. A confiança de cada sinal usado na avaliação é exibida.
-- **Situação**: Atendido †.
+- **Situação**: Atendido. A probabilidade aparece como "sinal de estilo do texto (não indica veracidade)".
 
 #### RF10 — Identificar padrões de desinformação no texto
 
@@ -352,9 +357,7 @@ Regras de escrita:
   2. Cada padrão encontrado vem com o trecho que o evidencia.
   3. Sem o modelo de linguagem, regras fixas fazem a mesma análise.
   4. O conteúdo analisado é tratado como dado, nunca como instrução. †
-- **Situação**: Atendido. Ressalva: a regra "ausência de data ou local"
-  dispara em quase todo texto longo e está prevista para deixar de pesar na
-  avaliação (P03).
+- **Situação**: Atendido. Os padrões aparecem como sinal de estilo e não entram na avaliação (RN11).
 
 ### 2.4 Módulo de Consolidação e Apresentação
 
@@ -367,8 +370,7 @@ Regras de escrita:
   2. A resposta indica se o conteúdo da fonte foi lido ou se só o título foi
      considerado; a fonte lida por inteiro pesa mais (RN10).
   3. Páginas iniciais e institucionais não contam como evidência (RN05).
-- **Situação**: Parcial. Sem o modelo de linguagem, fontes não verificadas
-  podem aparecer acima das verificadas (P02, P03).
+- **Situação**: Atendido. Sem julgamento de conteúdo, uma fonte aparece na resposta, mas não vota (RN12).
 
 #### RF11 — Apresentar o passo a passo da análise
 
@@ -400,8 +402,7 @@ Regras de escrita:
      fonte que refuta a afirmação conta contra ela, qualquer que seja o selo
      (RN02).
   2. Sem evidência relevante, a avaliação é "indeterminada".
-- **Situação**: Parcial. Sem o modelo de linguagem, um único indício fraco
-  pode levar a avaliação a "alta" (P02, P03).
+- **Situação**: Atendido. Nenhuma avaliação sai de "indeterminada" sem ao menos uma fonte com postura ou um selo aplicável (`decisao.py`).
 
 #### RF14 — Oferecer à pessoa os elementos para uma decisão autônoma
 
@@ -468,6 +469,8 @@ coluna "Onde está definida" aponta para o texto.
 | RN08 | O modelo de linguagem não redige a conclusão | RF12, critério 3 |
 | RN09 | Textos de opinião ou sátira não são classificados como fato | RNF02 |
 | RN10 | Uma fonte lida por inteiro vale mais do que uma lida só pelo título | Aqui. Aplica-se a RF05 e RF07 |
+| RN11 | O modelo próprio e os padrões textuais não entram na avaliação: aparecem como sinais de estilo | Aqui. Aplica-se a RF08, RF09 e RF10 |
+| RN12 | Sem julgamento do conteúdo das fontes, não há avaliação: a resposta é "indeterminada" | Aqui. Aplica-se a RF13 |
 
 ---
 
@@ -480,14 +483,14 @@ coluna "Onde está definida" aponta para o texto.
 | Critério | Verificação |
 |---|---|
 | Toda resposta lista as etapas executadas e a situação de cada uma. | Teste do fluxo completo (`tests/test_pipeline.py`). |
-| Todo sinal usado tem origem identificada (checagem, corroboração, modelo, padrões) e confiança numérica. | Estrutura `SinalAnalise` em `factcheck_mvp/schemas.py`. |
+| Todo sinal tem origem identificada (checagem, postura das fontes, e, à parte, sinais de estilo) e peso numérico. | Estrutura `SinalAnalise` em `factcheck_mvp/schemas.py`. |
 | A justificativa separa o que aumenta do que reduz a propensão. | `factcheck_mvp/agregador.py`. |
-| A avaliação é calculada por regras e pesos fixos, não por um modelo de linguagem. | `factcheck_mvp/agregador.py`. |
+| A avaliação é calculada por uma única função, com parâmetros documentados, não por um modelo de linguagem. | `decidir` em `factcheck_mvp/decisao.py`. |
 | Um componente provisório é sempre identificado como tal. | `tests/test_bot_modelo.py`. |
 | As limitações da consulta são declaradas na resposta. | Campo `limitacoes` do relatório. |
 
-**Situação**: Atendido. Os pesos do agregador são valores iniciais, ainda não
-calibrados com dados.
+**Situação**: Atendido. Os parâmetros da decisão são iniciais e estão sendo
+ajustados com a avaliação em `eval/`.
 
 ### RNF02 — Apresentar a avaliação com imparcialidade
 
@@ -512,8 +515,8 @@ calibrados com dados.
 | A resposta informa se o conteúdo da fonte foi lido. | Campo `corpo_lido`. |
 | O selo original da agência é preservado. | Campo `selo_original`. |
 | Cada etapa registra os endereços que usou. | Estrutura `EtapaRecibo`. |
-| A inclusão de um portal no catálogo passa por aprovação. | Pendente: hoje a inclusão é automática (P05). |
-| As respostas ficam registradas para auditoria posterior. | Pendente: só os votos de avaliação são gravados. † |
+| A inclusão de um portal no catálogo passa por aprovação. | Parcial: o portal descoberto não vale na consulta em curso, mas é gravado no catálogo (P05). |
+| As execuções ficam registradas para auditoria posterior. | Telemetria: um registro por execução em `runs/`, com etapas, fontes e chamadas (`telemetria.py`). |
 
 **Situação**: Parcial.
 
@@ -588,8 +591,8 @@ no documento de [Engenharia de Produto de Inteligência Artificial](ENGENHARIA_D
 | Saída | Probabilidade calibrada, entre 0 e 1, de o texto ser desinformação. |
 | Modelo | BERTimbau base (`neuralmind/bert-base-portuguese-cased`), ajustado no conjunto FakenewsBR versão 6, execução R0. |
 | Calibração | Método de Platt, ajustado em um conjunto separado do treino e do teste. |
-| Condição de uso | Textos com 80 palavras ou mais. |
-| Papel na avaliação | Indício auxiliar, com confiança 0,5. Não decide sozinho. |
+| Condição de uso | Textos com 80 palavras ou mais †. Na `main`, o modelo roda em qualquer texto. |
+| Papel na avaliação | Nenhum: fica fora da avaliação e aparece como sinal de estilo (RN11). Nas sondas da equipe, o modelo não distingue uma afirmação da sua negação e muda de resultado só pela caixa das letras (`docs/review/RELATORIO.md`, item D4). |
 
 ### 4.2 Métricas de avaliação fora de produção
 
@@ -651,10 +654,10 @@ variedade do português, com a mitigação de cada viés, estão no
 
 | Métrica | Fonte | Situação |
 |---|---|---|
-| Acerto do sistema completo em alegações já checadas | Conjunto de 200 alegações (100 falsas, 50 enganosas, 50 verdadeiras) em `avaliacao/` † | Disponível; falta a medição com todos os módulos ligados |
-| Utilidade percebida | Votos dos botões de avaliação † | Disponível; sem dados ainda |
-| Distribuição das probabilidades em uso real | Registro das respostas | Pendente |
-| Proporção de consultas em que o modelo não opina | Etapa "modelo" do recibo | Disponível por consulta; sem agregação |
+| Acerto, erro grave e cobertura do sistema completo | `eval/run.py`: 70 casos de desenvolvimento e um conjunto reservado, com gravação e reprodução das chamadas externas | Disponível; valores na [seção 1.4](#14-indicadores-de-desempenho) |
+| Registro de cada execução | Telemetria em `runs/<execução>/` | Disponível; sem acompanhamento ao longo do tempo (P07) |
+| Utilidade percebida | Votos dos botões de avaliação † | Não está na `main` |
+| Distribuição das probabilidades em uso real | Telemetria | Pendente (P07) |
 
 Os sinais de desvio dos dados e de conceito, e o que acompanhar ao longo do
 tempo, estão em [Monitoramento contínuo](ENGENHARIA_DE_PRODUTO_DE_IA.md#10-monitoramento-contínuo).
@@ -687,9 +690,9 @@ tempo, estão em [Monitoramento contínuo](ENGENHARIA_DE_PRODUTO_DE_IA.md#10-mon
    acerto em cerca de 80% dos casos. O erro medido está na
    [seção 4.2](#42-métricas-de-avaliação-fora-de-produção).
 3. **O modelo se abstém quando não é confiável.** Em textos curtos ele não
-   opina, e a resposta explica o motivo (RN04).
-4. **O peso do modelo é limitado.** Ele é um indício. Checagens de agências e
-   corroboração entre veículos pesam mais.
+   opina, e a resposta explica o motivo (RN04). †
+4. **O modelo não decide.** A probabilidade aparece como sinal de estilo e
+   não entra na avaliação (RN11).
 5. **Um componente provisório nunca se passa por medição.** Sem o modelo
    configurado, a resposta informa que o modelo está em treino e não mostra
    número.
@@ -716,30 +719,30 @@ Cada relação é registrada em um só lugar:
 | RF01 | `factcheck_mvp/telegram_bot.py` | `tests/test_guard_unica.py`, `tests/test_bot_modelo.py` |
 | RF02 | `factcheck_mvp/telegram_bot.py` | `tests/test_schemas.py`, `tests/test_loop1.py` |
 | RF03 | `factcheck_mvp/telegram_bot.py` | Sem teste automatizado |
-| RF04 | `factcheck_mvp/indice.py`, `br_news_crawler.py` | `tests/test_indice.py` |
-| RF05 | `factcheck_mvp/serpapi_layer.py`, `factcheck_mvp/aprofundar.py` | `tests/test_serpapi_layer.py`, `tests/test_loop1.py`, `tests/test_review.py` |
-| RF06 | `factcheck_mvp/corroboracao.py` | `tests/test_pipeline.py` |
-| RF07 | `factcheck_mvp/telegram_bot.py` | `tests/test_review_loop4.py` |
-| RF08 | `factcheck_mvp/modelo_fake.py` | `tests/test_modelo_texto_longo.py` † |
-| RF09 | `factcheck_mvp/modelo_fake.py` | `tests/test_bot_modelo.py` |
+| RF04 | `factcheck_mvp/indice.py`, `factcheck_mvp/ingestor.py`, `factcheck_mvp/selos.py`, `factcheck_mvp/jsonld.py` | `tests/test_indice.py`, `tests/test_indice_checagens.py`, `tests/test_ingestor.py`, `tests/test_selos.py`, `tests/test_jsonld.py` |
+| RF05 | `factcheck_mvp/serpapi_layer.py`, `factcheck_mvp/agente.py`, `factcheck_mvp/aprofundar.py`, `factcheck_mvp/extracao.py` | `tests/test_serpapi_layer.py`, `tests/test_agente.py`, `tests/test_extracao.py`, `tests/test_loop1.py` |
+| RF06 | `factcheck_mvp/corroboracao.py`, `factcheck_mvp/decisao.py` | `tests/test_corroboracao.py`, `tests/test_decisao.py` |
+| RF07 | `factcheck_mvp/telegram_bot.py`, `factcheck_mvp/pipeline.py` | `tests/test_review_loop4.py`, `tests/test_pipeline.py` |
+| RF08 | `factcheck_mvp/modelo_fake.py` | `tests/test_bot_modelo.py`, `tests/test_modelo_texto_longo.py` † |
+| RF09 | `factcheck_mvp/modelo_fake.py`, `factcheck_mvp/pipeline.py` | `tests/test_bot_modelo.py` |
 | RF10 | `factcheck_mvp/padroes_llm.py` | `tests/test_review_loop4.py`, `tests/test_padroes_local.py` †, `tests/test_blindagem.py` † |
-| RF11 | `factcheck_mvp/pipeline.py` | `tests/test_pipeline.py`, `tests/test_regressao_36.py` |
-| RF12 | `factcheck_mvp/agregador.py` | `tests/test_schemas.py` |
-| RF13 | `factcheck_mvp/agregador.py` | `tests/test_juiz_llm.py`, `tests/test_pipeline.py` |
+| RF11 | `factcheck_mvp/pipeline.py`, `factcheck_mvp/telemetria.py` | `tests/test_pipeline.py`, `tests/test_regressao_36.py`, `tests/test_telemetria.py` |
+| RF12 | `factcheck_mvp/agregador.py`, `factcheck_mvp/decisao.py` | `tests/test_schemas.py`, `tests/test_decisao.py` |
+| RF13 | `factcheck_mvp/decisao.py`, `factcheck_mvp/juiz_llm.py` | `tests/test_decisao.py`, `tests/test_juiz_llm.py`, `tests/test_review.py` |
 | RF14 | `factcheck_mvp/agregador.py` | `tests/test_pipeline.py` |
 | RF15 | `factcheck_mvp/api.py` | `tests/test_schemas.py` (contrato de entrada e saída); sem teste dos pontos de acesso |
-| RNF01 | `factcheck_mvp/schemas.py`, `factcheck_mvp/agregador.py` | `tests/test_schemas.py` |
+| RNF01 | `factcheck_mvp/decisao.py`, `factcheck_mvp/schemas.py` | `tests/test_decisao.py`, `tests/test_schemas.py` |
 | RNF02 | `factcheck_mvp/agregador.py` | `tests/test_schemas.py` |
-| RNF03 | `factcheck_mvp/schemas.py`, `factcheck_mvp/catalogo.py` | `tests/test_descoberta_site.py` |
+| RNF03 | `factcheck_mvp/schemas.py`, `factcheck_mvp/catalogo.py`, `factcheck_mvp/telemetria.py` | `tests/test_descoberta_site.py`, `tests/test_catalogo_roteamento.py`, `tests/test_telemetria.py` |
 | RNF04 | `factcheck_mvp/telegram_bot.py` | Sem teste automatizado |
-| RNF05 | `factcheck_mvp/api.py`, `factcheck_mvp/pipeline.py` | `tests/test_pipeline.py`, `tests/test_modelo_texto_longo.py` † |
-| RNF06 | `factcheck_mvp/config.py`, `factcheck_mvp/api.py` | `tests/test_cache_relatorio.py` †, `tests/test_serpapi_layer.py` |
-| RNF07 | `factcheck_mvp/blindagem.py` †, `factcheck_mvp/aprofundar.py` | `tests/test_blindagem.py` †, `tests/test_loop1.py`, `tests/test_feedback.py` † |
-| RNF08 | `factcheck_mvp/pipeline.py` | `tests/test_pipeline.py`, `tests/test_review.py` |
-| RNF09 | Repositório FakenewsBR: `models/v6/`, `scripts/analise_por_tamanho.py` | Avaliação estatística, sem teste automatizado |
+| RNF05 | `factcheck_mvp/api.py`, `factcheck_mvp/pipeline.py`, `factcheck_mvp/llm.py` | `tests/test_pipeline.py`, `tests/test_llm.py` |
+| RNF06 | `factcheck_mvp/config.py`, `factcheck_mvp/api.py`, `factcheck_mvp/replay.py` | `tests/test_serpapi_layer.py`, `tests/test_replay.py`, `tests/test_cache_relatorio.py` † |
+| RNF07 | `factcheck_mvp/aprofundar.py`, `factcheck_mvp/telemetria.py`, `factcheck_mvp/juiz_llm.py`, `factcheck_mvp/blindagem.py` † | `tests/test_loop1.py`, `tests/test_telemetria.py`, `tests/test_juiz_llm.py`, `tests/test_blindagem.py` †, `tests/test_feedback.py` † |
+| RNF08 | `factcheck_mvp/pipeline.py`, `factcheck_mvp/decisao.py` | `tests/test_pipeline.py`, `tests/test_review.py` |
+| RNF09 | Repositório FakenewsBR: `models/v6/`, `scripts/analise_por_tamanho.py`; `eval/` | Avaliação estatística (`eval/run.py`), sem teste automatizado |
 
-A suíte completa tem 75 testes automatizados na branch
-`melhorias/revisao-arquitetura`.
+A `main` tem 319 testes automatizados, todos passando em 30 de setembro de
+2026. Os arquivos marcados com † estão só na branch `melhorias/revisao-arquitetura`.
 
 ### 5.2 Canais de checagem
 
@@ -777,12 +780,15 @@ no texto.
 | BBC News Brasil | bbc.com/portuguese | Extração por seletores. Tem mapa do site. | Estrutura estável, sem acesso pago. |
 | Poder360 | poder360.com.br | Alimentador de notícias e extração por seletores. Tem mapa do site. | Estrutura estável. |
 
-**Veículos incluídos por descoberta automática, com curadoria pendente** (9):
+**Veículos incluídos por descoberta automática, com curadoria pendente** (16):
 Brasil de Fato, Exame, Autoesporte, O Globo, Olhar Digital, NC News, Agora
-Litoral, National Geographic Brasil e Record. Todos usam extração por
-seletores, com modelo de linguagem local como reserva.
+Litoral, National Geographic Brasil, Record, SBT News, Jornal Opção, Banda B,
+Folhamax, Rádio Difusora e dois sites de saúde. Nos quatro últimos, o nome
+gravado é o título de uma matéria, e não o do veículo (por exemplo, "Ações
+importantes que ajudam a combater a dengue"), o que mostra por que a inclusão
+precisa de curadoria (P05).
 
-**Lacuna em relação ao RF05**: 16 veículos catalogados, de uma meta de 50.
+**Lacuna em relação ao RF05**: 23 veículos catalogados, de uma meta de 50.
 Entre os citados no levantamento, a Forbes ainda não está no catálogo.
 
 ### 5.4 Interfaces e serviços externos
@@ -801,11 +807,14 @@ Entre os citados no levantamento, a Forbes ainda não está no catálogo.
 | Serviço | Uso no sistema | Configuração | Comportamento sem o serviço |
 |---|---|---|---|
 | Telegram | Canal de conversa. | `TELEGRAM_TOKEN` | A interface de programação e a página funcionam sem ele. |
-| SerpAPI, mecanismo Google Notícias | Descoberta de notícias recentes. | `SERPAPI_KEY`; limite diário em `SERPAPI_DAILY_CAP`. | A etapa de descoberta é pulada; o sistema usa só o índice local. |
-| OpenRouter | Modelo de linguagem para extrair afirmações, julgar a relação entre notícia e afirmação e identificar padrões. | `OPENROUTER_API_KEY`; limite diário em `LLM_DAILY_CAP`. | Regras fixas e comparação de palavras assumem; a qualidade cai ([seção 1.5](#15-escopo-inicial-e-limitações-declaradas), limitação 3). |
-| Modelo de linguagem local | Reserva para afirmações e padrões. | `UNSLOTH_BASE_URL`, `UNSLOTH_MODEL_NAME`. | Regras fixas assumem. |
-| Crawl4AI | Coleta e leitura de páginas dos portais. | `requirements.txt` | O índice não é atualizado. |
-| Modelo BERTimbau R0 | Estimativa de probabilidade do modelo próprio. | `FAKE_MODEL_PATH` † | Substituto identificado como provisório. |
+| SerpAPI | Busca de notícias e de checagens recentes (`SERP_ENGINE`, padrão Google). | `SERPAPI_KEY`; limite diário em `SERPAPI_DAILY_CAP`. | A etapa de descoberta é pulada; o sistema usa só o índice de checagens, se ligado. |
+| OpenRouter | Modelo de linguagem para extrair afirmações e consultas, julgar a postura de cada fonte e identificar padrões. | `OPENROUTER_API_KEY`; `OPENROUTER_MODEL_JUIZ` permite um modelo próprio para o julgamento; limite diário em `LLM_DAILY_CAP`. | Sem julgamento das fontes, a resposta é "indeterminada" (RN12). |
+| Modelo de linguagem local | Reserva para todas as finalidades do modelo de linguagem. | `UNSLOTH_BASE_URL`, `UNSLOTH_MODEL_NAME`. | Regras fixas assumem nas afirmações; sem julgamento, RN12. |
+| Feeds RSS e ClaimReview das agências | Índice de checagens com selo tipado. | `INDICE_CHECAGENS`; lista de feeds em `ingestor.py` | O índice não é atualizado; a busca aberta continua. |
+| Trafilatura | Extração do corpo das páginas, na cascata JSON-LD, trafilatura, seletor e regex. | `requirements-mvp.txt` | Os níveis seguintes da cascata assumem. |
+| ReaderLM-v2 (opcional) | Último nível da cascata de extração. Licença não comercial. | `EXTRACAO_READERLM`, `READERLM_BASE_URL` | Desligado por padrão. |
+| Crawl4AI | Coletor antigo dos portais (`br_news_crawler.py`), substituído pelos feeds como fonte do índice. | `requirements.txt` | Nenhum efeito na consulta. |
+| Modelo BERTimbau R0 | Sinal de estilo exibido na resposta, fora da avaliação. | `FAKE_MODEL_PATH` | Substituto identificado como provisório. |
 
 Nenhuma chave de serviço tem valor padrão utilizável. Todas são lidas do
 ambiente e ficam fora do controle de versão.
@@ -813,38 +822,41 @@ ambiente e ficam fora do controle de versão.
 ### 5.5 Pendências
 
 Lista única das pendências do produto. Impacto e esforço são uma **proposta**
-de priorização. Os detalhes técnicos de P02, P03, P05 e P06 estão em
-`PLANO_ESTABILIDADE.md`.
+de priorização. Os diagnósticos técnicos estão no relatório de revisão da
+equipe (`docs/review/RELATORIO.md`) e no registro das iterações da avaliação
+(`eval/ITERACOES.md`).
 
-| Pendência | O que falta | Afeta | Impacto | Esforço |
-|---|---|---|---|---|
-| P01 | Integrar a branch `melhorias/revisao-arquitetura` | RF02, RF03, RF08, RF09, RF10 | Alto | Baixo |
-| P02 | Ligar o modelo de linguagem em produção | RF04, RF06, RF07, RF13 | Alto | Baixo |
-| P03 | Estabilizar a avaliação: exigir evidência mínima, ordenar as fontes verificadas primeiro, tirar a regra "sem data" da nota | RF07, RF10, RF13, RNF08, IND07 | Alto | Baixo |
-| P04 | Medir o sistema completo com todos os módulos ligados | IND03 a IND06 | Alto | Baixo |
-| P05 | Aprovar portais novos antes de entrarem no catálogo; curadoria dos votos de avaliação | RNF03, RNF07 | Médio | Baixo |
-| P06 | Corrigir a comparação de datas entre fontes | RF06 | Médio | Baixo |
-| P07 | Acompanhar ao longo do tempo os sinais de desvio e de desempenho | RNF08, IND09 a IND13 | Alto | Médio |
-| P08 | Executar o coletor periodicamente para formar o índice completo | RF04, RF05 | Alto | Alto |
-| P09 | Retreinar o modelo para textos curtos | RF08, RNF09, IND08 | Alto | Alto |
-| P10 | Ampliar o catálogo para 50 veículos | RF05 | Médio | Alto |
-| P11 | Validar a linguagem e as personas com pessoas do público-alvo | RNF04, [seção 1.7](#17-personas-e-análise-estratégica-rascunho) | Alto | Médio |
-| P12 | Executar os testes automaticamente a cada envio ao repositório | RNF08 | Médio | Baixo |
-| P13 | Definir a frequência de retreino e adotar o modo sombra | RNF08 | Médio | Médio |
-| P14 | Medir o viés por tema e por posição política | RNF09 | Médio | Médio |
-| P15 | Escrever a política de retenção de dados | RNF07 | Médio | Baixo |
-| P16 | Imagem de contêiner e versões de bibliotecas fixadas | Reprodutibilidade | Baixo | Baixo |
-| P17 | Canal em outro aplicativo de mensagem | RNF05, HU15 | Médio | Alto |
+| Pendência | O que falta | Afeta | Impacto | Esforço | Situação |
+|---|---|---|---|---|---|
+| P01 | Integrar da branch `melhorias/revisao-arquitetura` o que a `main` ainda não tem: proteção contra injeção de instruções, reaproveitamento de respostas, botões de avaliação, orientação para áudio, pedido de texto quando o link não abre e piso de 80 palavras | RF02, RF03, RF08, RNF06, RNF07 | Alto | Médio | Aberta |
+| P02 | Ligar o modelo de linguagem em produção | RF04, RF06, RF07, RF13 | Alto | Baixo | Aberta |
+| P03 | Estabilizar a avaliação: evidência mínima, faixas simétricas, estilo fora da nota, sem fontes "relevantes" inventadas | RF07, RF10, RF13, RNF08, IND07 | Alto | Baixo | Resolvida no pull request nº 4 |
+| P04 | Medir o sistema completo com todos os módulos ligados | IND03 a IND06 | Alto | Baixo | Parcial: avaliação de 70 casos existe; falta uma rodada completa com a cota de busca garantida |
+| P05 | Aprovar portais novos antes de entrarem no catálogo; curadoria dos votos de avaliação | RNF03, RNF07 | Médio | Baixo | Parcial: o portal novo não vale na consulta, mas ainda é gravado |
+| P06 | Corrigir a comparação de datas entre fontes | RF06 | Médio | Baixo | Resolvida no pull request nº 4 |
+| P07 | Acompanhar ao longo do tempo os sinais de desvio e de desempenho | RNF08, IND09 a IND13 | Alto | Médio | Parcial: registro por execução existe; falta a agregação |
+| P08 | Formar o histórico completo do índice de checagens | RF04, RF05 | Alto | Alto | Parcial: os feeds trazem o passado recente; o histórico exige mapa do site |
+| P09 | Retreinar o modelo para textos curtos | RF08, RNF09, IND08 | Médio | Alto | Aberta. Impacto reduzido desde que o modelo saiu da avaliação |
+| P10 | Ampliar o catálogo para 50 veículos | RF05 | Médio | Alto | Aberta |
+| P11 | Validar a linguagem e as personas com pessoas do público-alvo | RNF04, [seção 1.7](#17-personas-e-análise-estratégica-rascunho) | Alto | Médio | Aberta |
+| P12 | Executar os testes automaticamente a cada envio ao repositório | RNF08 | Médio | Baixo | Aberta |
+| P13 | Definir a frequência de retreino e adotar o modo sombra | RNF08 | Médio | Médio | Aberta |
+| P14 | Medir o viés por tema e por posição política | RNF09 | Médio | Médio | Aberta |
+| P15 | Escrever a política de retenção de dados, incluindo os registros de execução | RNF07 | Médio | Baixo | Aberta |
+| P16 | Imagem de contêiner e versões de bibliotecas fixadas | Reprodutibilidade | Baixo | Baixo | Aberta |
+| P17 | Canal em outro aplicativo de mensagem | RNF05, HU15 | Médio | Alto | Aberta |
+| P18 | Tratar afirmações compostas sem perder o conector ("X, mas foi ele que criou") | RF13, IND05 | Médio | Médio | Aberta |
+| P19 | Levar notícias verdadeiras e refutações de agência a "baixa" e "alta", e não a "média": veredito pelo título das fontes de checagem e peso maior para agência curada | RF04, RF13, IND04 | Alto | Médio | Aberta, com hipóteses registradas em `eval/ITERACOES.md` |
 
-**Por onde começar:** P01 a P06 têm esforço baixo e, juntas, destravam nove
-requisitos. P08 e P09 são os projetos maiores.
+**Por onde começar:** P02 e P04 têm esforço baixo e destravam a medição do
+sistema. P19 ataca a maior fonte de erro registrada na avaliação.
 
 ### 5.6 Gestão dos requisitos
 
 | Momento | O que foi feito | Situação |
 |---|---|---|
 | Elicitação | Sessão de ideias da equipe, que gerou RF01 a RF15 e RNF01 a RNF05; análise de plataformas de checagem e de portais | Atendido. Entrevistas com o público-alvo: P11 |
-| Análise | Protótipo funcional do robô e da interface de programação; revisão da arquitetura; diagnóstico de instabilidade | Atendido |
+| Análise | Protótipo funcional do robô e da interface de programação; revisão de código da equipe (`docs/review/`) | Atendido |
 | Especificação | Este documento, com critérios de aceitação, histórias e regras, no padrão de redação da [seção 2](#2-requisitos-funcionais); RNF06 a RNF09 no documento de produto | Atendido |
-| Validação | Testes automatizados por requisito ([seção 5.1](#51-matriz-de-rastreabilidade-dos-requisitos)); conjunto de alegações checadas | Parcial: P04 e P11 |
+| Validação | Testes automatizados por requisito ([seção 5.1](#51-matriz-de-rastreabilidade-dos-requisitos)); avaliação com casos rotulados e reprodução determinística (`eval/`) | Parcial: P04 e P11 |
 | Gerenciamento | Requisitos versionados no repositório; mudanças entram por pedido de integração revisado; cada relação registrada em um só lugar | Atendido |
