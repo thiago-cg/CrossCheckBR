@@ -149,3 +149,15 @@ def test_teto_de_buscas_nao_inicia_caso_que_estouraria(amb, monkeypatch):
     assert all(c.get("nao_rodado") for c in out["casos"])
     assert out["metricas"]["n_nao_rodados"] == 4
     assert replay.uso_serpapi()["teto_processo"] is None  # restaurado
+
+
+def test_descoberta_status_distingue_falhou_de_rodou():
+    from eval.run import _descoberta_status, _busca_indisponivel
+    etapa = {"tipo": "etapa", "dados": {"nome": "descoberta", "status": "ok"}}
+    fb = {"tipo": "fallback", "dados": {"onde": "serpapi", "motivo": "HTTP 429"}}
+    ok = {"tipo": "http", "dados": {"url": "https://serpapi.com/search.json?q=x", "status": 200}}
+    assert _descoberta_status([etapa, ok]) == "rodou"
+    assert _descoberta_status([etapa, fb]) == "falhou"          # cota esgotada: caso não mede a busca
+    assert _descoberta_status([etapa, ok, fb]) == "parcial"
+    assert _descoberta_status([{"tipo": "etapa", "dados": {"nome": "descoberta", "status": "pulada"}}]) == "pulada"
+    assert abs(_busca_indisponivel({"descoberta": {"falhou": 0.4, "pulada": 0.2}}) - 0.6) < 1e-9

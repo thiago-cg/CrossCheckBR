@@ -184,12 +184,29 @@ def _estimativa_buscas_por_caso() -> int:
 # Execução
 
 def _descoberta_status(eventos: List[Dict[str, Any]]) -> str:
-    """rodou | pulada | ausente — a partir das etapas de descoberta do trace."""
+    """rodou | parcial | falhou | pulada | ausente — a partir do trace.
+
+    `falhou` = a descoberta tentou buscar mas TODAS as buscas foram recusadas (cota da SerpAPI,
+    timeout): o caso não mede a qualidade da busca/juiz. `parcial` = algumas falharam.
+    """
     sts = [e["dados"].get("status") for e in eventos
            if e.get("tipo") == "etapa" and str(e["dados"].get("nome", "")).startswith("descoberta")]
     if not sts:
         return "ausente"
-    return "pulada" if all(s == "pulada" for s in sts) else "rodou"
+    if all(s == "pulada" for s in sts):
+        return "pulada"
+    falhas = sum(1 for e in eventos if e.get("tipo") == "fallback"
+                 and str(e["dados"].get("onde", "")).startswith("serpapi"))
+    ok = sum(1 for e in eventos if e.get("tipo") == "http"
+             and "serpapi.com" in str(e["dados"].get("url", "")) and e["dados"].get("status") == 200)
+    if falhas and not ok:
+        return "falhou"
+    return "parcial" if falhas else "rodou"
+
+
+def _busca_indisponivel(m: Dict[str, Any]) -> float:
+    d = m.get("descoberta", {}) or {}
+    return float(d.get("pulada", 0) or 0) + float(d.get("falhou", 0) or 0)
 
 
 async def avaliar_caso(pipe: Any, caso: Dict[str, Any], timeout: float, modo: str) -> Dict[str, Any]:
@@ -395,8 +412,9 @@ def resumo_texto(meta: Dict[str, Any], m: Dict[str, Any], delta: Optional[Dict[s
     if m.get("destaque_indice"):
         L.append("  por tag índice: " + ", ".join(f"{t}: acerto={b.get('acerto')} grave={b.get('n_erro_grave')} n={b.get('n')}"
                                                  for t, b in m["destaque_indice"].items()))
-    if m.get("descoberta", {}).get("pulada", 0) >= 0.5:
-        L.append("  ATENÇÃO: descoberta web pulada na maioria dos casos — o eval NÃO julga mudanças de busca/juiz.")
+    if _busca_indisponivel(m) >= 0.5:
+        L.append("  ATENÇÃO: busca web pulada/falhou na maioria dos casos (sem chave ou cota SerpAPI esgotada) "
+                 "— o eval NÃO julga mudanças de busca/juiz.")
     if delta is not None:
         if delta.get("n_comuns"):
             L.append(f"  vs baseline '{delta.get('baseline_nome')}' ({delta['n_comuns']} comuns): "
@@ -421,8 +439,8 @@ def relatorio_md(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str, An
     L += ["", f"- níveis: `{m.get('niveis')}`", f"- descoberta web: `{m.get('descoberta')}`",
           f"- fallback (fração de casos) por onde: `{m.get('taxa_fallback_por_onde')}`",
           f"- descartes por motivo: `{m.get('descartes_por_motivo')}`"]
-    if m.get("descoberta", {}).get("pulada", 0) >= 0.5:
-        L.append("- **ATENÇÃO:** descoberta web pulada na maioria dos casos (sem SERPAPI_KEY ou orçamento): "
+    if _busca_indisponivel(m) >= 0.5:
+        L.append("- **ATENÇÃO:** busca web pulada/falhou na maioria dos casos (sem SERPAPI_KEY, orçamento ou cota esgotada): "
                  "este eval não serve para julgar mudanças de busca/juiz.")
     L += ["", "### Por rótulo", "", "| rótulo | n | acerto | erro grave | níveis |", "|---|---|---|---|---|"]
     for rot, b in m.get("por_rotulo", {}).items():
