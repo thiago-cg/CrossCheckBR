@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import glob as _glob
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -98,10 +99,26 @@ def validar_caso(c: Dict[str, Any], onde: str = "") -> None:
 
 
 def esperado_de(c: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    """Resolve (esperado, aceitavel) pelo rótulo; normaliza legados claimreview p/ README.
+
+    README: falso/enganoso esperado [alta], parcial [media].
+    Legados claimreview gravam `esperado` explícito sem `aceitavel`:
+      falso {"esperado":["alta"]} -> (["alta"],["media"])
+      enganoso {"esperado":["alta","media"]} -> (["alta"],["media"])
+    Overrides genuínos preservados (com `aceitavel` explícito ou `esperado`
+    fora de {"alta"}/{"alta","media"}).
+    """
     padrao_esp, padrao_ac = MAPA_ESPERADO[c["rotulo"]]
-    esp = c.get("esperado") or padrao_esp
-    ac = c.get("aceitavel", padrao_ac if "esperado" not in c else [])
-    return list(esp), [x for x in ac if x not in esp]
+    if "esperado" not in c:
+        esp = c.get("esperado") or padrao_esp
+        ac = c.get("aceitavel", padrao_ac)
+        return list(esp), [x for x in ac if x not in esp]
+    esp_raw = c.get("esperado") or padrao_esp
+    if "aceitavel" in c:
+        return list(esp_raw), [x for x in c["aceitavel"] if x not in esp_raw]
+    if c["rotulo"] in ("falso", "enganoso") and set(esp_raw) in ({"alta"}, {"alta", "media"}):
+        return ["alta"], ["media"]
+    return list(esp_raw), []
 
 
 def filtrar(casos: List[Dict[str, Any]], split: str = "dev", tags: Optional[List[str]] = None,
@@ -331,6 +348,105 @@ def _bloco(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "niveis": dict(Counter(str(r["nivel"]) for r in rs))}
 
 
+SCORE_ORDINAL = {"baixa": 0, "media": 1, "indeterminada": 1, "alta": 2}
+
+
+def _wilson(k: int, n: int, z: float = 1.96) -> List[Optional[float]]:
+    """IC95 Wilson p/ proporção k/n. [None,None] se n==0."""
+    if n <= 0:
+        return [None, None]
+    p = k / n
+    denom = 1 + z * z / n
+    centro = (p + z * z / (2 * n)) / denom
+    delta = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return [round(max(0.0, centro - delta), 4), round(min(1.0, centro + delta), 4)]
+
+
+def _recall_por_rotulo(rs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for rot in ROTULOS:
+        sub = [r for r in rs if r["rotulo"] == rot]
+        if not sub:
+            continue
+        k = sum(1 for r in sub if r.get("ok"))
+        out[rot] = {"n": len(sub), "ok": k, "recall": round(k / len(sub), 4),
+                    "wilson": _wilson(k, len(sub))}
+    return out
+
+
+def _acuracia_balanceada(rs: List[Dict[str, Any]]) -> Optional[float]:
+    rec = _recall_por_rotulo(rs)
+    if not rec:
+        return None
+    return round(sum(v["recall"] for v in rec.values()) / len(rec), 4)
+
+
+def _erro_grave_por_direcao(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fe = [r for r in rs if r["rotulo"] in ("falso", "enganoso")]
+    v = [r for r in rs if r["rotulo"] == "verdadeiro"]
+    fe_k = sum(1 for r in fe if r.get("grave"))
+    v_k = sum(1 for r in v if r.get("grave"))
+    return {"fe_para_baixa": round(fe_k / len(fe), 4) if fe else None,
+            "fe_k": fe_k, "fe_n": len(fe), "fe_wilson": _wilson(fe_k, len(fe)),
+            "v_para_alta": round(v_k / len(v), 4) if v else None,
+            "v_k": v_k, "v_n": len(v), "v_wilson": _wilson(v_k, len(v))}
+
+
+def _precisao_por_nivel(rs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for niv in NIVEIS:
+        sub = [r for r in rs if r.get("nivel") == niv]
+        k = sum(1 for r in sub if r.get("ok"))
+        out[niv] = {"n": len(sub), "ok": k,
+                    "precisao": round(k / len(sub), 4) if sub else None,
+                    "wilson": _wilson(k, len(sub))}
+    n_none = sum(1 for r in rs if r.get("nivel") not in NIVEIS)
+    if n_none:
+        out["sem_nivel"] = {"n": n_none, "ok": 0, "precisao": 0.0,
+                            "wilson": _wilson(0, n_none)}
+    return out
+
+
+def _auc_ordinal(rs: List[Dict[str, Any]]) -> Optional[float]:
+    pos = [SCORE_ORDINAL[r["nivel"]] for r in rs
+           if r["rotulo"] in ("falso", "enganoso") and r.get("nivel") in SCORE_ORDINAL]
+    neg = [SCORE_ORDINAL[r["nivel"]] for r in rs
+           if r["rotulo"] == "verdadeiro" and r.get("nivel") in SCORE_ORDINAL]
+    if not pos or not neg:
+        return None
+    conc = sum(1 for a in pos for b in neg if a > b)
+    ties = sum(1 for a in pos for b in neg if a == b)
+    return round((conc + 0.5 * ties) / (len(pos) * len(neg)), 4)
+
+
+def _sintetizar_trivial(rs: List[Dict[str, Any]], nivel_fixo: str) -> List[Dict[str, Any]]:
+    pseudo = []
+    for r in rs:
+        esp = r.get("esperado") or []
+        ac = r.get("aceitavel") or []
+        ok = nivel_fixo in esp
+        pseudo.append({"rotulo": r["rotulo"], "nivel": nivel_fixo, "ok": ok,
+                       "parcial": (not ok) and nivel_fixo in ac,
+                       "grave": eh_grave(r["rotulo"], nivel_fixo)})
+    return pseudo
+
+
+def _bloco_completo(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    b = _bloco(rs)
+    if not b.get("n"):
+        return b
+    b["acuracia_balanceada"] = _acuracia_balanceada(rs)
+    b["erro_grave_por_direcao"] = _erro_grave_por_direcao(rs)
+    b["cobertura"] = round(1 - b["taxa_indeterminada"], 4)
+    b["auc_ordinal"] = _auc_ordinal(rs)
+    return b
+
+
+def _baselines_triviais(rs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {f"sempre_{s}": _bloco_completo(_sintetizar_trivial(rs, s))
+            for s in ("alta", "media")}
+
+
 def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
     rodados = [r for r in res if not r.get("nao_rodado")]
     m = _bloco(rodados)
@@ -360,6 +476,25 @@ def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
     desc_st = Counter(r.get("descoberta") for r in rodados)
     m["descoberta"] = {k: round(v / n, 4) for k, v in desc_st.items()}
     m["http_miss_total"] = sum(r.get("http_miss", 0) for r in rodados)
+    rec = _recall_por_rotulo(rodados)
+    m["recall_por_rotulo"] = rec
+    m["acuracia_balanceada"] = round(sum(v["recall"] for v in rec.values()) / len(rec), 4) if rec else None
+    m["erro_grave_por_direcao"] = _erro_grave_por_direcao(rodados)
+    m["cobertura"] = round(1 - m.get("taxa_indeterminada", 0), 4) if m.get("n") else None
+    m["precisao_por_nivel"] = _precisao_por_nivel(rodados)
+    m["auc_ordinal"] = _auc_ordinal(rodados)
+    m["baselines_triviais"] = _baselines_triviais(rodados)
+    n_ok = sum(r["ok"] for r in rodados)
+    n_grave = sum(r["grave"] for r in rodados)
+    n_ind = sum(r["nivel"] == "indeterminada" for r in rodados)
+    m["intervalos_wilson"] = {
+        "acerto": _wilson(n_ok, len(rodados)),
+        "erro_grave": _wilson(n_grave, len(rodados)),
+        "taxa_indeterminada": _wilson(n_ind, len(rodados)),
+        "cobertura": _wilson(len(rodados) - n_ind, len(rodados)),
+        "recall_por_rotulo": {k: v["wilson"] for k, v in rec.items()},
+        "precisao_por_nivel": {k: v["wilson"] for k, v in m["precisao_por_nivel"].items()},
+    }
     return m
 
 
@@ -369,17 +504,27 @@ def comparar(res: List[Dict[str, Any]], baseline: Dict[str, Any]) -> Dict[str, A
     comuns = [r for r in res if not r.get("nao_rodado") and r["id"] in base_casos]
     if not comuns:
         return {"n_comuns": 0}
-    atual = _bloco(comuns)
-    antes = _bloco([base_casos[r["id"]] for r in comuns])
+    base_comuns = [base_casos[r["id"]] for r in comuns]
+    atual = _bloco_completo(comuns)
+    antes = _bloco_completo([{"rotulo": c.get("rotulo"), "nivel": c.get("nivel"),
+                              "ok": bool(c.get("ok")), "parcial": bool(c.get("parcial")),
+                              "grave": bool(c.get("grave"))} for c in base_comuns])
     mudaram = [{"id": r["id"], "antes": base_casos[r["id"]].get("nivel"), "agora": r["nivel"],
                 "ok_antes": base_casos[r["id"]].get("ok"), "ok_agora": r["ok"]}
                for r in comuns if base_casos[r["id"]].get("nivel") != r["nivel"]]
+    bal_pp = (round((atual["acuracia_balanceada"] - antes["acuracia_balanceada"]) * 100, 1)
+              if atual.get("acuracia_balanceada") is not None and antes.get("acuracia_balanceada") is not None else None)
+    gd_at, gd_an = atual["erro_grave_por_direcao"], antes["erro_grave_por_direcao"]
     return {"n_comuns": len(comuns), "baseline_nome": baseline.get("meta", {}).get("nome"),
             "acerto_pp": round((atual["acerto"] - antes["acerto"]) * 100, 1),
             "acerto_com_parcial_pp": round((atual["acerto_com_parcial"] - antes["acerto_com_parcial"]) * 100, 1),
+            "acuracia_balanceada_pp": bal_pp,
             "n_erro_grave_delta": atual["n_erro_grave"] - antes["n_erro_grave"],
+            "grave_dir_delta": {"fe": gd_at["fe_k"] - gd_an["fe_k"], "v": gd_at["v_k"] - gd_an["v_k"]},
             "taxa_indeterminada_pp": round((atual["taxa_indeterminada"] - antes["taxa_indeterminada"]) * 100, 1),
-            "antes": antes, "agora": atual, "mudaram": mudaram}
+            "cobertura_pp": round((atual["cobertura"] - antes["cobertura"]) * 100, 1),
+            "antes": antes, "agora": atual, "mudaram": mudaram,
+            "trivial": _baselines_triviais(comuns)}
 
 
 def avaliar_gate(delta: Dict[str, Any], max_queda_pp: float) -> Tuple[bool, List[str]]:
@@ -388,8 +533,17 @@ def avaliar_gate(delta: Dict[str, Any], max_queda_pp: float) -> Tuple[bool, List
     motivos = []
     if delta["n_erro_grave_delta"] > 0:
         motivos.append(f"erro_grave aumentou (+{delta['n_erro_grave_delta']})")
+    gd = delta.get("grave_dir_delta") or {}
+    if gd.get("fe", 0) > 0:
+        motivos.append(f"grave F/E->baixa aumentou (+{gd['fe']})")
+    if gd.get("v", 0) > 0:
+        motivos.append(f"grave V->alta aumentou (+{gd['v']})")
     if delta["acerto_pp"] < -abs(max_queda_pp):
         motivos.append(f"acerto caiu {delta['acerto_pp']}pp (limite -{abs(max_queda_pp)}pp)")
+    bal_agora = (delta.get("agora") or {}).get("acuracia_balanceada")
+    bal_tri = ((delta.get("trivial") or {}).get("sempre_alta") or {}).get("acuracia_balanceada")
+    if bal_agora is not None and bal_tri is not None and bal_agora < bal_tri:
+        motivos.append(f"balanceada {bal_agora} < sempre_alta {bal_tri}")
     return (not motivos), motivos
 
 
@@ -408,16 +562,27 @@ def _git_sha() -> str:
 
 
 def resumo_texto(meta: Dict[str, Any], m: Dict[str, Any], delta: Optional[Dict[str, Any]]) -> str:
+    tri = m.get("baselines_triviais") or {}
+    sa = (tri.get("sempre_alta") or {})
+    sm = (tri.get("sempre_media") or {})
+    gd = m.get("erro_grave_por_direcao") or {}
     L = [f"EVAL {meta['nome'] or ''} | modo={meta['modo']} split={meta['split']} n={m.get('n', 0)}"
          f" (não rodados {m.get('n_nao_rodados', 0)}) | env={meta['env']}",
          f"  acerto={m.get('acerto')} acerto+parcial={m.get('acerto_com_parcial')} "
          f"erro_grave={m.get('erro_grave')} ({m.get('n_erro_grave')}) indeterminada={m.get('taxa_indeterminada')}",
+         f"  balanceada={m.get('acuracia_balanceada')} (sempre_alta={sa.get('acuracia_balanceada')} "
+         f"sempre_media={sm.get('acuracia_balanceada')}) auc={m.get('auc_ordinal')} cobertura={m.get('cobertura')} "
+         f"grave_dir={gd.get('fe_k')}/{gd.get('fe_n')} FE->baixa,{gd.get('v_k')}/{gd.get('v_n')} V->alta",
+         f"  trivial: sempre_alta acerto={sa.get('acerto')} grave={sa.get('n_erro_grave')} | "
+         f"sempre_media acerto={sm.get('acerto')} grave={sm.get('n_erro_grave')}",
          f"  niveis={m.get('niveis')} descoberta={m.get('descoberta')}",
          f"  llm/caso={m.get('llm_chamadas_por_caso')} p50={_fmt_s(m.get('latencia_p50_ms'))} "
          f"p95={_fmt_s(m.get('latencia_p95_ms'))} erros_exec={m.get('n_erros_execucao')} http_miss={m.get('http_miss_total')}",
          f"  fallback(frac casos)={m.get('taxa_fallback_por_onde')}",
          f"  serpapi: {m.get('serpapi', {}).get('live_no_eval')} busca(s) live neste eval "
          f"({_saldo(m.get('serpapi', {}))})"]
+    if m.get("cota_serpapi_esgotada"):
+        L.append("  COTA SERPAPI ESGOTADA — troque SERPAPI_KEY; este eval NÃO julga busca/juiz.")
     if m.get("destaque_indice"):
         L.append("  por tag índice: " + ", ".join(f"{t}: acerto={b.get('acerto')} grave={b.get('n_erro_grave')} n={b.get('n')}"
                                                  for t, b in m["destaque_indice"].items()))
@@ -441,13 +606,27 @@ def relatorio_md(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str, An
          f"- env: `{meta['env']}` · casos: {meta['arquivos_casos']} · filtros: tags={meta['filtro_tag']} ids={meta['ids']}",
          f"- SerpAPI: {m['serpapi']['live_no_eval']} busca(s) live neste eval ({_saldo(m['serpapi'])})",
          "", "## Métricas", "", "| métrica | valor |", "|---|---|"]
-    for k in ("n", "n_nao_rodados", "acerto", "acerto_com_parcial", "erro_grave", "n_erro_grave",
+    for k in ("n", "n_nao_rodados", "acerto", "acerto_com_parcial", "acuracia_balanceada",
+              "cobertura", "auc_ordinal", "erro_grave", "n_erro_grave",
               "taxa_indeterminada", "llm_chamadas_por_caso", "latencia_p50_ms", "latencia_p95_ms",
               "n_erros_execucao", "http_miss_total"):
         L.append(f"| {k} | {m.get(k)} |")
     L += ["", f"- níveis: `{m.get('niveis')}`", f"- descoberta web: `{m.get('descoberta')}`",
           f"- fallback (fração de casos) por onde: `{m.get('taxa_fallback_por_onde')}`",
-          f"- descartes por motivo: `{m.get('descartes_por_motivo')}`"]
+          f"- descartes por motivo: `{m.get('descartes_por_motivo')}`",
+          f"- grave por direção: `{m.get('erro_grave_por_direcao')}`",
+          f"- precisão por nível: `{m.get('precisao_por_nivel')}`",
+          f"- recall por rótulo: `{m.get('recall_por_rotulo')}`",
+          f"- Wilson: `{m.get('intervalos_wilson')}`"]
+    tri = m.get("baselines_triviais") or {}
+    if tri:
+        L += ["", "### Trivial (mesmos casos) + lift", "", "| preditor | acerto | balanceada | grave | grave FE->baixa | grave V->alta |",
+              "|---|---|---|---|---|---|"]
+        for nome, chave in (("sistema", None), ("sempre_alta", "sempre_alta"), ("sempre_media", "sempre_media")):
+            b = m if chave is None else tri.get(chave, {})
+            gd2 = b.get("erro_grave_por_direcao") or {}
+            L.append(f"| {nome} | {b.get('acerto')} | {b.get('acuracia_balanceada')} | {b.get('n_erro_grave')} | "
+                     f"{gd2.get('fe_k')}/{gd2.get('fe_n')} | {gd2.get('v_k')}/{gd2.get('v_n')} |")
     if _busca_indisponivel(m) >= 0.5:
         L.append("- **ATENÇÃO:** busca web pulada/falhou na maioria dos casos (sem SERPAPI_KEY, orçamento ou cota esgotada): "
                  "este eval não serve para julgar mudanças de busca/juiz.")
@@ -461,8 +640,9 @@ def relatorio_md(meta: Dict[str, Any], m: Dict[str, Any], res: List[Dict[str, An
         L += ["", "## Delta vs baseline", ""]
         if delta.get("n_comuns"):
             L.append(f"{delta['n_comuns']} casos em comum com `{delta.get('baseline_nome')}`: acerto "
-                     f"{delta['acerto_pp']:+}pp, erro grave {delta['n_erro_grave_delta']:+}, indeterminada "
-                     f"{delta['taxa_indeterminada_pp']:+}pp.")
+                     f"{delta['acerto_pp']:+}pp, balanceada {delta.get('acuracia_balanceada_pp'):+}pp, erro grave {delta['n_erro_grave_delta']:+}, "
+                     f"grave-dir FE{delta.get('grave_dir_delta', {}).get('fe', 0):+} V{delta.get('grave_dir_delta', {}).get('v', 0):+}, "
+                     f"indeterminada {delta['taxa_indeterminada_pp']:+}pp, cobertura {delta.get('cobertura_pp'):+}pp.")
             for x in delta["mudaram"]:
                 L.append(f"- `{x['id']}`: {x['antes']} → {x['agora']} (ok {x['ok_antes']} → {x['ok_agora']})")
         else:
