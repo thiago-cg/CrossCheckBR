@@ -60,10 +60,65 @@ class ModeloTreinadoDetector:
         return {"prob_fake": round(proba, 3), "modelo": self.nome, "mock": False}
 
 
+class BertimbauDetector:
+    """Modelo real BERTimbau (transformers) com calibração Platt.
+
+    Diretório esperado: config.json + model.safetensors + tokenizer.json +
+    calibration.json {"platt_a", "platt_b", "max_length"}. Prob calibrada:
+    sigmoid(a * margem + b), margem = logit[fake] - logit[true].
+    Falha -> exceção clara no boot, não no chat.
+    """
+
+    def __init__(self, caminho: str):
+        import json
+        from pathlib import Path
+
+        try:
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        except ImportError as e:
+            raise RuntimeError(f"transformers ausente p/ modelo BERTimbau: {e}") from e
+        try:
+            import torch
+        except ImportError as e:
+            raise RuntimeError(f"torch ausente p/ modelo BERTimbau: {e}") from e
+
+        base = Path(caminho)
+        with open(base / "calibration.json", encoding="utf-8") as f:
+            calib = json.load(f)
+        self._a = float(calib["platt_a"])
+        self._b = float(calib["platt_b"])
+        self._max_len = int(calib.get("max_length", 192))
+        self._torch = torch
+        self._tok = AutoTokenizer.from_pretrained(caminho, local_files_only=True)
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            caminho, local_files_only=True)
+        self._model.eval()
+        self.nome = f"bertimbau:{base.name}"
+
+    def analisar(self, texto: str) -> Dict[str, Any]:
+        import math
+
+        torch = self._torch
+        enc = self._tok((texto or "")[:5000], return_tensors="pt",
+                        truncation=True, max_length=self._max_len)
+        with torch.no_grad():
+            logits = self._model(**enc).logits[0].tolist()
+        margem = logits[1] - logits[0] if len(logits) > 1 else logits[0]
+        proba = 1.0 / (1.0 + math.exp(-(self._a * margem + self._b)))
+        return {"prob_fake": round(min(0.99, max(0.01, proba)), 3),
+                "modelo": self.nome, "mock": False}
+
+
 def carregar_detector() -> DetectorFake:
     if config.FAKE_MODEL_PATH:
+        from pathlib import Path
+
+        caminho = Path(config.FAKE_MODEL_PATH)
         try:
-            det = ModeloTreinadoDetector(config.FAKE_MODEL_PATH)
+            if caminho.is_dir() and (caminho / "config.json").exists():
+                det = BertimbauDetector(config.FAKE_MODEL_PATH)
+            else:
+                det = ModeloTreinadoDetector(config.FAKE_MODEL_PATH)
             log.info("modelo fake real carregado: %s", det.nome)
             return det
         except Exception as e:
