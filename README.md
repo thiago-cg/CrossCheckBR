@@ -49,12 +49,13 @@ Regra-mestra: **implicação domina selo** — selo VERDADEIRO numa peça que re
 pip install -r requirements-mvp.txt
 cp .env.mvp.example .env   # TELEGRAM_TOKEN; SERPAPI_KEY opcional
 
-python -m pytest tests/ -q            # 20 testes
+python -m pytest tests/ -q
 uvicorn factcheck_mvp.api:app --port 8000 &
 python -m factcheck_mvp.telegram_bot  # @fn_tic_bot
 ```
 
 API: `GET /saude`, `GET /portais`, `POST /checar {"tipo":"texto|titulo|link","conteudo":"..."}`.
+Modelo de detecção real (BERTimbau v6, opcional) e avaliação do sistema inteiro: ver [MELHORIAS_ARQUITETURA.md](MELHORIAS_ARQUITETURA.md).
 Crawler: `pip install -r requirements.txt && crawl4ai-setup && python br_news_crawler.py --offline` (só contrato) ou `--classifier laya --max-artigos 2` (coleta real; LLM local em `http://127.0.0.1:8888/v1`).
 
 ## Estrutura
@@ -62,11 +63,12 @@ Crawler: `pip install -r requirements.txt && crawl4ai-setup && python br_news_cr
 ```
 factcheck_mvp/   pipeline.py, schemas.py, catalogo.py, indice.py, afirmacoes.py,
                  serpapi_layer.py, implicacao.py, corroboracao.py, modelo_fake.py,
-                 padroes_llm.py, agregador.py, api.py, telegram_bot.py, data/
+                 padroes_llm.py, agregador.py, blindagem.py, api.py, telegram_bot.py, data/
 br_news_crawler.py  crawler Crawl4AI dos 20 portais -> schemas reutilizáveis
-tests/  20 testes (contratos, neutralidade, pipeline offline, regressões de review)
+avaliacao/  conjunto-ouro (200 alegações checadas) + avaliação do pipeline inteiro
+tests/  contratos, neutralidade, pipeline offline, regressões de review
 ```
 
 ## Limitações honestas (também saem no recibo de cada resposta)
 
-Modelo de detecção ainda é placeholder; implicação hoje é em manchetes (deep crawl pendente); paywalls/WAFs restringem alguns portais; pesos do agregador são priors até calibração com dados rotulados. Privacidade: o texto é comparado com bases públicas (inclui consulta web externa) — não envie dados pessoais; segredos só via ambiente.
+Modelo de detecção real só opina em texto com 80+ palavras (sem `FAKE_MODEL_PATH`, placeholder); implicação hoje é em manchetes (deep crawl pendente); paywalls/WAFs restringem alguns portais; pesos do agregador são priors até calibração com dados rotulados. Privacidade: o texto é comparado com bases públicas (inclui consulta web externa) — não envie dados pessoais; segredos só via ambiente.

@@ -71,6 +71,15 @@ MAX_AFIRMACOES = _int("MAX_AFIRMACOES", 3)
 MAX_EVIDENCIAS = _int("MAX_EVIDENCIAS", 5)
 CACHE_SERPAPI_TTL = _int("CACHE_SERPAPI_TTL", 3600)
 FAKE_MODEL_PATH = _get("FAKE_MODEL_PATH")  # vazio = mock explícito (RF08 até o modelo real)
+# Modelo real só opina em texto longo: em manchete solta o BERTimbau v6 erra
+# por formato (curto → fake). Confiança baixa: é um sinal a mais, não o principal.
+FAKE_MODEL_MIN_PALAVRAS = _int("FAKE_MODEL_MIN_PALAVRAS", 80)
+FAKE_MODEL_CONFIANCA = _float("FAKE_MODEL_CONFIANCA", 0.5)
+# Cache de relatórios completos (mesmo texto repetido não refaz busca/LLM).
+RESULT_CACHE_TTL = _int("RESULT_CACHE_TTL", 1800)
+RESULT_CACHE_MAX = _int("RESULT_CACHE_MAX", 256)
+# Feedback 👍/👎 do bot (JSONL local; vira dado rotulado p/ calibrar pesos).
+FEEDBACK_PATH = _get("FEEDBACK_PATH", "")
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
 # Estratégia no orgânico: `agente` (padrão: onda 1 determinística → extração → juiz →

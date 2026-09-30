@@ -19,3 +19,5 @@ eval/serpapi_uso.json.lock
 eval/cassettes/
 # Contador local de uso da SerpAPI (estado de máquina)
 eval/serpapi_uso.json
+# Resultados da avaliação golden do PR2 (gerados localmente)
+avaliacao/resultados/

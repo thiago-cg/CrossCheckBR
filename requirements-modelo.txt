@@ -1,0 +1,4 @@
+# Opcional: liga o BERTimbau v6 (FAKE_MODEL_PATH). Sem isto o bot usa o mock.
+-r requirements-mvp.txt
+torch>=2.4
+transformers>=4.44
