@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 TipoEntrada = Literal["texto", "titulo", "link"]
 Propensao = Literal["baixa", "media", "alta", "indeterminada"]
 StatusEtapa = Literal["ok", "parcial", "falha", "pulada"]
+Polaridade = Literal["afirma", "nega"]
+# Postura de uma fonte frente ao NÚCLEO da afirmação (juiz_llm)
+Postura = Literal["SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO", "NAO_TRATA"]
 
 
 def agora_iso() -> str:
@@ -24,8 +27,18 @@ class EntradaConsulta(BaseModel):
 
 
 class Afirmacao(BaseModel):
+    """`texto` preserva idioma e POLARIDADE do usuário ("A vacina não altera o DNA");
+    `nucleo` é a alegação na forma afirmativa ("A vacina altera o DNA"), que é o que
+    o juiz e os selos avaliam; `polaridade="nega"` inverte a direção na decisão."""
+
     texto: str
     indice: int = 0
+    nucleo: str = ""
+    polaridade: Polaridade = "afirma"
+    consulta: str = ""  # 5-8 palavras-chave (PT) para a busca
+
+    def alvo(self) -> str:
+        return (self.nucleo or self.texto).strip()
 
 
 class FonteEvidencia(BaseModel):
@@ -49,9 +62,18 @@ class FonteEvidencia(BaseModel):
     # LLM-juiz: resumo da peça frente à afirmação + termômetro (-100..+100)
     resumo_juiz: Optional[str] = None
     score_juiz: Optional[int] = None
-    # Relevância julgada: True/False = veredito do juiz (ou do fallback lexical);
-    # None = não julgado (índice sem LLM, teto esgotado). False nunca é "útil".
+    # Relevância DERIVADA da postura do juiz: SUSTENTA/REFUTA/RELATA -> True,
+    # NAO_TRATA -> False, não julgado (sem LLM/teto) -> None. False nunca é "útil".
     relevante: Optional[bool] = None
+    # Juiz de 4 classes (fase 2): postura frente ao núcleo + citação verificada
+    postura: Optional[Postura] = None
+    citacao: Optional[str] = None
+    citacao_verificada: Optional[bool] = None
+    motor_juiz: Optional[str] = None  # llm-juiz:<motor> | fallback-*
+    veredito_normalizado: Optional[str] = None  # selos.VEREDITOS
+    cluster: Optional[str] = None  # grupo de independência (1 voto por cluster)
+    curada: Optional[bool] = None  # fonte do catálogo curado (por URL/aliases)
+    afirmacao: Optional[str] = None  # afirmação (texto do usuário) a que a fonte foi julgada
 
 
 class SinalAnalise(BaseModel):
@@ -89,3 +111,6 @@ class RelatorioChecagem(BaseModel):
     # Clareza em segundos (check #1): header + why sempre preenchidos pelo pipeline
     header: str = ""
     why_1linha: str = ""
+    # Decisão completa (decisao.Decisao serializada): votos por cluster, vereditos,
+    # log-odds, faixas. O nível, o header e a justificativa saem deste objeto.
+    decisao: Optional[Dict[str, Any]] = None

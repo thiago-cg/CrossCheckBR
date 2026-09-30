@@ -1,14 +1,26 @@
-"""Corroboração: em quantos veículos INDEPENDENTES a informação aparece?
+"""Corroboração: dedupe canônico e clusters de INDEPENDÊNCIA (um voto por cluster).
 
-Republicação da mesma agência/texto conta 1x. Divergências saem campo a campo.
+Ordem no pipeline (antes do juiz):
+1. `url_canonica` — sem esquema/www/amp/fragmento/query de tracking: a mesma URL
+   vinda do índice e da web vira UMA peça (`fundir_por_url`).
+2. `agrupar` — clusters de independência (union-find):
+   - assinatura de agência no corpo ("Estadão Conteúdo", "Agência Brasil",
+     "Reuters", "AFP", "Folhapress", "Agência O Globo") → cluster da agência;
+   - mesmo domínio-base (grupo econômico: folha.uol + uol) → mesmo cluster;
+   - corpos quase iguais (contenção de shingles de 5 palavras >= 0,8) → mesmo
+     cluster (republicação editada em outro domínio);
+   - sem corpo: título quase igual (Jaccard >= 0,85).
+3. `divergencias` — datas (`data_pub`) e vereditos diferentes ENTRE clusters:
+   informação para o recibo, nunca sinal de decisão.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse
 
-
+# ----------------------------------------------------------------------------- texto
 def _norm(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode().lower()
     return re.sub(r"\s+", " ", texto).strip()
@@ -21,16 +33,34 @@ def _similaridade(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
-_SUFIXO_DUPLO = (".com.br", ".org.br", ".net.br", ".gov.br", ".edu.br",
-                  ".co.uk", ".org.uk", ".com.ar", ".com.mx", ".com.pt")
+def shingles(texto: str, k: int = 5) -> set:
+    toks = re.findall(r"[a-z0-9]+", _norm(texto))
+    if len(toks) < k:
+        return set()
+    return {" ".join(toks[i:i + k]) for i in range(len(toks) - k + 1)}
+
+
+def similaridade_corpo(a: str, b: str) -> float:
+    """Contenção de shingles (|A∩B| / min(|A|,|B|)): robusta a corte/rodapé diferente."""
+    sa, sb = shingles(a), shingles(b)
+    if len(sa) < 8 or len(sb) < 8:
+        return 0.0
+    return len(sa & sb) / min(len(sa), len(sb))
+
+
+# ----------------------------------------------------------------------------- URL
+_SUFIXO_DUPLO = (".com.br", ".org.br", ".net.br", ".gov.br", ".edu.br", ".jus.br", ".leg.br",
+                 ".co.uk", ".org.uk", ".com.ar", ".com.mx", ".com.pt")
+_TRACKING = re.compile(r"^(utm_.*|fbclid|gclid|dclid|msclkid|mc_[a-z]+|ref|ref_src|ref_url|source|"
+                       r"cmpid|cmp|origin|origem|amp|outputtype|output|__twitter_impression|"
+                       r"s|share|at_[a-z]+|ito|xtor|ncid|ocid|_ga|igshid|spm|from)$", re.I)
 
 
 def dominio_base(url: str) -> str:
     """Domínio registrável aprox. (grupo econômico): folha.uol.com.br e
     uol.com.br -> uol.com.br; g1.globo.com e globo.com -> globo.com."""
     try:
-        from urllib.parse import urlparse as _up
-        host = (_up(url or "").hostname or "").lower()
+        host = (urlparse(url or "").hostname or "").lower()
     except Exception:
         return ""
     if host.startswith("www."):
@@ -45,44 +75,185 @@ def dominio_base(url: str) -> str:
     return ".".join(partes[-2:]) if len(partes) >= 2 else host
 
 
-def contar_independentes(pecas: List[Dict[str, Any]], limiar_dup: float = 0.85) -> Dict[str, Any]:
-    """Agrupa republicações E mesmo grupo econômico; retorna {n, grupos[[urls]]}.
+def dominio(url: str) -> str:
+    try:
+        host = (urlparse(url or "").hostname or "").lower()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
 
-    Mesmo domínio-base (ex: UOL + Folha) conta 1x — independência real, não só
-    texto diferente (round B, loop 7).
-    """
-    grupos: List[List[Dict[str, Any]]] = []
+
+def url_canonica(url: str) -> str:
+    """https + host sem www/amp + caminho sem /amp e sem barra final + query sem tracking,
+    ordenada; sem fragmento. Plataformas (youtube ?v=) preservam o id."""
+    try:
+        u = urlparse((url or "").strip())
+    except Exception:
+        return (url or "").strip()
+    host = (u.hostname or "").lower()
+    if not host:
+        return (url or "").strip()
+    for pre in ("www.", "amp.", "m."):
+        if host.startswith(pre) and host.count(".") >= 2:
+            host = host[len(pre):]
+    caminho = re.sub(r"/+", "/", u.path or "/")
+    caminho = re.sub(r"(/amp|\.amp|/amp\.html)$", "", caminho, flags=re.I)
+    caminho = re.sub(r"^/amp/", "/", caminho, flags=re.I)
+    caminho = caminho.rstrip("/") or "/"
+    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=False) if not _TRACKING.match(k)]
+    query = urlencode(sorted(q))
+    porta = f":{u.port}" if u.port and u.port not in (80, 443) else ""
+    return f"https://{host}{porta}{caminho}" + (f"?{query}" if query else "")
+
+
+# ----------------------------------------------------------------------------- agências
+AGENCIAS = {
+    "estadao-conteudo": r"estad[ãa]o conte[úu]do",
+    "agencia-brasil": r"ag[êe]ncia brasil",
+    "reuters": r"reuters",
+    "afp": r"\bafp\b|france[- ]presse",
+    "folhapress": r"folhapress",
+    "agencia-o-globo": r"ag[êe]ncia o globo",
+}
+# Assinatura = nome da agência em posição de crédito (parênteses, "Fonte:", "Com
+# informações da", "Por", linha própria), no começo ou no fim do corpo. Menção no
+# meio do texto ("disse à Reuters") não conta. Folhapress/Estadão Conteúdo são
+# sempre crédito.
+_SEMPRE_CREDITO = ("estadao-conteudo", "folhapress")
+
+
+def agencia_assinada(corpo: str) -> Optional[str]:
+    t = corpo or ""
+    if not t.strip():
+        return None
+    janelas = [t[:500], t[-700:]]
+    for chave, rx in AGENCIAS.items():
+        if chave in _SEMPRE_CREDITO and re.search(rx, t, re.I):
+            return chave
+        # "Investigado por: Reuters, AFP…" (rodapé do Comprova) NÃO é crédito de republicação:
+        # só parênteses, "Fonte:", "Com informações da", "Conteúdo da", linha própria ou "— Agência" no fim.
+        credito = (rf"(\(\s*(com\s+)?({rx})[^)]{{0,40}}\)|(fonte|com informa[çc][õo]es d[aeo]s?|"
+                   rf"conte[úu]do d[ae]|texto d[ae])\s*:?\s*(a |o )?({rx})|^\s*({rx})\s*$|"
+                   rf"[—–-]\s*({rx})\s*$)")
+        for j in janelas:
+            if re.search(credito, j, re.I | re.M):
+                return chave
+    return None
+
+
+# ----------------------------------------------------------------------------- peças
+def fundir_por_url(pecas: Iterable[Dict[str, Any]]) -> tuple:
+    """Funde peças com a mesma URL canônica (índice + web, ou duas afirmações).
+    Retorna (unicas, fusoes[(url_mantida, url_fundida)]). Campos fundidos: `afs`
+    (união), `origens` (união); veredito/corpo/trecho/data: o primeiro não vazio."""
+    por: Dict[str, Dict[str, Any]] = {}
+    ordem: List[str] = []
+    fusoes: List[tuple] = []
     for p in pecas:
-        texto = f"{p.get('titulo','')} {p.get('corpo_texto','') or ''}"
-        base = dominio_base(p.get("url", ""))
-        achou = False
-        for g in grupos:
-            ref = f"{g[0].get('titulo','')} {g[0].get('corpo_texto','') or ''}"
-            mesma_base = base and base == dominio_base(g[0].get("url", ""))
-            if mesma_base or _similaridade(texto, ref) >= limiar_dup:
-                g.append(p)
-                achou = True
-                break
-        if not achou:
-            grupos.append([p])
-    return {"n": len(grupos), "grupos": [[q.get("url", "") for q in g] for g in grupos]}
+        k = url_canonica(p.get("url", ""))
+        if not k:
+            continue
+        p.setdefault("afs", set())
+        p.setdefault("origens", set())
+        if k not in por:
+            p["url_canonica"] = k
+            por[k] = p
+            ordem.append(k)
+            continue
+        a = por[k]
+        a["afs"] = set(a.get("afs") or set()) | set(p.get("afs") or set())
+        a["origens"] = set(a.get("origens") or set()) | set(p.get("origens") or set())
+        for campo in ("veredito", "selo_original", "agencia", "afirmacao_checada", "corpo", "trecho",
+                      "data_pub", "snippet", "titulo", "veiculo"):
+            if not a.get(campo) and p.get(campo):
+                a[campo] = p[campo]
+        fusoes.append((a.get("url"), p.get("url")))
+    return [por[k] for k in ordem], fusoes
+
+
+def _texto(p: Dict[str, Any]) -> str:
+    return p.get("corpo") or p.get("corpo_texto") or p.get("trecho_corpo") or ""
+
+
+def agrupar(pecas: List[Dict[str, Any]], limiar_corpo: float = 0.8,
+            limiar_titulo: float = 0.85) -> Dict[str, Any]:
+    """Clusters de independência. Grava `cluster` e `motivo_cluster` em cada peça.
+    Retorna {n, clusters: {id: [urls]}, motivos: {url: motivo}}."""
+    n = len(pecas)
+    pai = list(range(n))
+    motivo: Dict[int, str] = {}
+
+    def achar(i: int) -> int:
+        while pai[i] != i:
+            pai[i] = pai[pai[i]]
+            i = pai[i]
+        return i
+
+    def unir(i: int, j: int, por: str) -> None:
+        ri, rj = achar(i), achar(j)
+        if ri != rj:
+            pai[max(ri, rj)] = min(ri, rj)
+            motivo.setdefault(max(i, j), por)
+
+    agencias = [agencia_assinada(_texto(p)) for p in pecas]
+    bases = [dominio_base(p.get("url", "")) for p in pecas]
+    for i in range(n):
+        for j in range(i):
+            if agencias[i] and agencias[i] == agencias[j]:
+                unir(i, j, f"mesma agência ({agencias[i]})")
+            elif bases[i] and bases[i] == bases[j]:
+                unir(i, j, f"mesmo grupo/domínio ({bases[i]})")
+            else:
+                ti, tj = _texto(pecas[i]), _texto(pecas[j])
+                if ti and tj:
+                    s = similaridade_corpo(ti, tj)
+                    if s >= limiar_corpo:
+                        unir(i, j, f"corpo quase idêntico ({s:.2f})")
+                elif _similaridade(pecas[i].get("titulo", ""), pecas[j].get("titulo", "")) >= limiar_titulo:
+                    unir(i, j, "título quase idêntico")
+    grupos: Dict[int, List[int]] = {}
+    for i in range(n):
+        grupos.setdefault(achar(i), []).append(i)
+    clusters: Dict[str, List[str]] = {}
+    for raiz, membros in grupos.items():
+        ag = next((agencias[m] for m in membros if agencias[m]), None)
+        cid = f"agencia:{ag}" if ag else (bases[raiz] or f"url:{raiz}")
+        if cid in clusters:  # colisão improvável (ex.: base vazia): desambigua
+            cid = f"{cid}#{raiz}"
+        clusters[cid] = [pecas[m].get("url", "") for m in membros]
+        for m in membros:
+            pecas[m]["cluster"] = cid
+            pecas[m]["motivo_cluster"] = motivo.get(m, "" if m == raiz else "mesmo cluster")
+    return {"n": len(clusters), "clusters": clusters,
+            "motivos": {pecas[m].get("url", ""): mo for m, mo in motivo.items()}}
+
+
+def contar_independentes(pecas: List[Dict[str, Any]], limiar_dup: float = 0.85) -> Dict[str, Any]:
+    """Compat: {n, grupos[[urls]]} usando os mesmos clusters de `agrupar` (não muta)."""
+    copia = [dict(p) for p in pecas]
+    r = agrupar(copia, limiar_titulo=limiar_dup)
+    return {"n": r["n"], "grupos": list(r["clusters"].values())}
 
 
 def divergencias(pecas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Compara campos normalizados entre peças (datas, vereditos, atores)."""
+    """Datas/vereditos diferentes ENTRE clusters (informação para o recibo)."""
     achados: List[Dict[str, Any]] = []
-    datas = {(p.get("data_publicacao") or "")[:10] for p in pecas if p.get("data_publicacao")}
-    if len(datas) > 1:
-        achados.append({"campo": "data", "tipo": "divergencia", "valores": sorted(datas),
-                        "leitura": "fontes apontam datas diferentes para o fato"})
-    vereditos = {(p.get("veredito") or "") for p in pecas if p.get("veredito")}
-    if len(vereditos) > 1:
-        achados.append({"campo": "veredito", "tipo": "divergencia", "valores": sorted(vereditos),
-                        "leitura": "checadores discordam entre si — pesa contra conclusão"})
-    # Convergência exige 2+ peças COM veredito: 1 selo + N peças sem selo não é
-    # convergência (evita contar o mesmo selo duas vezes, junto de "cobertura ampla").
-    n_com_veredito = sum(1 for p in pecas if p.get("veredito"))
-    if len(vereditos) == 1 and n_com_veredito >= 2:
-        achados.append({"campo": "veredito", "tipo": "convergencia", "valores": sorted(vereditos),
-                        "leitura": "checadores convergem para o mesmo veredito"})
+    por_cluster_data: Dict[str, str] = {}
+    por_cluster_ver: Dict[str, str] = {}
+    for p in pecas:
+        c = p.get("cluster") or p.get("url", "")
+        d = (p.get("data_pub") or "")[:10]
+        if re.match(r"\d{4}-\d{2}-\d{2}", d):
+            por_cluster_data.setdefault(c, d)
+        v = p.get("veredito")
+        if v:
+            por_cluster_ver.setdefault(c, v)
+    datas = sorted(set(por_cluster_data.values()))
+    if len(datas) > 1 and datas[0][:4] != datas[-1][:4]:
+        achados.append({"campo": "data", "tipo": "divergencia", "valores": datas,
+                        "leitura": "fontes apontam datas de anos diferentes: o conteúdo pode ser reciclado"})
+    vers = sorted(set(por_cluster_ver.values()))
+    if len(vers) > 1:
+        achados.append({"campo": "veredito", "tipo": "divergencia", "valores": vers,
+                        "leitura": "checadores diferentes deram selos diferentes"})
     return achados

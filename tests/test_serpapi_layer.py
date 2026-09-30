@@ -85,16 +85,76 @@ def test_simples_duas_queries_sem_operador_site():
     assert "checagem" in qs[1]["q"] or "falso" in qs[1]["q"]
 
 
-def test_avancada_duas_buscas_todos_os_hosts_sem_inurl():
+def test_avancada_duas_buscas_agencias_do_catalogo_sem_inurl():
     # Decisão live 23/09/2026: cadeia (site:inurl:) em OR retorna zero no
-    # Google — o filtro avançado é 1 bloco site: puro com todos os hosts.
+    # Google — o filtro avançado é 1 bloco site: puro (host ou host/caminho).
     qs = camada.construir_queries("vacina causa autismo", engine="google", estrategia="avancada")
     assert len(qs) == 2  # teto: 2 buscas por afirmação
     crua, filtro = qs
     assert "site:" not in crua["q"] and "inurl:" not in crua["q"]
-    for s in camada.sites_checagem():
-        assert f"site:{s['host']}" in filtro["q"], f"host sem cobertura: {s['host']}"
-    assert "inurl:" not in filtro["q"]
+    for s in camada.sites_checagem():  # consulta curta: todas as agências cabem em 32 palavras
+        assert f"site:{s['site']}" in filtro["q"], f"agência sem cobertura: {s['site']}"
+    assert "inurl:" not in filtro["q"] and len(filtro["q"].split()) <= 32
+
+
+def test_agencias_derivadas_do_catalogo_sem_lista_fixa():
+    cat = Catalogo([
+        {"id": "ag", "nome": "Agência", "tipo": "checagem", "homepage": "https://www.agencia.org/",
+         "aliases": ["agencia-nova.org"], "editorias": ["checagem", "verificação"]},
+        {"id": "sec", "nome": "Seção", "tipo": "checagem", "homepage": "https://portal.com.br/verifica/",
+         "editorias": ["desinformação"]},
+        {"id": "fin", "nome": "Finanças anti-golpe", "tipo": "checagem", "homepage": "https://fin.globo.com/",
+         "editorias": ["golpes financeiros", "fraudes"]},
+        {"id": "forcado", "nome": "Explícito", "tipo": "checagem", "homepage": "https://x.org/",
+         "editorias": ["checagem"], "agencia_checagem": False},
+        {"id": "cand", "nome": "Candidato", "tipo": "checagem", "homepage": "https://cand.org/",
+         "editorias": ["checagem"], "origem_catalogo": "descoberta-automatica"},
+        {"id": "geral", "nome": "Jornal", "tipo": "geral", "homepage": "https://jornal.com/",
+         "editorias": ["checagem"]},
+    ])
+    sites = [a["site"] for a in camada.agencias_checagem(cat)]
+    assert sites == ["agencia.org", "portal.com.br/verifica", "agencia-nova.org"]
+    assert camada.eh_secao_checagem("https://portal.com.br/verifica/x", cat) is True
+    assert camada.eh_secao_checagem("https://portal.com.br/esportes/x", cat) is False
+    assert camada.eh_secao_checagem("https://fin.globo.com/golpe-x", cat) is False
+
+
+def test_agencias_do_catalogo_real_lupa_nova_sim_valorinveste_nao():
+    E = camada.eh_secao_checagem
+    assert E("https://www.agencialupa.org/verificacao/2026/09/x/") is True
+    assert E("https://valorinveste.globo.com/mercados/noticia/2026/x.ghtml") is False
+    assert E("https://www.canalsaude.fiocruz.br/canal/videoAberto/x") is False
+    sites = [a["site"] for a in camada.agencias_checagem()]
+    assert "agencialupa.org" in sites and not any("valorinveste" in x for x in sites)
+
+
+def test_queries_nunca_passam_de_32_palavras():
+    longa = " ".join(f"palavra{i}" for i in range(60))
+    for est in ("simples", "avancada", "ambas"):
+        for q in camada.construir_queries(longa, engine="google", estrategia=est):
+            assert len(q["q"].split()) <= 32, (est, q["q"])
+    for q in camada.construir_queries(longa, engine="google_news"):
+        assert len(q["q"].split()) <= 32
+    q, fora = camada.query_agencias(longa)
+    assert len(q["q"].split()) <= 32 and "site:" in q["q"] and fora
+
+
+def test_buscar_ex_motivo_por_chamada_e_cache(monkeypatch):
+    import httpx as _hx
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"organic_results": [{"link": "https://x.com/a", "title": "T"}]}
+    monkeypatch.setattr(_hx, "get", lambda *a, **k: R())
+    c = camada.SerpAPIClient(api_key="k")
+    q = {"q": "a", "engine": "google", "hl": "pt-br", "gl": "br", "num": 10}
+    r1, r2 = c.buscar_ex(q), c.buscar_ex(q)
+    assert (r1.motivo, r1.cache) == ("ok", False) and (r2.motivo, r2.cache) == ("ok", True)
+    assert c.uso_hoje == 1
+    assert camada.SerpAPIClient(api_key="").buscar_ex(q).motivo == "sem_chave"
 
 
 def test_secao_checagem_dedicado_vs_geral():
@@ -166,12 +226,13 @@ def test_roteador_scholar_nao_cai_no_google():
     assert len(qs) == 1 and qs[0]["engine"] == "google_scholar"
 
 
-def test_avancada_valida_e_limita_hosts():
-    sites = [{"host": f"h{i}.exemplo.com", "paths": []} for i in range(30)]
-    sites.append({"host": "http://evil .com", "paths": []})
+def test_avancada_valida_e_limita_hosts_a_32_palavras():
+    sites = [{"host": f"h{i}.exemplo.com"} for i in range(30)]
+    sites.append({"host": "http://evil .com"})
     qs = camada.construir_queries_avancada("x", sites=sites)
     filtro = qs[1]["q"]
-    assert filtro.count("site:") == 20
+    assert filtro.count("site:") == 16  # 1 palavra + 16 sites + 15 OR = 32
+    assert len(filtro.split()) == 32
     assert "evil" not in filtro
 
 

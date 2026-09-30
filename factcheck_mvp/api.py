@@ -50,20 +50,9 @@ def pipeline() -> Pipeline:
                 except RuntimeError as e:
                     log.error("catálogo indisponível: %s", e)
                     raise HTTPException(status_code=503, detail="catálogo indisponível, tente mais tarde")
-                idx_ver = Indice()
+                # Índice de checagens (ClaimReview/RSS): atalho opcional atrás de INDICE_CHECAGENS
+                idx_ver = Indice.de_checagens()
                 idx_not = Indice()
-                try:
-                    import json
-                    from pathlib import Path
-
-                    base = Path(__file__).resolve().parent / "data"
-                    for nome in ("amostra_checagem.json", "amostra_geral.json"):
-                        arq = base / nome
-                        if arq.exists():
-                            for a in json.loads(arq.read_text(encoding="utf-8")):
-                                (idx_ver if (a.get("tipo_conteudo") == "checagem") else idx_not).adicionar(a)
-                except Exception:
-                    log.exception("falha ao carregar amostras do índice")
                 _pipe = Pipeline(catalogo, idx_ver, idx_not, SerpAPIClient())
     return _pipe
 

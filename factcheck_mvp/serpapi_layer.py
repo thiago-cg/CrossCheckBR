@@ -1,9 +1,12 @@
 """Camada 0 — descoberta fresca via SerpAPI (Google tradicional ou Google News).
 
 Dois motores mantidos (SERP_ENGINE): `google` (orgânico, padrão) e
-`google_news` (legado). Duas estratégias no orgânico (SERP_ESTRATEGIA):
+`google_news` (legado). Estratégias estáticas no orgânico (SERP_ESTRATEGIA):
 `simples` (crua + dirigida por vocabulário) e `avancada` (crua + 1 filtro
-com todos os hosts de checagem). `ambas` = união (p/ A/B).
+`site:` com as agências de checagem do catálogo). `ambas` = união (p/ A/B).
+`agente` (padrão) é orquestrado em `agente.py` e usa as mesmas peças daqui.
+Toda query tem no máximo 32 palavras (limite do Google; operadores contam).
+Agências de checagem: derivadas do catálogo (`agencias_checagem`), nunca lista fixa.
 Sem chave: tudo degrada com elegância (retorna None; pipeline segue no índice).
 Sem denylist: filtragem só por relevância nas etapas seguintes.
 """
@@ -11,11 +14,13 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
-from . import config
+from . import config, replay, telemetria
 from .catalogo import Catalogo
 
 log = logging.getLogger("factcheck.serpapi")
@@ -24,95 +29,159 @@ ENGINES = ("google", "google_news", "google_scholar")
 RESULT_KEY = {"google_news": "news_results", "google": "organic_results",
               "google_scholar": "organic_results"}
 
-# Portais de checagem priorizados na estratégia avançada.
-# `secao_apenas`: a checagem mora numa seção do portal amplo (vale só o
-# path); sem a flag, o host é dedicado e qualquer URL dele é checagem.
-SITES_CHECAGEM = [
-    {"host": "justicaeleitoral.jus.br", "paths": ["fato-ou-boato"],  # Fato ou Boato (TSE)
-     "secao_apenas": True},
-    {"host": "projetocomprova.com.br", "paths": []},                  # Projeto Comprova
-    {"host": "lupa.uol.com.br", "paths": []},                         # Agência Lupa
-    {"host": "aosfatos.org", "paths": ["radar"]},                     # Aos Fatos + Radar
-    {"host": "gov.br", "paths": ["saude-com-ciencia"],                # Saúde com Ciência (MS)
-     "secao_apenas": True},
-    {"host": "canalsaude.fiocruz.br", "paths": []},                   # Canal Saúde (Fiocruz)
-    {"host": "e-farsas.com", "paths": []},                            # E-farsas
-    {"host": "valorinveste.globo.com", "paths": []},                  # Valor Investe
-    {"host": "noticias.uol.com.br", "paths": ["confere"],             # UOL Confere
-     "secao_apenas": True},
-    {"host": "boatos.org", "paths": []},                              # Boatos.org
-    {"host": "agenciatatu.com.br", "paths": []},                      # Agência Tatu
-    {"host": "estadao.com.br", "paths": ["estadao-verifica"],         # Estadão Verifica
-     "secao_apenas": True},
-    {"host": "g1.globo.com", "paths": ["fato-ou-fake"],               # Fato ou Fake (G1)
-     "secao_apenas": True},
-]
+# Limite de termos do Google: a partir da 33ª palavra o resto é ignorado (e um
+# filtro `site:` cortado no meio zera a perna). Operadores (`OR`, `site:x`) contam.
+MAX_PALAVRAS_QUERY = 32
+# Palavras da consulta mantidas na query restrita às agências (o resto é `site:`).
+MAX_PALAVRAS_CONSULTA_SITES = 8
+
+# Agência de checagem = portal CURADO do catálogo com `tipo: checagem` cuja editoria
+# declara verificação (checagem/verificação/boato/desinformação/fake/farsa). Um campo
+# booleano `agencia_checagem` no portal, se existir, vence a heurística. Portais de
+# `tipo: checagem` sem editoria de verificação (ex.: cobertura anti-golpes de um site
+# de finanças, canal de vídeo institucional) não entram: o review (B1) mostrou que
+# contá-los como checagem faz notícia comum passar por checagem.
+_EDITORIA_VERIFICACAO = re.compile(r"checag|verifica|boato|desinforma|fake|farsa", re.I)
+_SITE_VALIDO = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}(/[a-z0-9._~%/-]*)?$")
+_cat_padrao: Optional[Catalogo] = None
 
 
-def sites_checagem() -> List[Dict[str, Any]]:
-    """Padrão + extras de SERP_SITES_EXTRAS (hosts separados por vírgula).
+def _catalogo_padrao() -> Catalogo:
+    """Catálogo do disco, carregado uma vez (agências curadas só mudam por curadoria humana)."""
+    global _cat_padrao
+    if _cat_padrao is None:
+        try:
+            _cat_padrao = Catalogo.carregar()
+        except Exception as e:  # catálogo ausente/corrompido: sem agências, sem quebrar a busca
+            telemetria.fallback("serpapi.agencias", f"catálogo indisponível: {type(e).__name__}: {e}")
+            return Catalogo([])
+    return _cat_padrao
 
-    Extras aceitam URL completa: normaliza p/ host (sem scheme, path, porta).
-    """
+
+def eh_agencia_checagem(portal: Optional[Dict[str, Any]], catalogo: Catalogo) -> bool:
+    if not portal or portal.get("tipo") != "checagem" or not catalogo.eh_curado(portal):
+        return False
+    explicito = portal.get("agencia_checagem")
+    if isinstance(explicito, bool):
+        return explicito
+    return any(_EDITORIA_VERIFICACAO.search(str(e or "")) for e in (portal.get("editorias") or []))
+
+
+def _extras() -> List[str]:
+    """Hosts de SERP_SITES_EXTRAS (vírgula). Aceita URL completa: vira host (sem scheme/porta/path)."""
     from urllib.parse import urlparse as _up
-    sites = [dict(s) for s in SITES_CHECAGEM]
-    vistos = {s["host"] for s in sites}
+    out = []
     for h in (getattr(config, "SERP_SITES_EXTRAS", "") or "").split(","):
         h = (h or "").strip().lower()
         if "://" in h or "/" in h:
             try:
-                u = _up(h if "://" in h else f"https://{h}")
-                h = u.hostname or ""
+                h = _up(h if "://" in h else f"https://{h}").hostname or ""
             except Exception:
                 h = ""
         else:
             h = h.split(":")[0].split("?")[0]  # sem porta/query
         if h.startswith("www."):
             h = h[4:]  # removeprefix manual (lstrip corrompe: tira charset, não prefixo)
-        if h and h not in vistos:
-            vistos.add(h)
-            sites.append({"host": h, "paths": []})
-    return sites
+        if h:
+            out.append(h)
+    return out
 
 
-def eh_secao_checagem(url: str) -> bool:
-    """URL é de seção de checagem? Host dedicado vale; host amplo exige path.
+def agencias_checagem(catalogo: Optional[Catalogo] = None) -> List[Dict[str, str]]:
+    """Agências de checagem DERIVADAS do catálogo (sem lista fixa de hosts).
 
-    Compensa o que o Google não faz: site: em host amplo (g1, estadão, UOL…)
-    retorna notícia geral — o path local separa checagem de geral sem
-    custar busca extra (inurl: em OR retorna zero no Google).
+    -> [{id, nome, host, path, site}], `site` = host (agência dedicada) ou host+caminho
+    (seção de um portal amplo, ex. g1.globo.com/fato-ou-fake). Ordem: domínio principal de
+    cada agência (ordem do catálogo), depois os aliases, depois SERP_SITES_EXTRAS.
     """
-    from urllib.parse import urlparse as _up
-    try:
-        u = _up((url or "").lower())
-        h = u.hostname or ""
-        if h.startswith("www."):
-            h = h[4:]
-        path = u.path or ""
-    except Exception:
+    from .catalogo import _host_caminho
+    cat = catalogo if catalogo is not None else _catalogo_padrao()
+    principais: List[Dict[str, str]] = []
+    aliases: List[Dict[str, str]] = []
+    for p in cat.portais:
+        if not eh_agencia_checagem(p, cat):
+            continue
+        for k, alvo in enumerate([p.get("homepage", "")] + list(p.get("aliases") or [])):
+            host, caminho = _host_caminho(alvo)
+            if not host:
+                continue
+            site = host if caminho == "/" else host + caminho.rstrip("/")
+            (principais if k == 0 else aliases).append(
+                {"id": p.get("id", ""), "nome": p.get("nome", ""), "host": host, "path": caminho, "site": site})
+    extras = [{"id": f"extra:{h}", "nome": h, "host": h, "path": "/", "site": h} for h in _extras()]
+    out, vistos = [], set()
+    for a in principais + aliases + extras:
+        if a["site"] not in vistos:
+            vistos.add(a["site"])
+            out.append(a)
+    return out
+
+
+def sites_checagem(catalogo: Optional[Catalogo] = None) -> List[Dict[str, str]]:
+    """Compat: mesmo que `agencias_checagem` (cada item tem `host` e `site`)."""
+    return agencias_checagem(catalogo)
+
+
+def eh_secao_checagem(url: str, catalogo: Optional[Catalogo] = None) -> bool:
+    """URL é de agência de checagem? Agência dedicada: qualquer caminho do host;
+    seção de portal amplo (g1/fato-ou-fake, estadão/estadao-verifica…): só sob o caminho
+    da seção (por segmento: /fato-ou-fake-x/ não vale)."""
+    from .catalogo import _host_caminho
+    host, caminho = _host_caminho(url or "")
+    if not host or not (url or "").strip():
         return False
-    for s in sites_checagem():
-        host = s["host"]
-        if h == host or h.endswith("." + host):
-            if not s.get("secao_apenas"):
-                return True  # outlet dedicado: tudo é checagem
-            # Match por segmento exato: /radar/ vale, /radar-meteorologico não.
-            segs = [p for p in path.split("/") if p]
-            if any(p in segs for p in s.get("paths", [])):
-                return True
+    for a in agencias_checagem(catalogo):
+        if host != a["host"] and not host.endswith("." + a["host"]):
+            continue
+        if caminho.startswith(a["path"]):
+            return True
     return False
 
 
+def limitar_palavras(texto: str, n: int = MAX_PALAVRAS_QUERY) -> str:
+    return " ".join((texto or "").split()[: max(0, n)])
+
+
+def n_palavras(q: str) -> int:
+    return len((q or "").split())
+
+
 def _base(q: str, engine: str) -> Dict[str, Any]:
-    return {"q": q, "hl": "pt-br", "gl": "br", "num": 10, "engine": engine}
+    return {"q": limitar_palavras(q), "hl": "pt-br", "gl": "br", "num": 10, "engine": engine}
+
+
+def query_agencias(consulta: str, agencias: Optional[List[Dict[str, Any]]] = None,
+                   max_palavras: int = MAX_PALAVRAS_QUERY,
+                   max_palavras_consulta: int = MAX_PALAVRAS_CONSULTA_SITES) -> Tuple[Dict[str, Any], List[str]]:
+    """Consulta + `(site:a OR site:b …)` das agências, com no máximo `max_palavras` palavras.
+
+    Evidência live (23/09/2026): cadeia `site:host inurl:path` em OR retorna zero; `site:` puro
+    (inclusive host/caminho) funciona. A consulta fica com até `max_palavras_consulta` palavras
+    e entram tantas agências quantas couberem (k agências = 2k-1 palavras), na ordem de
+    `agencias_checagem`. -> (query, sites que ficaram de fora).
+    """
+    agencias = agencias if agencias is not None else agencias_checagem()
+    sites = []
+    for a in agencias:
+        s = str(a.get("site") or a.get("host") or "").strip().lower()
+        if _SITE_VALIDO.match(s) and s not in sites:
+            sites.append(s)
+    palavras = (consulta or "").split()[: max(1, min(max_palavras_consulta, max_palavras - 1))]
+    k = max(0, (max_palavras - len(palavras) + 1) // 2)
+    usados, fora = sites[:k], sites[k:]
+    q = " ".join(palavras)
+    if usados:
+        q = f"{q} ({' OR '.join('site:' + s for s in usados)})"
+    return _base(q, "google"), fora
 
 
 def construir_queries_news(afirmacao: str) -> List[Dict[str, Any]]:
     """Legado: 2 queries no Google News (neutra + dirigida a checadores)."""
     curta = afirmacao.strip()[:200]
+    sufixo = " é verdade OR é falso OR checagem"
     return [
-        {"q": curta, "hl": "pt-br", "gl": "br", "engine": "google_news"},
-        {"q": f"{curta} é verdade OR é falso OR checagem",
+        {"q": limitar_palavras(curta), "hl": "pt-br", "gl": "br", "engine": "google_news"},
+        {"q": limitar_palavras(curta, MAX_PALAVRAS_QUERY - n_palavras(sufixo)) + sufixo,
          "hl": "pt-br", "gl": "br", "engine": "google_news"},
     ]
 
@@ -120,32 +189,20 @@ def construir_queries_news(afirmacao: str) -> List[Dict[str, Any]]:
 def construir_queries_simples(afirmacao: str) -> List[Dict[str, Any]]:
     """Orgânico sem operadores de site: crua + dirigida leve."""
     curta = afirmacao.strip()[:200]
+    sufixo = " é verdade OR é falso OR checagem OR fake"
     return [
         _base(curta, "google"),
-        _base(f"{curta} é verdade OR é falso OR checagem OR fake", "google"),
+        _base(limitar_palavras(curta, MAX_PALAVRAS_QUERY - n_palavras(sufixo)) + sufixo, "google"),
     ]
 
 
 def construir_queries_avancada(afirmacao: str,
                                sites: Optional[List[Dict[str, Any]]] = None
                                ) -> List[Dict[str, Any]]:
-    """Orgânico em 2 buscas: crua (recall) + 1 filtro com TODOS os hosts.
-
-    Evidência live (23/09/2026, "ibuprofeno cura dengue"): mega-query com
-    pares (site:host inurl:path) em OR retorna ZERO — aninhado ou flat,
-    o Google inviabiliza a cadeia. Só o bloco `site:` puro nos hosts
-    dedicados funciona (9 hosts, 1 resultado). Por isso os paths (TSE,
-    Radar, Saúde com Ciência, Confere, Verifica, Fato ou Fake) ficam
-    cobertos pelo índice local + query crua, não por inurl:.
-    """
+    """Orgânico em 2 buscas: crua (recall) + a mesma consulta restrita às agências de checagem
+    do catálogo (`query_agencias`, ≤ 32 palavras). Os paths de seção entram como `site:host/path`."""
     curta = afirmacao.strip()[:200]
-    sites = sites if sites is not None else sites_checagem()
-    # Hosts válidos + teto: filtro gigante estoura o limite de termos do
-    # Google e a perna do filtro zera (evidência live 23/09/2026).
-    hosts = [s["host"] for s in sites
-             if re.match(r"^[a-z0-9.-]+\.[a-z]{2,}$", s.get("host", "") or "")][:20]
-    ors = " OR ".join(f"site:{h}" for h in hosts)
-    return [_base(curta, "google"), _base(f"{curta} ({ors})", "google")]
+    return [_base(curta, "google"), query_agencias(curta, sites)[0]]
 
 
 def construir_queries(afirmacao: str, engine: Optional[str] = None,
@@ -159,13 +216,13 @@ def construir_queries(afirmacao: str, engine: Optional[str] = None,
     if eng == "google_news":
         return construir_queries_news(afirmacao)
     if eng == "google_scholar":
-        curta = afirmacao.strip()[:200]
-        return [{"q": curta, "hl": "pt", "num": 5, "engine": "google_scholar"}]
+        return [{"q": limitar_palavras(afirmacao.strip()[:200]), "hl": "pt", "num": 5,
+                 "engine": "google_scholar"}]
     est = (estrategia if estrategia is not None else
            getattr(config, "SERP_ESTRATEGIA", "avancada") or "avancada")
     est = str(est).strip().lower()
     if est == "agente":
-        raise ValueError("agente é orquestração pipeline-level (use agente.descobrir), "
+        raise ValueError("agente é orquestração pipeline-level (use agente.onda1/onda_extra), "
                          "não query estática da camada")
     if est == "simples":
         return construir_queries_simples(afirmacao)
@@ -177,6 +234,14 @@ def construir_queries(afirmacao: str, engine: Optional[str] = None,
                 uniao.append(q)
         return uniao
     return construir_queries_avancada(afirmacao)
+
+
+@dataclass
+class ResultadoBusca:
+    """Resultado de UMA chamada (sem estado compartilhado: seguro com requisições concorrentes)."""
+    payload: Optional[Dict[str, Any]]
+    motivo: str          # ok | vazio | cap | erro | sem_chave
+    cache: bool = False  # veio do cache em memória do cliente (não gastou busca)
 
 
 class SerpAPIClient:
@@ -198,6 +263,7 @@ class SerpAPIClient:
         self.bloqueios_cap = 0
         self.erros_rede = 0
         self.ultimo_motivo = "ok"  # ok|cap|erro|vazio|sem_chave
+        self._trava = threading.Lock()  # buscas de uma onda rodam em paralelo (threads)
 
     @property
     def uso_hoje(self) -> int:
@@ -224,55 +290,66 @@ class SerpAPIClient:
 
     def buscar(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Retorna o JSON bruto ou None (sem chave, timeout, erro). Nunca levanta."""
+        return self.buscar_ex(params).payload
+
+    def buscar_ex(self, params: Dict[str, Any]) -> ResultadoBusca:
+        """Como `buscar`, mas devolve o motivo e se veio do cache DESTA chamada.
+
+        `ultimo_motivo` continua sendo atualizado (compat), mas é estado compartilhado:
+        quem precisa do motivo por requisição (o agente) usa o retorno daqui."""
         if not self.ativo:
             self.ultimo_motivo = "sem_chave"
-            return None
+            return ResultadoBusca(None, "sem_chave")
         agora = time.time()
         chave = self._chave(params)
-        hit = self._cache.get(chave)
-        if hit and hit[0] > agora:
-            return hit[1]
-        # Teto diário de custo (check #7): cache-hit não conta, só chamada real
-        hoje = datetime.now(timezone.utc).date().isoformat()
-        if hoje != self._dia:
-            self._dia, self._uso_n = hoje, 0
-        cap = getattr(config, "SERPAPI_DAILY_CAP", 100)
-        if cap and self._uso_n >= cap:
-            self.bloqueios_cap += 1
-            self.ultimo_motivo = "cap"
+        with self._trava:
+            hit = self._cache.get(chave)
+            if hit and hit[0] > agora:
+                return ResultadoBusca(hit[1], "ok", cache=True)
+            # Teto diário de custo (check #7): cache-hit não conta, só chamada real
+            hoje = datetime.now(timezone.utc).date().isoformat()
+            if hoje != self._dia:
+                self._dia, self._uso_n = hoje, 0
+            cap = getattr(config, "SERPAPI_DAILY_CAP", 100)
+            estourou = bool(cap and self._uso_n >= cap)
+            if estourou:
+                self.bloqueios_cap += 1
+                self.ultimo_motivo = "cap"
+        if estourou:
             # WARNING de propósito: aparece no bot_err.log (era silêncio total)
-            log.warning("SerpAPI teto diário atingido (%s/%s): descoberta pausada",
-                        self._uso_n, cap)
-            return None
+            log.warning("SerpAPI teto diário atingido (%s/%s): descoberta pausada", self._uso_n, cap)
+            telemetria.fallback("serpapi.cap", f"teto diário {self._uso_n}/{cap}")
+            return ResultadoBusca(None, "cap")
         try:
-            import httpx
-
             corpo = dict(params)
             corpo.pop("engine", None)  # motor vai explícito (override por query)
-            r = httpx.get(
+            r = replay.http_get(
                 "https://serpapi.com/search.json",
                 params={"engine": self.engine_de(params), "api_key": self.api_key, **corpo},
                 timeout=self.timeout,
             )
             r.raise_for_status()
             payload = r.json()
-            self._uso_n += 1
             tem = bool((payload or {}).get(self.result_key(params))
                        or (payload or {}).get("top_stories"))
-            if tem:
-                # Vazios NÃO entram no cache: transitório colado por 1h de TTL
-                # custa mais caro agora (mais queries por checagem).
-                if len(self._cache) >= self._cache_max:  # teto: evita crescimento ilimitado
-                    mais_antiga = min(self._cache, key=lambda k: self._cache[k][0])
-                    del self._cache[mais_antiga]
-                self._cache[chave] = (agora + self.ttl, payload)
-            self.ultimo_motivo = "ok" if tem else "vazio"
-            return payload
+            with self._trava:
+                self._uso_n += 1
+                if tem:
+                    # Vazios NÃO entram no cache: transitório colado por 1h de TTL
+                    # custa mais caro agora (mais queries por checagem).
+                    if len(self._cache) >= self._cache_max:  # teto: evita crescimento ilimitado
+                        mais_antiga = min(self._cache, key=lambda k: self._cache[k][0])
+                        del self._cache[mais_antiga]
+                    self._cache[chave] = (agora + self.ttl, payload)
+                self.ultimo_motivo = "ok" if tem else "vazio"
+            return ResultadoBusca(payload, "ok" if tem else "vazio")
         except Exception as e:
             self.erros_rede += 1
             self.ultimo_motivo = "erro"
             log.warning("SerpAPI falhou: %s", str(e)[:150])
-            return None  # SerpAPI é opcional: falha vira etapa "pulada/falha", nunca exceção
+            if not isinstance(e, (replay.OrcamentoSerpAPIEsgotado, replay.CotaSerpAPIEsgotada)):  # já emitiram
+                telemetria.fallback("serpapi", f"{type(e).__name__}: {e}")
+            return ResultadoBusca(None, "erro")  # SerpAPI é opcional: falha vira etapa, nunca exceção
 
 
 def normalizar_item(item: Dict[str, Any], engine: str = "google_news",
@@ -368,7 +445,9 @@ def rotear_fonte(parcial: Dict[str, Any], catalogo: Catalogo) -> Dict[str, Any]:
     Sem denylist: nenhum domínio é bloqueado aqui.
     """
     nome = (parcial.get("fonte") or {}).get("nome", "")
-    portal = catalogo.por_nome_fonte(nome) or catalogo.por_dominio(parcial.get("url", ""))
+    # Fase 2: catálogo decidido pela URL (domínio + aliases), nome só como último recurso;
+    # `catalogada` = portal CURADO (inserção automática é candidata, não curada).
+    portal = catalogo.por_url(parcial.get("url", "")) or catalogo.por_nome_fonte(nome)
     if portal:
         parcial["fonte"] = {
             "id": portal["id"],
@@ -376,7 +455,7 @@ def rotear_fonte(parcial: Dict[str, Any], catalogo: Catalogo) -> Dict[str, Any]:
             "homepage": portal["homepage"],
             "tipo": portal.get("tipo", ""),
         }
-        parcial["catalogada"] = True
+        parcial["catalogada"] = bool(catalogo.eh_curado(portal))
     else:
         parcial["catalogada"] = False
     return parcial
