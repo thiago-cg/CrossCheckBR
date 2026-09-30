@@ -114,8 +114,14 @@ def _local(messages: List[dict], max_tokens: int, timeout_s: float, finalidade: 
 
 def _openrouter(messages: List[dict], max_tokens: int, timeout_s: float, finalidade: str) -> tuple:
     from . import llm_openrouter
+    # O juiz pode usar um modelo próprio (OPENROUTER_MODEL_JUIZ); se falhar, cai no modelo global.
+    modelos = None
+    if finalidade == "juiz" and getattr(config, "OPENROUTER_MODEL_JUIZ", ""):
+        modelos = [m for m in (config.OPENROUTER_MODEL_JUIZ, config.OPENROUTER_MODEL,
+                               config.OPENROUTER_FALLBACK_MODEL) if m]
     with telemetria.finalidade(finalidade):
-        return llm_openrouter.chat(messages, max_tokens=max_tokens, timeout_s=int(timeout_s))
+        return llm_openrouter.chat(messages, max_tokens=max_tokens, timeout_s=int(timeout_s),
+                                   modelos=modelos)
 
 
 def _provedores() -> List[tuple]:

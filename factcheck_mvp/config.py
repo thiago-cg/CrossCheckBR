@@ -33,6 +33,7 @@ SERPAPI_KEY = _get("SERPAPI_KEY")
 OPENROUTER_API_KEY = _get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 OPENROUTER_FALLBACK_MODEL = _get("OPENROUTER_FALLBACK_MODEL", "google/gemma-4-26b-a4b-it:free")
+OPENROUTER_MODEL_JUIZ = _get("OPENROUTER_MODEL_JUIZ")  # vazio = mesmo modelo dos demais passos
 # Roteamento de provider (ex: StreamLake fp8 p/ deepseek-v4-flash).
 # Lista separada por vírgula; vazio = roteamento padrão da OpenRouter.
 OPENROUTER_PROVIDER_ORDER = _get("OPENROUTER_PROVIDER_ORDER", "StreamLake")

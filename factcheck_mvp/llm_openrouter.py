@@ -77,7 +77,7 @@ def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) ->
 
 
 def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
-         timeout_s: int = 0) -> Tuple[str, str]:
+         timeout_s: int = 0, modelos: List[str] | None = None) -> Tuple[str, str]:
     """Retorna (texto, modelo_usado). Tenta primary -> fallback. Respeita cap diário.
 
     Resposta vazia (200 com conteúdo vazio, comum no StreamLake) ganha 1 retry
@@ -88,7 +88,8 @@ def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
         raise RuntimeError("teto LLM diário atingido")
     mt = max_tokens or config.OPENROUTER_MAX_TOKENS
     ts = timeout_s or config.OPENROUTER_TIMEOUT_S
-    modelos = [m for m in (config.OPENROUTER_MODEL, config.OPENROUTER_FALLBACK_MODEL) if m]
+    if not modelos:  # `modelos` = ordem própria da chamada (ex.: modelo do juiz); vazio = padrão global
+        modelos = [m for m in (config.OPENROUTER_MODEL, config.OPENROUTER_FALLBACK_MODEL) if m]
     ultimo_erro: Exception | None = None
     for modelo in modelos:
         for tentativa in range(2):

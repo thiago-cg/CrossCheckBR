@@ -91,3 +91,19 @@ def test_openrouter_falha_cai_no_local(monkeypatch):
 def test_extrair_json_tolera_cercas_e_texto():
     assert llm.extrair_json('```json\n{"x": 1}\n```') == {"x": 1}
     assert llm.extrair_json('Aqui está:\n[{"x": 2}] fim') == [{"x": 2}]
+
+
+def test_juiz_usa_modelo_proprio_e_demais_usam_o_global(monkeypatch):
+    """OPENROUTER_MODEL_JUIZ vale só p/ finalidade 'juiz'; cai no modelo global se ele falhar."""
+    from factcheck_mvp import config, llm, llm_openrouter
+    vistos = {}
+    monkeypatch.setattr(config, "OPENROUTER_MODEL_JUIZ", "vendor/juiz")
+    monkeypatch.setattr(config, "OPENROUTER_MODEL", "vendor/geral")
+    monkeypatch.setattr(config, "OPENROUTER_FALLBACK_MODEL", "vendor/geral")
+    monkeypatch.setattr(llm_openrouter, "chat",
+                        lambda msgs, max_tokens=0, timeout_s=0, modelos=None: (vistos.setdefault("m", modelos) or "x", "vendor/juiz"))
+    llm._openrouter([{"role": "user", "content": "x"}], 10, 5, "juiz")
+    assert vistos["m"] == ["vendor/juiz", "vendor/geral", "vendor/geral"]
+    vistos.clear()
+    llm._openrouter([{"role": "user", "content": "x"}], 10, 5, "afirmacoes")
+    assert vistos["m"] is None  # sem override: chat() usa OPENROUTER_MODEL/FALLBACK
