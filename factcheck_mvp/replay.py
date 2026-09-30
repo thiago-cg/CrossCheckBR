@@ -301,6 +301,18 @@ class CotaSerpAPIEsgotada(httpx.HTTPError):
 _lock_uso = threading.Lock()
 _teto_processo: Optional[int] = None
 _usadas_processo = 0
+_cota_esgotada = False
+
+
+def cota_esgotada() -> bool:
+    """True se alguma chamada live neste processo viu 401/403/429 da SerpAPI."""
+    return _cota_esgotada
+
+
+def resetar_cota() -> None:
+    """Limpa a flag (eval.rodar() chama na entrada; testes usam no fixture)."""
+    global _cota_esgotada
+    _cota_esgotada = False
 
 
 def arq_uso_serpapi() -> Optional[Path]:
@@ -401,6 +413,7 @@ def _checar_cota_serpapi(metodo: str, url: str, resp: Resposta, lat: float) -> N
     (não grava cassete, p/ que um record com chave nova busque de novo)."""
     if resp.status_code not in (401, 403, 429):
         return
+    global _cota_esgotada
     try:
         detalhe = str((resp.json() or {}).get("error") or "")[:200]
     except Exception:
@@ -409,6 +422,7 @@ def _checar_cota_serpapi(metodo: str, url: str, resp: Resposta, lat: float) -> N
            "Cota da conta esgotada ou chave inválida: coloque uma nova SERPAPI_KEY no .env.")
     telemetria.fallback("serpapi", msg, status=resp.status_code)
     _evento_http(metodo, url, resp, lat, "live", msg)
+    _cota_esgotada = True
     raise CotaSerpAPIEsgotada(msg)
 
 

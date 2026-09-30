@@ -271,6 +271,11 @@ async def executar_casos(pipe: Any, casos: List[Dict[str, Any]], modo: str = "re
 
     async def _um(c: Dict[str, Any]) -> None:
         async with sem:
+            if replay.cota_esgotada():
+                resultados[c["id"]] = {"id": c["id"], "rotulo": c["rotulo"], "nao_rodado": True,
+                                       "motivo": "cota SerpAPI esgotada (troque SERPAPI_KEY)"}
+                progresso(f"  - {c['id']}: NÃO RODADO (cota SerpAPI esgotada)")
+                return
             if max_buscas is not None and modo != "replay":
                 usadas = replay.uso_serpapi()["usadas_processo"]
                 if usadas + estimativa > max_buscas:
@@ -522,6 +527,7 @@ def rodar(casos: List[Dict[str, Any]], *, modo: str = "replay", paralelo: int = 
             "git": _git_sha(), "n_casos": len(casos)}
     uso_antes = replay.uso_serpapi()
     replay.definir_teto_serpapi(max_buscas)
+    replay.resetar_cota()
     try:
         with overrides_env(env):
             if isolar_catalogo and pipeline_factory is None:
@@ -538,6 +544,11 @@ def rodar(casos: List[Dict[str, Any]], *, modo: str = "replay", paralelo: int = 
     m["serpapi"] = {"live_no_eval": uso_depois["usadas_processo"],
                     "usadas_total": uso_depois["usadas"], "restantes": uso_depois["restantes"],
                     "orcamento": uso_depois["orcamento"], "usadas_antes": uso_antes["usadas"]}
+    cota = replay.cota_esgotada()
+    m["cota_serpapi_esgotada"] = cota
+    if cota:
+        m["aviso"] = ("COTA SERPAPI ESGOTADA — troque SERPAPI_KEY no .env. "
+                      "Casos sem busca não medem busca/juiz; este eval é inválido.")
     delta = None
     if Path(baseline).exists():
         try:
@@ -546,7 +557,8 @@ def rodar(casos: List[Dict[str, Any]], *, modo: str = "replay", paralelo: int = 
             delta = None
     dir_saida = Path(dir_resultados) / (ts + (f"-{nome}" if nome else ""))
     salvar(dir_saida, meta, m, res, delta)
-    return {"meta": meta, "metricas": m, "casos": res, "delta": delta, "dir": dir_saida}
+    return {"meta": meta, "metricas": m, "casos": res, "delta": delta, "dir": dir_saida,
+            "cota_esgotada": cota, "codigo_saida": (2 if cota else 0)}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -594,6 +606,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 arquivos_casos=a.casos, isolar_catalogo=not a.catalogo_real)
     print(resumo_texto(out["meta"], out["metricas"], out["delta"]))
     print(f"  artefatos: {out['dir']}/relatorio.md")
+    if out.get("cota_esgotada"):
+        print("COTA SERPAPI ESGOTADA — troque SERPAPI_KEY no .env; "
+              "este eval NÃO julga mudanças de busca/juiz.", file=sys.stderr)
+        return 2
     if a.salvar_baseline:
         salvar_baseline(out["meta"], out["metricas"], out["casos"])
         print(f"  baseline salvo em {BASELINE}")

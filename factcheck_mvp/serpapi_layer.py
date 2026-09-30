@@ -346,7 +346,10 @@ class SerpAPIClient:
         except Exception as e:
             self.erros_rede += 1
             self.ultimo_motivo = "erro"
-            log.warning("SerpAPI falhou: %s", str(e)[:150])
+            if isinstance(e, replay.CotaSerpAPIEsgotada):
+                log.warning("SerpAPI cota esgotada/chave inválida, eval deve parar: %s", str(e)[:200])
+            else:
+                log.warning("SerpAPI falhou: %s", str(e)[:150])
             if not isinstance(e, (replay.OrcamentoSerpAPIEsgotado, replay.CotaSerpAPIEsgotada)):  # já emitiram
                 telemetria.fallback("serpapi", f"{type(e).__name__}: {e}")
             return ResultadoBusca(None, "erro")  # SerpAPI é opcional: falha vira etapa, nunca exceção
