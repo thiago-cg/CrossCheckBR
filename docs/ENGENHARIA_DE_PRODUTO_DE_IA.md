@@ -29,22 +29,23 @@ ao uso da predição. A coluna "Detalhes" aponta para onde cada bloco é
 desenvolvido.
 
 > [!IMPORTANT]
-> **A predição é um indício, não uma decisão.** O modelo entra na avaliação
-> como sinal auxiliar, ao lado das checagens de agências e da corroboração
-> entre veículos, e nunca decide sozinho.
+> **A predição é um indício, não uma decisão.** Desde o pull request nº 4, o
+> modelo não entra na avaliação: a propensão vem só das checagens de agências e
+> da postura das fontes, e a predição aparece na resposta como sinal de estilo,
+> ao lado do nível (RN11).
 
 | Bloco | Resumo | Detalhes |
 |---|---|---|
 | **Proposta de valor** | Estimar a propensão de um texto ser desinformação e mostrar as evidências, para a pessoa decidir se compartilha. Para quem recebe notícias em aplicativos de mensagem, para estudantes e professores, para jornalistas e checadores | [Requisitos, seção 1](ENGENHARIA_DE_REQUISITOS.md#1-visão-geral-e-proposta-de-valor) |
 | **Tarefa de aprendizado de máquina** | Classificação binária de texto em português. Entrada: o texto da notícia. Saída: probabilidade calibrada de ser desinformação | [Requisitos, seção 4.1](ENGENHARIA_DE_REQUISITOS.md#41-especificação-da-tarefa) |
-| **Decisões** | A predição vira um sinal na avaliação final: acima de 0,6 aumenta a propensão, abaixo de 0,4 reduz, entre os dois não pesa. Não aprova, não bloqueia e não rotula nada automaticamente | [Seção 3](#3-decisões-e-jornadas) |
+| **Decisões** | A predição é exibida como sinal de estilo, com a ressalva de que não é veredito, e não altera a propensão (RN11). Não aprova, não bloqueia e não rotula nada automaticamente | [Seção 3](#3-decisões-e-jornadas) |
 | **Predições** | A cada consulta, em tempo real, uma vez por texto. O modelo se abstém em textos curtos (RN04) | [RNF06](#rnf06--responder-dentro-dos-limites-de-tempo-e-de-custo) |
 | **Fontes de dados** | Conjunto FakenewsBR, com rótulos em camadas; agências de checagem; portais de notícias; busca de notícias recentes | [Requisitos, seção 4.4](ENGENHARIA_DE_REQUISITOS.md#44-fontes-de-dados-e-coleta-contínua) |
 | **Coleta de dados** | O coletor percorre os portais do catálogo; os votos de avaliação registram o texto e a propensão informada. Os votos precisam de curadoria antes de virar rótulo | [Requisitos, seção 4.4](ENGENHARIA_DE_REQUISITOS.md#44-fontes-de-dados-e-coleta-contínua); pendências P05 e P08 |
 | **Variáveis de entrada** | O próprio texto; não há variáveis construídas à mão. Em estudo: ocultar nomes de pessoas e lugares no treino, para o modelo não decorar quem aparece em boatos. Tamanho do texto, grupo de origem e canal servem para medir vieses, não para treinar | [RNF09](#rnf09--medir-e-mitigar-os-vieses-do-modelo-e-dos-dados) |
 | **Construção do modelo** | Ajuste das seis últimas camadas do BERTimbau, duas passagens pelos dados, com pesos por grupo de origem e calibração em conjunto separado. Um treino leva cerca de 7 horas sem placa de vídeo, ou de 30 a 55 minutos com uma, em caderno na nuvem. A frequência de retreino ainda não está definida | [Seção 6](#6-reprodutibilidade); pendência P13 |
 | **Avaliação antes da implantação** | Métrica principal: acurácia no pior grupo de origem. Recortes obrigatórios por grupo, canal, tamanho do texto e variedade do português. O modelo precisa superar o de referência | [Requisitos, seção 4.2](ENGENHARIA_DE_REQUISITOS.md#42-métricas-de-avaliação-fora-de-produção) |
-| **Avaliação em produção e monitoramento** | Sistema completo medido em alegações já checadas; avaliações das pessoas; sinais de desvio | [Requisitos, seção 4.3](ENGENHARIA_DE_REQUISITOS.md#43-métricas-em-produção); [seção 10](#10-monitoramento-contínuo) |
+| **Avaliação em produção e monitoramento** | Sistema completo medido em casos rotulados (`eval/`); registro de cada execução em `runs/`; sinais de desvio | [Requisitos, seção 4.3](ENGENHARIA_DE_REQUISITOS.md#43-métricas-em-produção); [seção 10](#10-monitoramento-contínuo) |
 
 ---
 
@@ -57,8 +58,8 @@ desenvolvido.
 | Engenharia do modelo | Ajuste do BERTimbau com pesos por grupo de origem; 23 experimentos e 4 controles; revisão crítica do desenho experimental | FakenewsBR: `models/v6/train_bertimbau_v6.py`, `models/v6/autoresearch/` | Atendido |
 | Avaliação do modelo | Métricas por grupo de origem, por canal e por tamanho de texto; comparação com o modelo de referência | FakenewsBR: `models/v6/compare/`, `scripts/analise_por_tamanho.py` | Atendido |
 | Implantação | Pesos publicados como versão no repositório; o robô carrega o modelo por configuração | `factcheck_mvp/modelo_fake.py` | Parcial: manual ([seção 9](#9-operação-e-implantação)) |
-| Operação | Limites de custo e de requisições, reaproveitamento de respostas, instância única do robô | `factcheck_mvp/config.py`, `factcheck_mvp/api.py` | Parcial: sem automação (P12) |
-| Monitoramento e avaliação | Registro das etapas em cada resposta; votos de avaliação; conjunto de alegações checadas | `avaliacao/`, `feedback.jsonl` | Pendente: sem acompanhamento agregado (P07) |
+| Operação | Limites de custo e de requisições, limites de tempo por etapa, instância única do robô | `factcheck_mvp/config.py`, `factcheck_mvp/api.py` | Parcial: sem automação (P12) |
+| Monitoramento e avaliação | Registro de cada execução (etapas, chamadas, fontes, decisão); reprodução determinística; avaliação com casos rotulados | `factcheck_mvp/telemetria.py`, `factcheck_mvp/replay.py`, `eval/` | Parcial: sem acompanhamento agregado (P07) |
 
 ---
 
@@ -124,10 +125,10 @@ verbo no infinitivo e objeto no título, e o atributo de qualidade logo abaixo.
 | Critério | Valor atual | Meta proposta | Situação |
 |---|---|---|---|
 | Latência do modelo próprio | 37 milissegundos por texto, sem placa de vídeo (medido em um Apple M4) | Abaixo de 200 milissegundos | Atendido |
-| Latência da resposta completa (IND11) | Não medida. Limites: 60 segundos na busca, 120 no julgamento das fontes, 180 no total | Mediana abaixo de 30 segundos | Pendente: P07 |
+| Latência da resposta completa (IND11) | Medida pela avaliação: mediana de 39,9 segundos por caso na iteração 0, com modelo de linguagem local. Limites: 60 segundos no agente de busca, 180 na interface de programação, 240 por chamada ao modelo de linguagem e 600 no julgamento das fontes | Mediana abaixo de 30 segundos | Parcial: P07 |
 | Vazão | 30 requisições por minuto por endereço de rede | A definir com o uso real | Parcial |
-| Capacidade diária e controle de custo | 100 buscas e 50 chamadas ao modelo de linguagem por dia: cerca de 3 consultas completas | 200 consultas por dia | Pendente |
-| Picos de demanda | Sem fila. Consultas iguais em até 30 minutos reaproveitam a resposta | Fila com limite de concorrência | Parcial |
+| Capacidade diária e controle de custo | 100 buscas e 50 chamadas ao modelo de linguagem por dia. Uma consulta com julgamento das fontes faz várias chamadas, e a avaliação completa precisou de limites de 1.000 | 200 consultas por dia | Pendente |
+| Picos de demanda | Sem fila. Buscas repetidas em até uma hora vêm de cache; o reaproveitamento da resposta inteira está só na branch de melhorias (P01) | Fila com limite de concorrência | Parcial |
 
 ### RNF07 — Proteger os dados e o sistema contra uso indevido
 
@@ -136,13 +137,14 @@ verbo no infinitivo e objeto no título, e o atributo de qualidade logo abaixo.
 | Critério | Como é tratado | Situação |
 |---|---|---|
 | Dados em trânsito | Conexões cifradas com o Telegram e com os serviços externos de busca e de modelo de linguagem. A interface de programação própria ainda não tem cifragem configurada | Parcial |
-| Dados em repouso | O texto da consulta só é gravado quando a pessoa avalia a resposta, junto com o voto e sem identificá-la. Fora isso, fica em memória por até 30 minutos, para reaproveitar a resposta | Atendido |
+| Dados em repouso | Cada execução grava em `runs/` o texto da consulta, as chamadas ao modelo de linguagem e as fontes, sem identificar a pessoa. Não há prazo de retenção | Parcial: P15 |
 | Chaves de serviço | Lidas do ambiente, fora do controle de versão, sem valor padrão | Atendido |
 | Acesso a endereços | Só portais do catálogo, com limite de tamanho e de tempo | Atendido |
-| Injeção de instruções | Texto da pessoa e das páginas é delimitado e tratado como dado | Atendido |
-| Texto que imita jornal para enganar o modelo | O modelo reage ao formato: um boato escrito como reportagem recebe probabilidade baixa. Mitigação: o modelo é indício auxiliar | Parcial |
+| Injeção de instruções | Texto da pessoa e das páginas é tratado como dado. A delimitação explícita e o teste de blindagem estão só na branch de melhorias | Parcial: P01 |
+| Texto que imita jornal para enganar o modelo | O modelo reage ao formato: um boato escrito como reportagem recebe probabilidade baixa. Mitigação: o modelo não entra na avaliação (RN11) | Atendido no produto; pendente no modelo (P09) |
+| Invenção pelo modelo de linguagem | O julgamento de cada fonte só vale com um trecho citado que exista na página (semelhança mínima de 0,9) | Atendido |
 | Envenenamento dos dados de avaliação | Votos podem ser manipulados e exigem curadoria antes de entrar em treino | Pendente: P05 |
-| Envenenamento do catálogo | Portais novos entram no catálogo sem aprovação | Pendente: P05 |
+| Envenenamento do catálogo | Portais novos não valem na consulta em que são descobertos, mas entram no catálogo sem aprovação | Parcial: P05 |
 | Lei Geral de Proteção de Dados | Aviso no início da conversa; orientação para não enviar dados pessoais | Parcial: falta a política de retenção (P15) |
 
 ### RNF08 — Manter a resposta disponível diante de falhas
@@ -152,12 +154,12 @@ verbo no infinitivo e objeto no título, e o atributo de qualidade logo abaixo.
 | Critério | Como é tratado | Situação |
 |---|---|---|
 | Falha de uma etapa | A resposta continua e a falha vira limitação declarada (RF11) | Atendido |
-| Falha do modelo de linguagem | Regras fixas assumem | Atendido, com perda de qualidade (P02) |
-| Falha da busca | O sistema usa só o índice local | Atendido |
-| Falha do modelo próprio | A etapa é registrada como falha e a resposta segue sem ele | Atendido |
-| Estabilidade da resposta (IND07) | A mesma notícia em versão curta e longa pode receber propensões diferentes | Pendente: P03 |
+| Falha do modelo de linguagem | Regras fixas extraem as afirmações; sem julgamento das fontes, a resposta é "indeterminada" (RN12) | Atendido, com perda de qualidade (P02) |
+| Falha da busca | O sistema usa só o índice de checagens, se ligado | Atendido |
+| Falha do modelo próprio | A etapa é registrada como falha e a resposta segue sem o sinal de estilo | Atendido |
+| Estabilidade da resposta (IND07) | O estilo saiu da avaliação e as faixas ficaram simétricas, o que remove a principal causa de propensões diferentes para a mesma notícia. Falta medir | Parcial: P04 |
 | Frequência de retreino | Não definida. **Proposta:** a cada três meses, ou quando um sinal da [seção 10](#10-monitoramento-contínuo) passar do limite | Pendente: P13 |
-| Monitoramento de desvio | Ver [seção 10](#10-monitoramento-contínuo) | Pendente: P07 |
+| Monitoramento de desvio | Ver [seção 10](#10-monitoramento-contínuo) | Parcial: P07 |
 | Retorno à versão anterior | O modelo é trocado por configuração. Hoje só há uma versão publicada; sem ela, o substituto identificado como provisório assume | Parcial |
 
 ### RNF09 — Medir e mitigar os vieses do modelo e dos dados
@@ -180,7 +182,7 @@ Os valores que já estão naquela seção não são repetidos aqui.
 **Salvaguardas do produto**, independentes do modelo: a resposta nunca é
 binária (RF12); nenhum domínio é bloqueado por lista (RN06); termos
 partidários são proibidos no texto da resposta (RNF02); o modelo de linguagem
-não redige a conclusão (RN08).
+não redige a conclusão (RN08); o modelo próprio não altera a propensão (RN11).
 
 ---
 
@@ -194,7 +196,7 @@ não redige a conclusão (RN08).
 | Modelo | Pesos publicados como versão `modelo-v6-R0`, com a calibração no mesmo pacote | Atendido |
 | Experimentos | Cada execução grava `run_config.json` com as assinaturas do código, dos dados e da separação, e todos os parâmetros | Atendido |
 | Ambiente | Lista de dependências; versões das bibliotecas registradas no relatório do treino | Parcial: P16 |
-| Avaliação do sistema | Conjunto de alegações checadas gerado com semente fixa | Atendido |
+| Avaliação do sistema | Casos rotulados em `eval/` (70 de desenvolvimento e um conjunto reservado); gravação das respostas externas para reprodução determinística (`factcheck_mvp/replay.py`) | Atendido |
 
 Assinaturas da execução R0: dados `596b0911…`, separação `6df3d748…`, código
 de treino `dfa29ba7…`. Com o mesmo código, os mesmos dados e a mesma semente,
@@ -211,10 +213,10 @@ do sistema usa a que lhe cabe.
 | | Partes determinísticas | Partes probabilísticas |
 |---|---|---|
 | O que é | Regras, formatação, segurança, contratos de entrada e saída | Modelo próprio, modelo de linguagem, avaliação final |
-| Como validar | Testes automatizados com resultado fixo | Desempenho estatístico em conjuntos de referência |
+| Como validar | Testes automatizados com resultado fixo | Desempenho estatístico em conjuntos de referência; `eval/run.py --gate` compara com a rodada anterior |
 | Critério | Todos os testes passam | Indicadores acima das metas; nenhum grupo abaixo do mínimo |
 | Onde está | [Requisitos, seção 5.1](ENGENHARIA_DE_REQUISITOS.md#51-matriz-de-rastreabilidade-dos-requisitos): requisito, arquivo e teste | Modelo: [seção 4.2](ENGENHARIA_DE_REQUISITOS.md#42-métricas-de-avaliação-fora-de-produção). Sistema em uso: [seção 4.3](ENGENHARIA_DE_REQUISITOS.md#43-métricas-em-produção). Resultado e experiência: [seção 1.4](ENGENHARIA_DE_REQUISITOS.md#14-indicadores-de-desempenho), IND04 a IND13 |
-| Situação | Atendido | Parcial: o modelo está medido; o sistema completo, não (P04) |
+| Situação | Atendido: 319 testes passando | Parcial: o modelo está medido; o sistema completo tem uma medição reconstruída em 70 casos, e falta uma rodada completa (P04) |
 
 ---
 
@@ -235,7 +237,7 @@ do sistema usa a que lhe cabe.
 
 | Prática | Situação atual | Proposta |
 |---|---|---|
-| Integração contínua | Os testes são executados à mão | Executar os testes a cada envio ao repositório (P12) |
+| Integração contínua | Os testes e a comparação da avaliação (`eval/run.py --gate`) são executados à mão | Executar os testes a cada envio ao repositório (P12) |
 | Treinamento contínuo | O treino é manual, em computador local ou em caderno na nuvem | Retreino periódico, com o mesmo conjunto de teste (P13) |
 | Entrega contínua | O robô é iniciado por um roteiro local | Implantação automatizada depois dos testes |
 | Modo sombra | Não existe | O modelo novo recebe as consultas reais sem influenciar a resposta, e os resultados são comparados (P13) |
@@ -259,12 +261,12 @@ desinformação também.
 | Desvio dos dados | As consultas ficam diferentes dos textos de treino | Proporção de consultas curtas demais para o modelo; distribuição do tamanho dos textos | Pendente: P07 |
 | Desvio de conceito | O que caracteriza desinformação muda | Acerto no conjunto de alegações checadas, refeito todo mês com checagens novas (IND04, IND05) | Pendente: P07 |
 | Deterioração de desempenho | Os indicadores caem | Proporção de respostas "indeterminada" (IND03); avaliações negativas (IND09); distribuição da probabilidade do modelo | Pendente: P07 |
-| Falhas de serviço | Busca ou modelo de linguagem fora | Proporção de etapas com falha | Disponível por resposta; sem agregação |
+| Falhas de serviço | Busca ou modelo de linguagem fora | Proporção de etapas com falha | Gravado por execução; sem agregação |
 
-Todos os sinais já são produzidos em cada resposta. Falta gravá-los e
-acompanhá-los ao longo do tempo (P07).
+Cada execução já grava seus sinais em `runs/` (`docs/TELEMETRIA.md`). Falta
+agregá-los e acompanhá-los ao longo do tempo (P07).
 
 ---
 
-As pendências citadas neste documento (P02 a P16) estão reunidas, com impacto
+As pendências citadas neste documento (P01 a P16) estão reunidas, com impacto
 e esforço, em [Requisitos, seção 5.5](ENGENHARIA_DE_REQUISITOS.md#55-pendências).
