@@ -1,16 +1,22 @@
 """Descoberta de catálogo: crawl profundo de site NÃO catalogado + proposta de schema.
 
-Antes o deep crawl só lia URLs do catálogo (allow-list anti-SSRF). Agora sites
-novos relevantes ganham leitura em MODO DESCOBERTA — mesmas proteções SSRF
-(IP privado, http/https 80/443, redirect revalidado, teto bytes/tempo; tetos
-MENORES que o crawl catalogado) — e viram PROPOSTA pendente em
+Sites novos relevantes ganham leitura em MODO DESCOBERTA — mesmas proteções
+SSRF do deep crawl (IP privado, http/https 80/443, redirect revalidado, teto
+bytes/tempo) e a MESMA cascata de extração (`aprofundar.corpo_de_html` ->
+`extracao.extrair`) — e viram PROPOSTA pendente em
 `data/catalogo_propostas.json`. Nunca há auto-merge em `catalogo.json`:
-aprovação é manual (curadoria), como numa agência de checagem.
+`inserir_no_catalogo` só enfileira a proposta (review A5); só
+`promover_proposta` (curadoria manual, CLI) grava no catálogo.
+
+Teto de bytes: `DISCOVERY_MAX_BYTES` (env), default LOCAL de 5 MB — o antigo
+200 KB (config.py) derrubava G1/Estadão para 65–98 chars (review A4).
+TODO(config.py): atualizar o default de `DISCOVERY_MAX_BYTES` para 5_000_000.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -18,8 +24,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
-from . import config
-from .aprofundar import CorpoLido, _url_segura, extrair_corpo
+from . import config, replay, telemetria
+from .aprofundar import (HEADERS_NAVEGADOR, CorpoLido, _url_segura, corpo_de_html,
+                         max_bytes_padrao)
 
 log = logging.getLogger("factcheck.descoberta")
 
@@ -93,29 +100,21 @@ async def _fetch_aberto(url: str, timeout: float, max_bytes: int) -> tuple[str, 
     if not _url_segura(url):
         return "", url, "url insegura (SSRF)"
     try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as cli:
-            atual = url
-            for _ in range(3):
-                async with cli.stream("GET", atual,
-                                      headers={"User-Agent": "factcheck-mvp/0.1-descoberta"}) as r:
-                    if r.status_code in (301, 302, 303, 307, 308):
-                        nxt = r.headers.get("location", "")
-                        if not nxt.startswith("http"):
-                            nxt = urljoin(atual, nxt)
-                        if not _url_segura(nxt):
-                            return "", url, "redirect inseguro (SSRF)"
-                        atual = nxt
-                        continue
-                    r.raise_for_status()
-                    buf = b""
-                    async for chunk in r.aiter_bytes(65536):
-                        buf += chunk
-                        if len(buf) > max_bytes:
-                            break
-                    return buf[:max_bytes].decode("utf-8", errors="ignore"), atual, None
-            return "", url, "redirects demais"
+        atual = url
+        for _ in range(3):
+            r = await replay.ahttp_get(atual, max_bytes=max_bytes, timeout=timeout,
+                                       headers=dict(HEADERS_NAVEGADOR))
+            if r.status_code in (301, 302, 303, 307, 308):
+                nxt = r.headers.get("location", "")
+                if not nxt.startswith("http"):
+                    nxt = urljoin(atual, nxt)
+                if not _url_segura(nxt):
+                    return "", url, "redirect inseguro (SSRF)"
+                atual = nxt
+                continue
+            r.raise_for_status()
+            return r.content[:max_bytes].decode("utf-8", errors="ignore"), atual, None
+        return "", url, "redirects demais"
     except Exception as e:
         return "", url, str(e)[:120]
 
@@ -227,25 +226,31 @@ async def detectar_sitemap(homepage: str, timeout: float = 8.0) -> Optional[str]
 
 
 async def descobrir(urls: List[str], timeout: float = 0,
-                    max_bytes: int = 0) -> Dict[str, Dict]:
+                    max_bytes: int = 0,
+                    afirmacoes: Optional[Dict[str, str]] = None) -> Dict[str, Dict]:
     """Crawl profundo em modo descoberta. Retorna {url: {corpo, proposta, erro}}.
 
+    `corpo` é um `CorpoLido` (mesmo contrato do deep crawl, com texto_completo,
+    metodo, titulo, data_pub, veredito_pagina) só quando corpo_lido=True.
+    `afirmacoes` (opcional, url -> afirmação) orienta o trecho enviado ao juiz.
     Nunca levanta: cada URL falha isolada (corpo None + erro).
     """
     timeout = timeout or getattr(config, "DISCOVERY_TIMEOUT_S", 8)
-    max_bytes = max_bytes or getattr(config, "DISCOVERY_MAX_BYTES", 200000)
+    max_bytes = max_bytes or max_bytes_padrao("DISCOVERY_MAX_BYTES")
+    afirmacoes = afirmacoes or {}
     saida: Dict[str, Dict] = {}
     for url in urls:
         try:
             html_art, final_art, erro_art = await _fetch_aberto(url, timeout, max_bytes)
             corpo = None
             if not erro_art and html_art:
-                texto = extrair_corpo(html_art)
-                if len(texto) >= 200:
-                    corpo = CorpoLido(url=url, final_url=final_art,
-                                      trecho_corpo=texto[:2000], corpo_lido=True)
+                lido = await corpo_de_html(
+                    url, final_art, html_art, None, afirmacoes.get(url, ""),
+                    truncado=len(html_art.encode("utf-8", errors="ignore")) >= max_bytes)
+                if lido.corpo_lido:
+                    corpo = lido
                 else:
-                    erro_art = "corpo curto/JS/paywall"
+                    erro_art = lido.erro or "corpo curto/JS/paywall"
             home = homepage_de(url)
             html_home, _, _ = await _fetch_aberto(home, timeout, min(max_bytes, 200000)) if home else ("", "", None)
             proposta = None
@@ -267,8 +272,13 @@ async def descobrir(urls: List[str], timeout: float = 0,
                     pass
             saida[url] = {"corpo": corpo, "proposta": proposta,
                           "erro": erro_art if not corpo else None}
+            telemetria.evento("fonte", url=url, estagio="descoberta-site",
+                              decisao="mantida" if corpo else "descartada",
+                              motivo=erro_art if not corpo else f"corpo lido via {corpo.metodo} ({len(corpo.texto_completo)} chars)",
+                              metodo=(corpo.metodo if corpo else None))
         except Exception as e:  # isolamento por URL
             log.warning("descoberta falhou %s: %s", (url or "")[:80], str(e)[:100])
+            telemetria.fallback("descoberta-site", f"{type(e).__name__}: {e}", url=url)
             saida[url] = {"corpo": None, "proposta": None, "erro": str(e)[:120]}
     return saida
 
@@ -312,7 +322,8 @@ def salvar_proposta(proposta: Dict, caminho: Optional[str] = None) -> bool:
 
 
 # Campos da proposta que NÃO entram no catalogo.json (metadados de descoberta)
-_CHAVES_DESCOBERTA = {"dominio", "titulo_exemplo", "status", "coletado_em"}
+_CHAVES_DESCOBERTA = {"dominio", "titulo_exemplo", "status", "coletado_em",
+                      "origem_proposta", "proposto_em"}
 
 _TIPOS_VALIDOS = ("geral", "checagem")
 
@@ -334,7 +345,11 @@ def _classificar_tipo_jev(nome: str, homepage: str, editorias: List[str]) -> Opt
     """Reclassifica tipo via Jev/OpenRouter Decisions. None se falhar.
 
     Nunca levanta: sem chave/rede, mantém o tipo heurístico da proposta.
+    Desligado por padrão (`JEV_ATIVO=1` liga): o modelo é pago e a tarefa é secundária
+    (a proposta vai para curadoria humana de qualquer forma).
     """
+    if os.getenv("JEV_ATIVO", "0") != "1":
+        return None
     try:
         from . import llm_openrouter
         texto = f"SITE: {nome} {homepage} editorias: {', '.join(editorias[:8])}"
@@ -349,15 +364,16 @@ def _classificar_tipo_jev(nome: str, homepage: str, editorias: List[str]) -> Opt
         return "checagem" if score >= 0.5 else "geral"
     except Exception as e:  # sem chave/rede: mantém tipo da proposta
         log.warning("jev indisponível p/ reclassificar tipo: %s", str(e)[:100])
+        telemetria.fallback("descoberta-site.jev", e)
         return None
 
 
-def inserir_no_catalogo(prop: Dict, caminho_catalogo: Optional[str] = None,
+def _gravar_no_catalogo(prop: Dict, caminho_catalogo: Optional[str] = None,
                         tipo: Optional[str] = None,
-                        origem: str = "descoberta-automatica") -> Dict:
-    """Grava proposta no catalogo.json imediatamente. Retorna {"ok", "portal"} ou erro.
+                        origem: str = "curadoria-manual") -> Dict:
+    """Grava proposta no catalogo.json. SÓ a curadoria (`promover_proposta`) chama.
 
-    Carimba origem + data (auditoria) — nunca levanta.
+    Carimba origem + data (auditoria) — nunca levanta. Retorna {"ok", "portal"} ou erro.
     """
     from .catalogo import DEFAULT_CATALOGO
     if tipo is not None and tipo not in _TIPOS_VALIDOS:
@@ -404,6 +420,53 @@ def inserir_no_catalogo(prop: Dict, caminho_catalogo: Optional[str] = None,
     return {"ok": True, "portal": portal}
 
 
+def inserir_no_catalogo(prop: Dict, caminho_catalogo: Optional[str] = None,
+                        tipo: Optional[str] = None,
+                        origem: str = "descoberta-automatica",
+                        caminho_propostas: Optional[str] = None) -> Dict:
+    """NÃO grava mais no catalogo.json (review A5: o catálogo "curado" se escrevia
+    sozinho e fonte catalogada ganha peso cheio). Enfileira a proposta em
+    `catalogo_propostas.json` (curadoria via `promover_proposta`/CLI) e devolve
+    `{"ok": False, "proposta": True, "portal": <proposta carimbada>, "motivo"}`:
+    o chamador NÃO deve marcar a fonte como catalogada.
+
+    Assinatura mantida. `caminho_catalogo` só é lido para detectar domínio que já
+    está no catálogo (`{"ok": False, "proposta": False, "erro": "... já existe"}`).
+    Nunca levanta.
+    """
+    from . import catalogo as _cat
+    if tipo is not None and tipo not in _TIPOS_VALIDOS:
+        return {"ok": False, "proposta": False, "erro": f"tipo inválido: {tipo} (use geral|checagem)"}
+    for campo in ("id", "nome", "homepage"):
+        if not prop.get(campo):
+            return {"ok": False, "proposta": False, "erro": f"proposta sem campo obrigatório: {campo}"}
+    if not str(prop["homepage"]).startswith(("http://", "https://")):
+        return {"ok": False, "proposta": False, "erro": "homepage fora de http(s)"}
+    dominio = prop.get("dominio") or dominio_de(prop["homepage"])
+    try:
+        dados = json.loads(Path(caminho_catalogo or _cat.DEFAULT_CATALOGO).read_text(encoding="utf-8"))
+        portais = dados.get("portais") or []
+    except (OSError, ValueError, AttributeError):
+        portais = []  # catálogo ilegível não impede a proposta
+    if any(dominio_de(p.get("homepage", "")) == dominio for p in portais if isinstance(p, dict)):
+        return {"ok": False, "proposta": False, "erro": f"domínio {dominio} já existe no catálogo"}
+    hoje = datetime.now(timezone.utc).date().isoformat()
+    proposta = dict(prop)
+    proposta["dominio"] = dominio
+    proposta["tipo"] = tipo or prop.get("tipo") or "geral"
+    if proposta["tipo"] not in _TIPOS_VALIDOS:
+        proposta["tipo"] = "geral"
+    proposta["status"] = "pendente"
+    proposta["origem_proposta"] = origem
+    proposta["proposto_em"] = hoje
+    proposta.setdefault("coletado_em", datetime.now(timezone.utc).isoformat())
+    if not salvar_proposta(proposta, caminho_propostas):
+        telemetria.fallback("descoberta-catalogo", "falha ao gravar proposta", dominio=dominio)
+        return {"ok": False, "proposta": False, "erro": "falha ao gravar catalogo_propostas.json"}
+    return {"ok": False, "proposta": True, "portal": proposta,
+            "motivo": "proposta enfileirada p/ curadoria (sem auto-merge no catálogo)"}
+
+
 def promover_proposta(dominio: str, caminho_propostas: Optional[str] = None,
                       caminho_catalogo: Optional[str] = None,
                       tipo: Optional[str] = None, usar_jev: bool = False) -> Dict:
@@ -432,8 +495,8 @@ def promover_proposta(dominio: str, caminho_propostas: Optional[str] = None,
         if sugestao:
             tipo_final = sugestao
 
-    res = inserir_no_catalogo(prop, caminho_catalogo, tipo=tipo_final,
-                                origem="curadoria-manual")
+    res = _gravar_no_catalogo(prop, caminho_catalogo, tipo=tipo_final,
+                              origem="curadoria-manual")
     if not res.get("ok"):
         return res
     # Baixa da fila de pendentes (promovida, não pendente)

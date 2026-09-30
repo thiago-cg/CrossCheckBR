@@ -135,18 +135,80 @@ def _portal_novo():
             "rss": [], "observacoes": "auto"}
 
 
-def test_inserir_no_catalogo_imediato(tmp_path):
+def test_inserir_no_catalogo_so_propoe(tmp_path):
+    """Review A5: descoberta nunca grava no catalogo.json; vira proposta pendente."""
     import json
     arq_cat = _catalogo_tmp(tmp_path)
-    res = dz.inserir_no_catalogo(_portal_novo(), arq_cat)
-    assert res["ok"] is True, res
-    portal = res["portal"]
-    assert portal["origem_catalogo"] == "descoberta-automatica"
-    assert "adicionado_em" in portal and "curadoria posterior" in portal["observacoes"]
+    arq_props = str(tmp_path / "props.json")
+    antes = open(arq_cat, encoding="utf-8").read()
+    res = dz.inserir_no_catalogo(_portal_novo(), arq_cat, caminho_propostas=arq_props)
+    assert res["ok"] is False and res["proposta"] is True, res
+    assert res["portal"]["status"] == "pendente"
+    assert res["portal"]["origem_proposta"] == "descoberta-automatica"
+    assert open(arq_cat, encoding="utf-8").read() == antes, "catalogo.json intocado"
+    props = dz.carregar_propostas(arq_props)
+    assert len(props) == 1 and props[0]["dominio"] == "exemplo.com"
+    # repetir não duplica (dedupe por domínio)
+    assert dz.inserir_no_catalogo(_portal_novo(), arq_cat, caminho_propostas=arq_props)["proposta"] is True
+    assert len(dz.carregar_propostas(arq_props)) == 1
+    # domínio já catalogado: nem propõe
+    g1 = {"id": "g1-bis", "nome": "G1", "homepage": "https://g1.globo.com/"}
+    res2 = dz.inserir_no_catalogo(g1, arq_cat, caminho_propostas=arq_props)
+    assert res2["ok"] is False and res2["proposta"] is False and "já existe" in res2["erro"]
+    # proposta enfileirada é promovível pela curadoria (único caminho p/ o catálogo)
+    res3 = dz.promover_proposta("exemplo.com", caminho_propostas=arq_props, caminho_catalogo=arq_cat)
+    assert res3["ok"] is True
+    portal = res3["portal"]
+    assert "origem_proposta" not in portal and "proposto_em" not in portal
     dados = json.loads(open(arq_cat, encoding="utf-8").read())
     assert any(p["id"] == "jornal-exemplo" for p in dados["portais"])
-    # duplicado falha (id e domínio)
-    assert dz.inserir_no_catalogo(_portal_novo(), arq_cat)["ok"] is False
+
+
+def test_inserir_no_catalogo_default_usa_fila_global(tmp_path, monkeypatch):
+    """Sem caminhos: grava em DEFAULT_PROPOSTAS (a cópia isolada do eval/CLI troca esse global)."""
+    arq_props = tmp_path / "fila.json"
+    monkeypatch.setattr(dz, "DEFAULT_PROPOSTAS", arq_props)
+    from factcheck_mvp import catalogo as cat
+    monkeypatch.setattr(cat, "DEFAULT_CATALOGO", tmp_path / "nao_existe.json")
+    res = dz.inserir_no_catalogo(_portal_novo())
+    assert res["proposta"] is True and arq_props.exists()
+
+
+def _html_artigo_longo():
+    corpo = "".join(f"<p>Parágrafo {i} da reportagem com texto corrido suficiente para contar como matéria real.</p>"
+                    for i in range(15))
+    return f"<html><head><title>Matéria</title></head><body><article><h1>Matéria</h1>{corpo}</article></body></html>"
+
+
+def test_descobrir_usa_cascata_e_teto_5mb(monkeypatch):
+    import asyncio
+    from factcheck_mvp import replay
+    vistos = {}
+
+    class R:
+        def __init__(self, html):
+            self.status_code, self.headers, self.content = 200, {}, html.encode()
+            self.truncado = False
+
+        def raise_for_status(self):
+            pass
+
+    async def falso_get(url, max_bytes=None, headers=None, timeout=10.0, **kw):
+        vistos.setdefault(url, (max_bytes, headers))
+        return R(_html_artigo_longo() if "/politica/" in url else "<html></html>")
+
+    monkeypatch.setattr(replay, "ahttp_get", falso_get)
+    monkeypatch.setattr(dz, "_url_segura", lambda u: True)
+    monkeypatch.setattr(dz, "_classificar_tipo_jev", lambda *a: None)
+    monkeypatch.delenv("DISCOVERY_MAX_BYTES", raising=False)
+    url = "https://exemplo.com/politica/lei-nova/"
+    out = asyncio.run(dz.descobrir([url]))
+    c = out[url]["corpo"]
+    assert c is not None and c.corpo_lido and c.metodo in ("trafilatura", "regex")
+    assert len(c.texto_completo) >= 500 and c.trecho_corpo
+    mb, hdr = vistos[url]
+    assert mb == 5_000_000
+    assert "Mozilla" in hdr["User-Agent"]
 
 
 def test_catalogo_adicionar_roteia_na_hora():
