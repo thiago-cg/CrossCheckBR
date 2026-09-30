@@ -2,6 +2,8 @@
 
 Chatbot (Telegram, com API preparada para web futura) que recebe **texto, título ou link** de notícia e devolve **propensão a desinformação em escala (baixa/média/alta)** — nunca um veredito binário — com evidências linkadas, % do modelo e o passo a passo auditável.
 
+**Site do projeto:** https://mariadenis.github.io/crosscheckbr-site/ — requisitos, produto de IA, como funciona e equipe.
+
 ## Como funciona (pipeline em 7 etapas)
 
 ```
