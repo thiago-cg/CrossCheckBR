@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from dataclasses import asdict
 import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
@@ -279,8 +280,10 @@ class Pipeline:
               + " | ".join(f"[{a.polaridade}] {a.texto!r} (núcleo {a.alvo()!r}; consulta {a.consulta!r})"
                            for a in afs))
         if not afs:
-            dec = decisao.decidir(decisao.Evidencias(afirmacoes=[], vago=eh_vago, opiniao=eh_opiniao,
-                                                     rumor=eh_rumor))
+            ev0 = decisao.Evidencias(afirmacoes=[], vago=eh_vago, opiniao=eh_opiniao,
+                                     rumor=eh_rumor)
+            telemetria.evento("evidencias", **asdict(ev0))
+            dec = decisao.decidir(ev0)
             dec.motivo = "nenhuma afirmação factual encontrada no texto"
             self._emitir_decisao(dec)
             return self._relatorio(entrada, dec, [], [], etapas,
@@ -427,6 +430,7 @@ class Pipeline:
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
             n_lidas=n_lidas, n_consultadas=len(pecas))
+        telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
         self._emitir_decisao(dec)
         etapa("agregacao", "ok", f"propensão {dec.nivel} (L={dec.log_odds:+.2f}, p={dec.prob:.2f}): {dec.motivo}.")
@@ -521,8 +525,11 @@ class Pipeline:
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
+        for ai in list(por_af):
+            por_af[ai] = sorted(por_af[ai], key=lambda pi: (str(pecas[pi].get("url") or ""), pi))
         itens_por_af: Dict[int, List[Dict[str, Any]]] = {}
-        for ai, pis in por_af.items():
+        for ai in sorted(por_af):
+            pis = por_af[ai]
             alvo = afs[ai].alvo()
             itens = []
             for pi in pis:

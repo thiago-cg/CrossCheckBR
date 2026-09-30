@@ -98,10 +98,14 @@ def test_rodar_metricas_artefatos_baseline_e_gate(amb):
     assert m["taxa_fallback_por_onde"] == {"juiz": 1.0} and m["descoberta"] == {"pulada": 1.0}
     assert set(m["destaque_indice"]) == {"fora_do_indice", "no_indice"}
     assert m["serpapi"]["live_no_eval"] == 0 and out["meta"]["env"] == ev.ENV_PADRAO
+    assert m["acuracia_balanceada"] is not None and m["cobertura"] == 0.75
+    assert m["auc_ordinal"] is not None and "sempre_alta" in m["baselines_triviais"]
+    assert "acerto" in m["intervalos_wilson"]
     d = out["dir"]
     assert (d / "metricas.json").exists() and (d / "casos.jsonl").exists()
     md = (d / "relatorio.md").read_text()
     assert "cli trace" in md and "ATENÇÃO" in md and "🛑" in md
+    assert "sempre_alta" in md and "balanceada" in md
     casos = [json.loads(x) for x in (d / "casos.jsonl").read_text().splitlines()]
     assert all(c["run_id"] and (amb / "runs" / c["run_id"] / "resultado.json").exists() for c in casos)
     ev.salvar_baseline(out["meta"], m, out["casos"], amb / "baseline.json")
@@ -113,8 +117,15 @@ def test_rodar_metricas_artefatos_baseline_e_gate(amb):
     assert dl["n_comuns"] == 4 and dl["n_erro_grave_delta"] == 1 and dl["acerto_pp"] == -25.0
     assert [x["id"] for x in dl["mudaram"]] == ["f1"]
     ok, motivos = ev.avaliar_gate(dl, 5.0)
-    assert not ok and len(motivos) == 2
+    assert not ok and len(motivos) >= 3
     assert "vs baseline" in ev.resumo_texto(out2["meta"], out2["metricas"], dl)
+    assert "balanceada" in ev.resumo_texto(out2["meta"], out2["metricas"], dl)
+
+
+def test_esperado_normaliza_legado_claimreview():
+    assert ev.esperado_de({"rotulo": "falso", "esperado": ["alta"]}) == (["alta"], ["media"])
+    assert ev.esperado_de({"rotulo": "enganoso", "esperado": ["alta", "media"]}) == (["alta"], ["media"])
+    assert ev.esperado_de({"rotulo": "falso", "esperado": ["indeterminada", "alta"]}) == (["indeterminada", "alta"], [])
 
 
 def test_caso_que_quebra_nao_derruba_eval(amb):
@@ -161,3 +172,16 @@ def test_descoberta_status_distingue_falhou_de_rodou():
     assert _descoberta_status([etapa, ok, fb]) == "parcial"
     assert _descoberta_status([{"tipo": "etapa", "dados": {"nome": "descoberta", "status": "pulada"}}]) == "pulada"
     assert abs(_busca_indisponivel({"descoberta": {"falhou": 0.4, "pulada": 0.2}}) - 0.6) < 1e-9
+
+
+def test_descoberta_status_ignora_descoberta_catalogo():
+    from eval.run import _descoberta_status
+    catalogo_ok = {"tipo": "etapa", "dados": {"nome": "descoberta-catalogo", "status": "ok"}}
+    descoberta_pulada = {"tipo": "etapa", "dados": {"nome": "descoberta", "status": "pulada"}}
+    descoberta_ok = {"tipo": "etapa", "dados": {"nome": "descoberta", "status": "ok"}}
+    agente_ok = {"tipo": "etapa", "dados": {"nome": "descoberta-agente", "status": "ok"}}
+    ok = {"tipo": "http", "dados": {"url": "https://serpapi.com/search.json?q=x", "status": 200}}
+    assert _descoberta_status([catalogo_ok, descoberta_pulada]) == "pulada"
+    assert _descoberta_status([descoberta_ok, catalogo_ok, ok]) == "rodou"
+    assert _descoberta_status([agente_ok, ok]) == "rodou"
+    assert _descoberta_status([catalogo_ok]) == "ausente"

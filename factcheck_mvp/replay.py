@@ -301,6 +301,18 @@ class CotaSerpAPIEsgotada(httpx.HTTPError):
 _lock_uso = threading.Lock()
 _teto_processo: Optional[int] = None
 _usadas_processo = 0
+_cota_esgotada = False
+
+
+def cota_esgotada() -> bool:
+    """True se alguma chamada live neste processo viu 401/403/429 da SerpAPI."""
+    return _cota_esgotada
+
+
+def resetar_cota() -> None:
+    """Limpa a flag (eval.rodar() chama na entrada; testes usam no fixture)."""
+    global _cota_esgotada
+    _cota_esgotada = False
 
 
 def arq_uso_serpapi() -> Optional[Path]:
@@ -357,6 +369,24 @@ def _eh_serpapi(url: str) -> bool:
     return h == "serpapi.com" or h.endswith(".serpapi.com")
 
 
+def _eh_llm(url: str) -> bool:
+    """URL de LLM (OpenRouter ou local): as únicas que podem ir live com LLM_ONLY_RECORD=1."""
+    try:
+        h = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    return h in ("localhost", "127.0.0.1", "openrouter.ai") or h.endswith(".openrouter.ai")
+
+
+def _modo_efetivo(url: str) -> str:
+    """Modo vigente p/ esta URL. Com LLM_ONLY_RECORD=1 e modo record, só LLM vai live;
+    SerpAPI/páginas ficam em replay (miss em vez de live). Nível 2 do protocolo."""
+    m = modo_atual()
+    if m == "record" and os.environ.get("LLM_ONLY_RECORD") == "1" and not _eh_llm(url):
+        return "replay"
+    return m
+
+
 def _reservar_serpapi(url: str) -> None:
     """Conta 1 busca live ANTES de chamar (conservador: falha de rede também conta)."""
     global _usadas_processo
@@ -401,6 +431,7 @@ def _checar_cota_serpapi(metodo: str, url: str, resp: Resposta, lat: float) -> N
     (não grava cassete, p/ que um record com chave nova busque de novo)."""
     if resp.status_code not in (401, 403, 429):
         return
+    global _cota_esgotada
     try:
         detalhe = str((resp.json() or {}).get("error") or "")[:200]
     except Exception:
@@ -409,6 +440,7 @@ def _checar_cota_serpapi(metodo: str, url: str, resp: Resposta, lat: float) -> N
            "Cota da conta esgotada ou chave inválida: coloque uma nova SERPAPI_KEY no .env.")
     telemetria.fallback("serpapi", msg, status=resp.status_code)
     _evento_http(metodo, url, resp, lat, "live", msg)
+    _cota_esgotada = True
     raise CotaSerpAPIEsgotada(msg)
 
 
@@ -442,7 +474,7 @@ def _do_cassete(m: str, metodo: str, k: str, url: str, max_bytes: Optional[int])
 
 def _executar(metodo: str, url_chave: str, corpo_chave: Any, ao_vivo: Callable[[], Resposta],
               max_bytes: Optional[int] = None) -> Resposta:
-    m = modo_atual()
+    m = _modo_efetivo(url_chave)
     k = chave(metodo, url_chave, corpo_chave)
     resp = _do_cassete(m, metodo, k, url_chave, max_bytes)
     if resp is not None:
@@ -539,7 +571,7 @@ async def ahttp_get(url: str, max_bytes: Optional[int] = None, headers: Optional
     `max_bytes` (resp.truncado=True se cortou). Não levanta por status: use
     raise_for_status(). Erros de rede levantam como no httpx.
     """
-    m = modo_atual()
+    m = _modo_efetivo(url)
     k = chave("GET", url, None)
     resp = _do_cassete(m, "GET", k, url, max_bytes)
     if resp is not None:

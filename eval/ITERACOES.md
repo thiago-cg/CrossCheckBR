@@ -151,3 +151,39 @@ Hipóteses (NÃO implementadas; aguardam decisão):
 - H3 (baixa prioridade): `padroes` cai em fallback com LLMs pequenos; fora do nível.
 - H4 (ataca B): olhar as consultas de 5 casos B (a `consulta` do LLM pode estar perdendo a entidade central).
 - H5 (ataca G): investigar os 2 falso→baixa (chico_cesar, ibge) — possível inversão de polaridade.
+
+## Iteração 2 re-medida — Fase A (eval consertado, sistema intacto; 2026-09-30)
+
+Branch `fase-a`. Nenhuma mudança de decisão/busca/juiz nesta fase, só harness + replay.
+`pytest`: 321 passed.
+
+- A1: `esperado_de` normalizado p/ README (falso `["alta"]`→parcial media; enganoso `["alta","media"]`→`(["alta"],["media"])`).
+  Novas métricas sempre impressas: `acuracia_balanceada`, `erro_grave_por_direcao` (FE→baixa, V→alta),
+  `cobertura=1-indet`, `precisao_por_nivel`, `auc_ordinal` (baixa 0, media/indet 1, alta 2; F/E vs V),
+  `baselines_triviais` sempre_alta/media, Wilson 95%. Gate exige `balanceada >= sempre_alta` e sem grave novo.
+- A2: `_descoberta_status` filtra `("descoberta","descoberta-agente")`; `descoberta-catalogo` ignorada.
+- A3: evento `evidencias` antes de `decidir()`; `python3 -m eval.decisao --snapshot`; snapshot
+  `eval/snapshots/a3-dev.jsonl` (69 linhas, oreo timeout fora): **69/69 níveis** vs `validos.json`.
+- A4: lotes do juiz ordenados por URL; LLM miss em replay → `nao_reproduzido` (fora de métricas/delta).
+- A4b: `LLM_ONLY_RECORD=1` congela SerpAPI/páginas no record (só LLM ao vivo) — nível 2.
+- A5: `replay.cota_esgotada` interrompe o eval (pula não-iniciados, exit 2).
+
+Nível 0 (decisão, traces antigos, 69 casos, métricas novas):
+`DECISAO a3-dev`: acerto 19/69 (0,275), acerto+parcial 37/69 (0,536), grave 3/69, indet 27/69.
+
+Nível 1 (record busca congelada + LLM vivo p/ nova ordem do juiz, dev 70):
+`20260930-154821-fase-a-llm-frozen`: acerto 16/70 (0,229), parcial 34/70 (0,486), **grave 1/70**
+(FE→baixa 1/58, V→alta 0/8), indet 31/70, balanceada 0,346 (sempre_alta 0,50, sempre_media 0,19),
+AUC 0,786, cobertura 0,557. Precisão: alta 12 casos, baixa 5. SerpAPI live 0 neste eval
+(total 440→450 por 10 buscas de um record parcial sem freeze, antes do A4b; resto reuse).
+`llm_miss=0`, `http_miss=124` (páginas 403/SSL/PDF que também falharam no record).
+Replay `20260930-162345-fase-a-replay2`: n=69 + 1 `nao_reproduzido` (llm_miss 3),
+acerto 16/69, grave 1, balanceada 0,347, AUC 0,785 — **±1 caso vs record**.
+
+Leitura honesta: com métricas novas o sistema continua abaixo do trivial em balanceada
+(0,35 < 0,50) e o único sinal segue em `baixa`/AUC. O `sempre_alta` tem 8 graves (8/8 V→alta);
+o sistema tem 1 grave real restante + 0 em V. Diferença snapshot (3 graves) vs novo (1 grave)
+vem do juiz live re-gravado (não-determinismo) + 10 queries novas do record parcial — não de regra.
+Sem validação: replay 70/70 idêntico duas vezes (aborts nativos flaky SIGABRT/SIGSEGV em
+trafilatura/PDF impediram a 3ª perna; 2 pernas OK ±1 caso) e holdout (nível 4, ~25 casos record:
+pedir aprovação antes).
