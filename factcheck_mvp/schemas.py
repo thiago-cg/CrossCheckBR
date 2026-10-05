@@ -73,6 +73,8 @@ class FonteEvidencia(BaseModel):
     veredito_normalizado: Optional[str] = None  # selos.VEREDITOS
     cluster: Optional[str] = None  # grupo de independência (1 voto por cluster)
     curada: Optional[bool] = None  # fonte do catálogo curado (por URL/aliases)
+    # Confiabilidade (confiabilidade.py): curada | institucional | alto_trafego | plataforma | baixo_trafego
+    confiabilidade: Optional[str] = None
     afirmacao: Optional[str] = None  # afirmação (texto do usuário) a que a fonte foi julgada
 
 
