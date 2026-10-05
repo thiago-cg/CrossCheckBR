@@ -222,17 +222,18 @@ def formatar(rel: RelatorioChecagem) -> str:
              if not _generica(f.url, f.titulo, getattr(f, "trecho_corpo", None) or "")
              and getattr(f, "relevante", None) is not False]
     if rel.fontes and not uteis:
-        linhas.append("Sem evidência relevante encontrada — não compartilhe como verdade/falso.")
+        linhas.append("Não encontramos fontes que tratem do assunto. Na dúvida, não compartilhe.")
         linhas.append("")
-    # Top 2-3 lado a lado: portal | veredito | corpo_lido | link + quote
+    # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        linhas.append("Fontes lado a lado (compare):")
+        from .agregador import direcoes_por_url, postura_legivel
+        direcoes = direcoes_por_url(getattr(rel, "decisao", None))
+        linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
-            selo = f" [selo: {f.veredito}]" if f.veredito else ""
-            corpo = "📄 corpo lido" if getattr(f, "corpo_lido", False) else "📰 só título"
-            term = (f" [{f.postura}]" if getattr(f, "postura", None) else
-                    f" 🌡{f.score_juiz:+d}" if getattr(f, "score_juiz", None) is not None else "")
-            linhas.append(f"{i}. {f.portal_nome or 'web'}{selo} ({corpo}{term}): {f.titulo[:90]}")
+            selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
+            corpo = "📄 texto lido" if getattr(f, "corpo_lido", False) else "📰 só manchete"
+            linhas.append(f"{i}. {f.portal_nome or 'web'} {postura_legivel(f, direcoes)}{selo} "
+                          f"({corpo}): {f.titulo[:90]}")
             if getattr(f, "quote", None):
                 linhas.append(f"   “{f.quote[:140]}”")
             if f.url:
@@ -250,17 +251,15 @@ def formatar(rel: RelatorioChecagem) -> str:
             else:
                 linhas.append(f"Modelo de detecção: {s.valor} ({s.rotulo}).")
             break
-    outros = [f"{s.motor} {s.confianca:.2f}" for s in rel.sinais
-              if s.motor != "modelo-fake" and s.confianca is not None]  # estilo (confiança None) fora
-    if outros:
-        linhas.append("Sinais (confiança): " + "; ".join(outros[:6]) + ".")
     linhas.append("")
-    if rel.etapas:  # RF11 no canal principal: resumo nome:status
-        linhas.append("Passo a passo: " + "; ".join(f"{e.nome}:{e.status}" for e in rel.etapas) + ".")
+    if rel.etapas:  # RF11 no canal principal: etapa + status em linguagem simples
+        from .agregador import NOMES_ETAPAS, STATUS_ETAPA
+        linhas.append("Como chegamos aqui: " + " · ".join(
+            f"{STATUS_ETAPA.get(e.status, '')} {NOMES_ETAPAS.get(e.nome, e.nome)}" for e in rel.etapas))
         linhas.append("")
     if rel.limitacoes:
-        for i, lim in enumerate(rel.limitacoes[:3], 1):
-            linhas.append(f"Limitação {i}: {lim}")
+        linhas.append("Limitações desta análise:")
+        linhas += [f"• {lim}" for lim in rel.limitacoes[:3]]
         linhas.append("")
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]

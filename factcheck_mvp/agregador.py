@@ -8,7 +8,7 @@ direção de selo por substring) foi removido.
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 # Qualquer conclusão binária é proibida na saída (RF12). Varredura em testes.
 FRASES_BINARIAS = (
@@ -55,3 +55,50 @@ def gerar_header(propensao: str, why: str = "") -> Dict[str, str]:
     """Header legível em segundos (check #1). O `why` vem de `Decisao.why_1linha()`."""
     emoji = EMOJI_PROPENSAO.get(propensao, "⚪")
     return {"header": f"{emoji} {titulo_propensao(propensao)}", "why_1linha": why}
+
+
+# ------------------------------------------------- rótulos do bot e da web (mesma linguagem)
+NOMES_ETAPAS = {
+    "recebimento": "Leitura do texto",
+    "afirmacoes": "Identificação das afirmações",
+    "base-checagem": "Base de checagens",
+    "descoberta-agente": "Planejamento da busca",
+    "descoberta": "Busca de notícias",
+    "deep-crawl": "Leitura das notícias",
+    "juiz": "Análise das fontes",
+    "corroboracao": "Comparação entre veículos",
+    "agregacao": "Estimativa final",
+    "agente-critico": "Revisão da busca",
+    "descoberta-catalogo": "Novos sites no catálogo",
+    "modelo": "Modelo automático",
+    "padroes": "Padrões de desinformação",
+}
+STATUS_ETAPA = {"ok": "✅", "parcial": "⚠️", "pulada": "⏭️", "falha": "❌"}
+_POSTURA_SEM_VOTO = {
+    "RELATA_SEM_ENDOSSO": "relata o assunto sem tomar posição",
+    "NAO_TRATA": "não trata do assunto",
+    "SUSTENTA": "trata do assunto",   # votos anulados (conflito com selo/cluster)
+    "REFUTA": "trata do assunto",
+}
+
+
+def direcoes_por_url(decisao: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """url -> direção do voto (+1 contesta o que o texto afirma, -1 confirma).
+
+    Vem dos votos da decisão, que já aplicam a polaridade do usuário: se ele
+    NEGA o núcleo, uma página que REFUTA o núcleo está do lado dele."""
+    saida: Dict[str, float] = {}
+    for v in (decisao or {}).get("votos", []) or []:
+        for u in v.get("urls", []) or []:
+            saida[u] = v.get("direcao", 0.0)
+    return saida
+
+
+def postura_legivel(fonte: Any, direcoes: Dict[str, float]) -> str:
+    """O que a fonte faz frente ao que o usuário enviou, em linguagem simples."""
+    d = direcoes.get(getattr(fonte, "url", ""), 0.0)
+    if d > 0:
+        return "contesta o que o texto afirma"
+    if d < 0:
+        return "confirma o que o texto afirma"
+    return _POSTURA_SEM_VOTO.get(getattr(fonte, "postura", None) or "", "não avaliada")
