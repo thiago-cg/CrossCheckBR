@@ -4,13 +4,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from . import afirmacoes, config, corroboracao, implicacao, juiz_llm, padroes_llm
-from .agregador import agregar, gerar_header, perguntas_guia
+from . import afirmacoes, config, corroboracao, factcheck_api, implicacao, juiz_llm, padroes_llm
+from .agregador import agregar, gerar_header, montar_justificativa, perguntas_guia
 from .aprofundar import aprofundar
 from .catalogo import Catalogo
 from .indice import Indice
+from .logs import id_consulta, novo_id, resumo_texto
 from .modelo_fake import DetectorFake, carregar_detector
 from .schemas import (
     Afirmacao,
@@ -96,9 +98,17 @@ class Pipeline:
         sinais: List[SinalAnalise] = []
         fontes: List[FonteEvidencia] = []
         limitacoes: List[str] = []
+        if id_consulta.get() == "-":
+            novo_id()  # bot/testes: a API já define o id na requisição
+        t_inicio = time.time()
+        log.info("checagem iniciada: tipo=%s, %d caracteres, llm=%s: %r", entrada.tipo,
+                 len(entrada.conteudo), usar_llm, resumo_texto(entrada.conteudo))
 
         def etapa(nome: str, status: str, detalhe: str = "", fontes_urls: Optional[List[str]] = None):
             etapas.append(EtapaRecibo(nome=nome, status=status, detalhe=detalhe, fontes=fontes_urls or []))
+            # Toda etapa vira linha de log (o recibo do usuário é a mesma fonte).
+            (log.info if status in ("ok", "pulada") else log.warning)(
+                "etapa %s [%s] %.1fs: %s", nome, status, time.time() - t_inicio, detalhe)
 
         async def avisar(msg: str) -> None:
             try:
@@ -147,6 +157,10 @@ class Pipeline:
                     return [{"score": 0, "sustenta": 0.0, "refuta": 0.0, "relevante": False,
                              "erro": str(e)[:200], "motor": "llm-juiz"} for _ in idxs]
 
+            if saida:
+                log.info("  juiz: %d agente(s) de resumo, %d fora do tema, %d com resumo",
+                         len(saida), sum(1 for s_ in saida if s_["resumo"].strip() == juiz_llm.FORA_DO_TEMA),
+                         sum(1 for s_ in saida if s_["resumo"] and s_["resumo"].strip() != juiz_llm.FORA_DO_TEMA))
             if grupos:
                 blocos = await asyncio.gather(*[_j(af, idxs) for af, idxs in grupos.items()])
                 for (_, idxs), scores in zip(grupos.items(), blocos):
@@ -191,6 +205,10 @@ class Pipeline:
             afs, llm_motor = afirmacoes.extrair_afirmacoes(texto_base, max_n=0, usar_llm=False)
             limitacoes.append(f"Extração de afirmações via fallback: {e}")
         etapa("afirmacoes", "ok" if afs else "falha", f"{len(afs)} afirmação(ões) via {llm_motor}.")
+        for af in afs:
+            log.info("  afirmação %d: %r", af.indice, resumo_texto(af.texto, 160))
+        if eh_rumor or eh_opiniao or eh_vago:
+            log.info("  marcas no texto: rumor=%s opinião/sátira=%s vago=%s", eh_rumor, eh_opiniao, eh_vago)
         if not afs:
             return self._relatorio(entrada, "indeterminada",
                                    "Não identifiquei afirmação factual para checar.", sinais, fontes, etapas,
@@ -201,6 +219,26 @@ class Pipeline:
         # Piso de score: 1 token em comum não vira evidência; confiança escala com o score.
         achados_ver: List[Dict[str, Any]] = []
         achados_not: List[Dict[str, Any]] = []
+        # Checagens das agências (Google Fact Check) vêm antes do índice local:
+        # entram no corte MAX_EVIDENCIAS e passam pelo mesmo LLM-juiz dos selos.
+        n_factcheck = 0
+        if factcheck_api.ativo():
+            try:
+                blocos_fc = await asyncio.wait_for(asyncio.gather(*[
+                    asyncio.to_thread(factcheck_api.buscar, af.texto)
+                    for af in afs[: config.MAX_AFIRMACOES]]), timeout=20)
+            except asyncio.TimeoutError:
+                blocos_fc = []
+                limitacoes.append("Busca nas agências de checagem excedeu o tempo (parcial).")
+            vistos_fc = set()
+            for af, docs in zip(afs, blocos_fc):
+                for d in docs:
+                    if d["url"] not in vistos_fc:
+                        vistos_fc.add(d["url"])
+                        # score 3.0 -> confiança 0.85: checagem publicada, ainda por julgar
+                        achados_ver.append({"doc": d, "score": 3.0, "afirmacao": af.texto})
+            n_factcheck = len(vistos_fc)
+            log.info("  google fact check: %d checagem(ns) das agências", n_factcheck)
         for af in afs:
             achados_ver += [{**h, "afirmacao": af.texto} for h in self.idx_ver.buscar(af.texto, top_k=5)
                             if h["score"] >= config.INDICE_SCORE_MIN]
@@ -236,6 +274,9 @@ class Pipeline:
         restam_juiz -= len(julg_ver)
         for (pos, h), j in zip(pos_ver, julg_ver):
             d = h["doc"]
+            log.info("  selo %-24s %s nota=%s relevante=%s | %s",
+                     (d.get("fonte") or {}).get("nome", "")[:24], d.get("veredito"),
+                     j.get("score"), j.get("relevante"), resumo_texto(d.get("titulo", ""), 70))
             if j.get("resumo"):
                 fontes[pos].resumo_juiz = (j["resumo"] or "")[:500]
             if j.get("score") is not None:
@@ -288,10 +329,21 @@ class Pipeline:
                                          data_pub=(d.get("data_publicacao") or None),
                                          quote=(corpo_n[:140] if corpo_n and not gen_n else None),
                                          tipo_conteudo=d.get("tipo_conteudo")))
-        if achados_ver or achados_not:
+        # "ok" só com checagem julgada relevante: homepage/seção casando por
+        # palavra solta não é achado (a base local ainda é quase só homepages).
+        n_ver_relev = sum(1 for pos, _ in pos_ver if fontes[pos].relevante)
+        if n_ver_relev:
             etapa("base-checagem", "ok",
-                  f"{len(achados_ver)} checagem(ns) e {len(achados_not)} notícia(s) no índice local.",
-                  [h["doc"].get("url", "") for h in (achados_ver + achados_not)[:5]])
+                  f"{n_ver_relev} checagem(ns) relevante(s) "
+                  f"({n_factcheck} das agências via Google Fact Check; resto do índice local).",
+                  [fontes[pos].url for pos, _ in pos_ver if fontes[pos].relevante][:5])
+        elif achados_ver or achados_not:
+            fc = (f"{n_factcheck} checagem(ns) das agências fora do tema; " if factcheck_api.ativo()
+                  else "Google Fact Check desligado (sem FACTCHECK_API_KEY); ")
+            etapa("base-checagem", "parcial",
+                  f"Nenhuma checagem sobre o tema. {fc}índice local com {len(self.idx_ver)} "
+                  f"documentos ({len(achados_ver) + len(achados_not) - n_factcheck} só por palavras soltas).")
+            limitacoes.append("Não encontramos checagem publicada por agências sobre o tema.")
         else:
             etapa("base-checagem", "parcial", "Nenhuma checagem prévia encontrada no índice.")
             limitacoes.append("Sem checagem prévia no índice local.")
@@ -318,6 +370,8 @@ class Pipeline:
                     descobertas += b
             except asyncio.TimeoutError:
                 limitacoes.append("Descoberta web atingiu o teto de 60s (resultado parcial).")
+            log.info("  serpapi: %d consulta(s), %d resultado(s) brutos (uso hoje %d)",
+                     len(consultas), len(descobertas), self.serpapi.uso_hoje)
             vistos, unicas = set(), []
             for d in descobertas:
                 if d["url"] and d["url"] not in vistos:
@@ -332,19 +386,28 @@ class Pipeline:
                                key=lambda d: _overlap(d.get("_afirmacao", ""),
                                                       d.get("titulo", "")),
                                reverse=True)[:12]
-            # Deep crawl (check #2): corpo lido p/ o juiz, não só manchete.
+            # Leitura (check #2): CADA notícia que vai a um agente do juiz é lida
+            # na íntegra — qualquer site público vindo do Google News, não só o
+            # catálogo (anti-SSRF segue a cada hop). Falha -> agente lê a manchete.
             corpos = {}
-            top_crawl = [d for d in ordenadas if d.get("catalogada")][:3]
-            if top_crawl:
+            a_ler = ordenadas[: max(config.DEEP_CRAWL_MAX_PAGES, 1)]
+            if a_ler:
                 try:
-                    await avisar("Lendo o corpo das principais fontes…")
-                    corpos = await aprofundar(top_crawl, self.catalogo)
+                    await avisar(f"Lendo as {len(a_ler)} notícias encontradas…")
+                    corpos = await aprofundar(a_ler, self.catalogo, por_afirm=len(a_ler),
+                                              exigir_catalogo=False)
                 except Exception:
                     corpos = {}
-                for d in top_crawl:
+                for d in a_ler:
                     c = corpos.get(d.get("url", ""))
                     if c and c.corpo_lido:
                         d["_corpo"] = c
+                        if not d.get("catalogada"):
+                            # Site fora do catálogo: corpo lido vale, mas no tier
+                            # provisório (confiança reduzida até curadoria).
+                            d["_descoberta"] = True
+            n_lidas = sum(1 for d in a_ler if d.get("_corpo"))
+            log.info("  leitura: %d de %d notícias lidas na íntegra", n_lidas, len(a_ler))
             # Descoberta de catálogo: relevante NÃO catalogada entra no catálogo
             # IMEDIATAMENTE (primeira vez que aparece) + corpus com peso cheio.
             # Se a inserção falhar: fallback provisório (proposta pendente + conf 0.5).
@@ -413,8 +476,17 @@ class Pipeline:
             restam_juiz -= len(julgados)
             for d, j in zip(julg_ds, julgados):
                 d["_imp"] = j
+                log.info("  agente %-22s %s nota=%s relevante=%s motor=%s | %s",
+                         (d.get("fonte") or {}).get("nome", "")[:22],
+                         "texto " if d.get("_corpo") else "título",
+                         j.get("score"), j.get("relevante"), j.get("motor") or "-",
+                         resumo_texto(d.get("titulo", ""), 70))
             juiz_ok = any(d.get("_imp", {}).get("motor") == "llm-juiz"
                           and not d["_imp"].get("erro") for d in julg_ds)
+            if any("fallback-lexico" in (d.get("_imp", {}).get("erro") or "") for d in julg_ds):
+                limitacoes.append("A análise por IA das notícias falhou ou atingiu o limite diário "
+                                  "(LLM_DAILY_CAP): parte das fontes foi comparada só por palavras, "
+                                  "sem saber se confirmam ou contestam o conteúdo.")
             relevantes = [d for d in julg_ds if d.get("_imp", {}).get("relevante")]
             # Sem juiz (LLM fora/cap) e zero relevantes: relevância lexical +
             # corpo lido provisório nas top-3 catalogadas (nunca o tier cheio).
@@ -441,10 +513,14 @@ class Pipeline:
                              if d.get("_descoberta") and d.get("_corpo")
                              and d["_corpo"].corpo_lido
                              and d["_imp"].get("sustenta", 0.0) >= 0.6)
+            # Peso proporcional ao placar: 3 contestam x 1 sustenta não pode
+            # empatar 1 sinal com 1 sinal (caso Selic: saía "baixa").
+            frac_ref = n_ref / max(1, n_ref + n_sus)
+            frac_sus = 1.0 - frac_ref if n_ref else 1.0
             if n_ref:
                 sinais.append(SinalAnalise(motor="corroboracao", rotulo="fontes refutam a afirmação",
                                            valor=f"{n_ref} fonte(s) contestam a afirmação",
-                                           confianca=0.8,
+                                           confianca=round(0.8 * frac_ref, 3),
                                            evidencias=[d["url"] for d in relevantes if d["_imp"].get("refuta", 0.0) >= 0.6][:5]))
             if n_sus:
                 # Tier de evidência (check #2): corpo lido vale mais que só-título
@@ -454,15 +530,15 @@ class Pipeline:
                 if n_sus_corpo:
                     sinais.append(SinalAnalise(motor="corroboracao", rotulo="fontes sustentam a afirmação (corpo lido)",
                                                valor=f"{n_sus_corpo} fonte(s) com corpo lido sustentam ({n_sus} manchetes)",
-                                               confianca=0.75,
+                                               confianca=round(0.75 * frac_sus, 3),
                                                evidencias=[d["url"] for d in relevantes if d.get("_corpo") and d["_corpo"].corpo_lido and not d.get("_descoberta")][:5]))
                 elif n_sus_desc:
                     sinais.append(SinalAnalise(motor="corroboracao", rotulo="fontes sustentam a afirmação (site novo, corpo lido)",
                                                valor=f"{n_sus_desc} fonte(s) fora do catálogo com corpo lido (provisório, até curadoria)",
-                                               confianca=0.5,
+                                               confianca=round(0.5 * frac_sus, 3),
                                                evidencias=[d["url"] for d in relevantes if d.get("_descoberta")][:5]))
                 else:
-                    conf_sus = 0.5 if not n_modais else 0.25
+                    conf_sus = round((0.5 if not n_modais else 0.25) * frac_sus, 3)
                     sinais.append(SinalAnalise(motor="corroboracao", rotulo="fontes sustentam a afirmação (só título)",
                                                valor=f"{n_sus} manchete(s) sustentam ({n_modais} condicionais); corpo não lido",
                                                confianca=conf_sus,
@@ -491,11 +567,12 @@ class Pipeline:
                                              resumo_juiz=(d["_imp"].get("resumo") or "")[:500] or None,
                                              score_juiz=d["_imp"].get("score"),
                                              relevante=bool(d["_imp"].get("relevante"))))
+            n_lidas = sum(1 for d in a_ler if d.get("_corpo"))  # inclui as lidas na descoberta
             motivo = getattr(self.serpapi, "ultimo_motivo", "vazio")
             etapa("descoberta", "ok" if unicas else "parcial",
-                  f"{len(unicas)} resultado(s), {len(relevantes)} relevante(s) após julgamento llm-juiz "
-                  f"({n_corpo_lido} com corpo lido via deep crawl"
-                  f"{f', +{n_descoberta_corpo} via descoberta' if n_descoberta_corpo else ''})"
+                  f"{len(unicas)} resultado(s); {n_lidas} de {len(a_ler)} notícias lidas na íntegra "
+                  f"(as demais, só pela manchete); {len(relevantes)} sobre o assunto segundo o juiz "
+                  f"({n_corpo_lido} delas com o texto lido)"
                   f"{f' [serpapi: {motivo}]' if not unicas else ''}.",
                   [d["url"] for d in relevantes[:5]])
             if not unicas:
@@ -520,7 +597,11 @@ class Pipeline:
         corroboraveis = [f.model_dump() for f in fontes
                          if f.tipo_fonte in ("corroboracao", "veredito")
                          and f.relevante is True]
-        contagem = corroboracao.contar_independentes(corroboraveis)
+        # Quem contesta a afirmação não é "cobertura" que a reforça: 4 veículos
+        # desmentindo não podem virar "presente em 3+ veículos" (reduz propensão).
+        # Sem nota do juiz (cap/falha -> lexical) não se sabe o sentido: não conta.
+        contagem = corroboracao.contar_independentes(
+            [f for f in corroboraveis if f.get("score_juiz") is not None and f["score_juiz"] >= 0])
         for div in corroboracao.divergencias(corroboraveis):
             sinais.append(SinalAnalise(motor="corroboracao",
                                        rotulo=f"{div['tipo']}: {div['campo']}",
@@ -530,12 +611,17 @@ class Pipeline:
             sinais.append(SinalAnalise(motor="corroboracao", rotulo="cobertura ampla",
                                        valor="informação presente em 3+ veículos independentes",
                                        confianca=0.75, evidencias=[f.url for f in fontes[:5]]))
-        elif contagem["n"] <= 1 and fontes and not any(s.motor == "veredito-existente" for s in sinais):
+        elif (corroboracao.contar_independentes(corroboraveis)["n"] <= 1 and fontes
+              and not any(s.motor == "veredito-existente" for s in sinais)):
+            # "Isolada" mede presença do ASSUNTO (inclui quem contesta): desmentido
+            # em 5 veículos não é "ausente nos veículos".
             # "Isolada" só quando NÃO há veredito: uma checagem encontrada já é achado, não ausência.
             sinais.append(SinalAnalise(motor="corroboracao", rotulo="cobertura isolada",
                                        valor="informação ausente ou isolada nos veículos consultados",
                                        confianca=0.7, evidencias=[f.url for f in fontes[:3]]))
-        etapa("corroboracao", "ok", f"{contagem['n']} fonte(s) independente(s).")
+        etapa("corroboracao", "ok",
+              f"{corroboracao.contar_independentes(corroboraveis)['n']} veículo(s) independente(s) "
+              f"tratam do assunto; {contagem['n']} sem contestar o conteúdo.")
 
         # 6. Modelo próprio (RF08/09) — mock explícito até o real
         await avisar("Rodando o modelo de detecção e a análise de padrões…")
@@ -567,6 +653,11 @@ class Pipeline:
         await avisar("Montando o relatório…")
         agg = agregar(sinais)
         prop = agg["propensao"]
+        for s_ in sinais:
+            log.info("  sinal %-18s conf=%s %s | %s", s_.motor, s_.confianca, s_.rotulo,
+                     resumo_texto(s_.valor, 60))
+        log.info("  agregador: score=%s -> %s", agg.get("score"), prop)
+        extras: List[str] = []
         # Loop 3: veredito só conta se confianca>=0.6 e fonte não-genérica.
         tem_veredito = any(s.motor == "veredito-existente" and (s.confianca or 0) >= 0.6
                            for s in sinais)
@@ -580,24 +671,28 @@ class Pipeline:
         # Notícia citando "precisamos/deveria" com veredito+corpo não é rebaixada.
         if eh_opiniao and prop != "indeterminada" and not (tem_veredito and n_corpo >= 1):
             prop = "indeterminada"
-            agg["justificativa"] += (" Texto com marcas de opinião/sátira: "
-                                     "não classificável como fato.")
+            extras.append("O texto tem marcas de opinião ou sátira, por isso não foi tratado como fato.")
         # Claim vago (round C): comparativo sem indicador/período não é
         # falsificável — contém em indeterminada e pede especificação.
         if eh_vago and prop != "indeterminada":
             prop = "indeterminada"
-            agg["justificativa"] += (" Afirmação vaga demais para checar "
-                                     "(sem indicador nem período).")
+            extras.append("A afirmação é vaga demais para checar: diga qual indicador e qual período.")
         if not tem_veredito and not tem_corpo and prop in ("baixa", "media", "alta"):
             prop = "indeterminada"
-            agg["justificativa"] += (" Sem checagem prévia nem corpo lido relevante: "
-                                     "elementos insuficientes para propensão.")
-            limitacoes.append("Sem evidência relevante (nada sobre o tema nas fontes consultadas): veredito contido em indeterminada.")
+            if any(f.relevante is True for f in fontes):
+                # Há fonte julgada sobre o tema, mas só pela manchete: diz isso,
+                # não "nada sobre o tema" (contradizia o "1 contesta" do header).
+                extras.append("As fontes sobre o assunto foram avaliadas só pela manchete, "
+                              "sem o texto completo, então faltam elementos para estimar a propensão.")
+                limitacoes.append("Fontes sobre o tema lidas só pela manchete: estimativa contida em indeterminada.")
+            else:
+                extras.append("Não encontramos checagens nem notícias que tratem do assunto, "
+                              "então faltam elementos para estimar a propensão.")
+                limitacoes.append("Sem evidência relevante (nada sobre o tema nas fontes consultadas): veredito contido em indeterminada.")
         elif eh_rumor and not tem_veredito:
             if not tem_corpo and prop in ("baixa", "media"):
                 prop = "indeterminada"
-                agg["justificativa"] += (" Relato sem fonte: elementos insuficientes; "
-                                         "vale buscar a fonte original.")
+                extras.append("É um relato sem fonte: vale procurar a origem da informação.")
         etapa("agregacao", "ok", f"propensão {prop} a partir de {len(sinais)} sinais.")
         # Ordena úteis+corpo_lido primeiro ANTES de fatiar (não descarta deep-crawl).
         # Julgado-irrelevante vai p/ o fim (resto auditável, nunca manchete).
@@ -609,7 +704,12 @@ class Pipeline:
             return (gen or f.relevante is False, not getattr(f, "corpo_lido", False),
                     -(f.confianca or 0))
         fontes_ord = sorted(fontes, key=_chave_f)
-        return self._relatorio(entrada, prop, agg["justificativa"], sinais,
+        if prop != agg["propensao"]:
+            log.info("  propensão ajustada %s -> %s: %s", agg["propensao"], prop, " ".join(extras))
+        justificativa = montar_justificativa(prop, sinais, " ".join(extras))
+        log.info("checagem concluída em %.1fs: %s | %d fonte(s), %d limitação(ões)",
+                 time.time() - t_inicio, prop, len(fontes), len(limitacoes))
+        return self._relatorio(entrada, prop, justificativa, sinais,
                                fontes_ord[: config.MAX_EVIDENCIAS * 2], etapas, limitacoes)
 
     @staticmethod
@@ -624,8 +724,13 @@ class Pipeline:
         uteis = [f for f in fontes if not _g(f) and f.relevante is not False]
         resto = [f for f in fontes if _g(f)]
         fontes_ord = uteis + resto
-        hdr = gerar_header(propensao, sinais, n_fontes=len(uteis),
-                           n_corpo_lido=sum(1 for f in uteis if getattr(f, "corpo_lido", False)))
+        # Header conta só o que o juiz julgou relevante (índice não julgado não
+        # é "fonte sobre o assunto").
+        julgadas = [f for f in uteis if f.relevante is True]
+        hdr = gerar_header(propensao, sinais, n_fontes=len(julgadas),
+                           n_corpo_lido=sum(1 for f in julgadas if getattr(f, "corpo_lido", False)),
+                           n_contestam=sum(1 for f in julgadas if (f.score_juiz or 0) < 0),
+                           n_confirmam=sum(1 for f in julgadas if (f.score_juiz or 0) > 0))
         if not uteis and fontes:
             limitacoes = list(limitacoes) + ["Sem evidência relevante (só homepages/seções): prefira buscar a fonte original."]
         return RelatorioChecagem(propensao=propensao, justificativa=justificativa, sinais=sinais,

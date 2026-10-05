@@ -1353,6 +1353,1228 @@
       "subsecoes": [],
       "origem_catalogo": "descoberta-automatica",
       "adicionado_em": "2026-09-22"
+    },
+    {
+      "id": "news-un-org",
+      "nome": "ONU News",
+      "tipo": "geral",
+      "homepage": "https://news.un.org/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/pt/",
+        "/pt/story/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://news.un.org/pt/story/2025/12/1851799"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "infomoney-com-br",
+      "nome": "InfoMoney",
+      "tipo": "geral",
+      "homepage": "https://www.infomoney.com.br/",
+      "rss": [
+        "https://www.infomoney.com.br/feed/",
+        "https://www.infomoney.com.br/comments/feed/",
+        "https://www.infomoney.com.br/web-stories/feed/"
+      ],
+      "sitemap": "https://www.infomoney.com.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/saude/",
+        "/saude/memorando-da-fda-relaciona-10-mortes-de-criancas-as-vacinas-contra-a-covid-diz-o-nyt/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.infomoney.com.br/saude/memorando-da-fda-relaciona-10-mortes-de-criancas-as-vacinas-contra-a-covid-diz-o-nyt/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "saude-abril-com-br",
+      "nome": "Veja Saúde",
+      "tipo": "geral",
+      "homepage": "https://saude.abril.com.br/",
+      "rss": [
+        "https://saude.abril.com.br/ultimas-noticias/rss"
+      ],
+      "sitemap": "https://saude.abril.com.br/sitemap.xml",
+      "editorias": [
+        "medicina",
+        "podcast",
+        "coluna",
+        "alimentacao",
+        "ofertas",
+        "web-stories-abril",
+        "vida-animal",
+        "leitura-saudavel"
+      ],
+      "article_url_patterns": [
+        "/coluna/",
+        "/coluna/e-verdade-ou-fake-news/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://saude.abril.com.br/coluna/e-verdade-ou-fake-news/beber-agua-gelada-causa-infarto-cancer-e-ate-gordura-no-figado-e-fake/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "gauchazh-clicrbs-com-br",
+      "nome": "GZH",
+      "tipo": "geral",
+      "homepage": "https://gauchazh.clicrbs.com.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "politica",
+        "esportes",
+        "colunistas",
+        "viral",
+        "pioneiro",
+        "zona-sul",
+        "gaucha",
+        "passo-fundo"
+      ],
+      "article_url_patterns": [
+        "/saude/",
+        "/saude/vida/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://gauchazh.clicrbs.com.br/saude/vida/noticia/2019/12/beber-agua-gelada-nao-causa-cancer-nem-problemas-cardiacos-ck4j3fssr04a201qh3l715wew.html"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "metropoles-com",
+      "nome": "Metrópoles",
+      "tipo": "geral",
+      "homepage": "https://www.metropoles.com/",
+      "rss": [],
+      "sitemap": "https://www.metropoles.com/sitemap.xml",
+      "editorias": [
+        "colunas",
+        "brasil",
+        "distrito-federal",
+        "sao-paulo",
+        "minas-gerais",
+        "conteudo-especial",
+        "saude",
+        "esportes"
+      ],
+      "article_url_patterns": [
+        "/saude/",
+        "/saude/refrigerante-risco-gordura-figado/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.metropoles.com/saude/refrigerante-risco-gordura-figado"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "brasilparalelo-com-br",
+      "nome": "Vacina que cura o câncer? Pesquisa russa anima cientistas | Brasil Paralelo",
+      "tipo": "geral",
+      "homepage": "https://www.brasilparalelo.com.br/",
+      "rss": [
+        "https://www.brasilparalelo.com.br/noticias/feed.xml",
+        "https://www.brasilparalelo.com.br/artigos/feed.xml",
+        "https://www.brasilparalelo.com.br/assista-agora/feed.xml"
+      ],
+      "sitemap": "https://www.brasilparalelo.com.br/sitemap.xml",
+      "editorias": [
+        "noticias",
+        "streaming",
+        "assista-agora",
+        "resumo-bp"
+      ],
+      "article_url_patterns": [
+        "/noticias/",
+        "/noticias/vacina-que-cura-o-cancer-pesquisa-russa-anima-cientistas-mas-promessa-de-100-eficaz-e-exagero/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.brasilparalelo.com.br/noticias/vacina-que-cura-o-cancer-pesquisa-russa-anima-cientistas-mas-promessa-de-100-eficaz-e-exagero"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "cbn-globo-com",
+      "nome": "cbn",
+      "tipo": "geral",
+      "homepage": "https://cbn.globo.com/",
+      "rss": [
+        "https://cbn.globo.com/rss/cbn/"
+      ],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/mundo/",
+        "/mundo/noticia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody'], .mc-article-body"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://cbn.globo.com/mundo/noticia/2026/08/07/governo-trump-planeja-emitir-diretriz-relacionando-vacinas-e-autismo-diz-agencia.ghtml"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "primeirapagina-com-br",
+      "nome": "Primeira Página",
+      "tipo": "geral",
+      "homepage": "https://primeirapagina.com.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "tag",
+        "politica",
+        "esportes",
+        "emprego-e-concursos",
+        "economia",
+        "seguranca",
+        "animais",
+        "comportamento"
+      ],
+      "article_url_patterns": [
+        "/economia/",
+        "/economia/taxa-de-juros-cai-para-14-decisao-do-banco-central-pode-aliviar-parcelas-e-estimular-consumo/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://primeirapagina.com.br/economia/taxa-de-juros-cai-para-14-decisao-do-banco-central-pode-aliviar-parcelas-e-estimular-consumo/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "fpabramo-org-br",
+      "nome": "Fundação Perseu Abramo",
+      "tipo": "geral",
+      "homepage": "https://fpabramo.org.br/",
+      "rss": [],
+      "sitemap": "https://fpabramo.org.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/35-anos-confisco-da-poupanca-collor/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": ".post-content"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://fpabramo.org.br/35-anos-confisco-da-poupanca-collor/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "investnews-com-br",
+      "nome": "InvestNews",
+      "tipo": "geral",
+      "homepage": "https://investnews.com.br/",
+      "rss": [
+        "https://investnews.com.br/feed/",
+        "https://investnews.com.br/comments/feed/",
+        "https://investnews.com.br/web-stories/feed/"
+      ],
+      "sitemap": "https://investnews.com.br/sitemap.xml",
+      "editorias": [
+        "negocios",
+        "investimentos",
+        "the-wall-street-journal",
+        "economia",
+        "patrocinados",
+        "politica-de-privacidade",
+        "ferramentas",
+        "tag"
+      ],
+      "article_url_patterns": [
+        "/economia/",
+        "/economia/boato-confisco-da-poupanca/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://investnews.com.br/economia/boato-confisco-da-poupanca/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "midiamax-com-br",
+      "nome": "Midiamax | Jornal de Campo Grande e Mato Grosso do Sul",
+      "tipo": "geral",
+      "homepage": "https://midiamax.com.br/",
+      "rss": [],
+      "sitemap": "https://midiamax.com.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/brasil/",
+        "/brasil/2026/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://midiamax.com.br/brasil/2026/banco-central-reduz-taxa-selic-14-ano-quarta-queda-consecutiva/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "agenciamural-org-br",
+      "nome": "Agência Mural",
+      "tipo": "geral",
+      "homepage": "https://agenciamural.org.br/",
+      "rss": [],
+      "sitemap": "https://agenciamural.org.br/sitemap.xml",
+      "editorias": [
+        "editoria",
+        "sua-quebrada",
+        "institucional",
+        "muralista",
+        "especiais",
+        "sobre-nos",
+        "apoie",
+        "eleicoes-2026-acompanhe-primeiro-voto-de-jovem-com-baixa-visao-em-diadema"
+      ],
+      "article_url_patterns": [
+        "/cnn-nao-publicou-que-lula-vai-tributar-pix/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://agenciamural.org.br/cnn-nao-publicou-que-lula-vai-tributar-pix/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "terra-com-br",
+      "nome": "Terra",
+      "tipo": "geral",
+      "homepage": "https://www.terra.com.br/",
+      "rss": [],
+      "sitemap": "https://www.terra.com.br/sitemap.xml",
+      "editorias": [
+        "noticias",
+        "diversao",
+        "vida-e-estilo",
+        "esportes",
+        "meu-terra",
+        "nos",
+        "economia",
+        "byte"
+      ],
+      "article_url_patterns": [
+        "/vida-e-estilo/",
+        "/vida-e-estilo/saude/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.terra.com.br/vida-e-estilo/saude/vacina-da-gripe-tem-chip-veja-6-fake-news-que-ainda-circulam,5b2d61cdf974970bef1382d50c5fc05b4y0myfgp.html"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "oespecialista-safra-com-br",
+      "nome": "O Especialista",
+      "tipo": "geral",
+      "homepage": "https://oespecialista.safra.com.br/",
+      "rss": [
+        "https://oespecialista.safra.com.br/feed/",
+        "https://oespecialista.safra.com.br/web-stories/feed/"
+      ],
+      "sitemap": "https://oespecialista.safra.com.br/sitemap.xml",
+      "editorias": [
+        "analise",
+        "investimentos",
+        "analises-safra",
+        "inteligencia-artificial",
+        "safra-micron-technology-alta-memorias-inteligencia-artificial",
+        "data-centers-demanda-energia-utilities-brasil",
+        "j-safra-investment-conference-2026-sinais-mercados",
+        "safra-lidera-ranking-carteira-valor"
+      ],
+      "article_url_patterns": [
+        "/copom-selic-cautela-inflacao/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody'], main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://oespecialista.safra.com.br/copom-selic-cautela-inflacao/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "agenciabrasil-ebc-com-br",
+      "nome": "Agência Brasil",
+      "tipo": "geral",
+      "homepage": "https://agenciabrasil.ebc.com.br/",
+      "rss": [],
+      "sitemap": "https://agenciabrasil.ebc.com.br/sitemap.xml",
+      "editorias": [
+        "politica",
+        "internacional",
+        "meio-ambiente",
+        "esportes",
+        "economia",
+        "radioagencia-nacional",
+        "ultimas",
+        "educacao"
+      ],
+      "article_url_patterns": [
+        "/economia/",
+        "/economia/noticia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody'], main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://agenciabrasil.ebc.com.br/economia/noticia/2026-04/banco-central-reduz-juros-basicos-para-145-ao-ano"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "poligrafo-sapo-pt",
+      "nome": "Polígrafo",
+      "tipo": "checagem",
+      "homepage": "https://poligrafo.sapo.pt/",
+      "rss": [],
+      "sitemap": "https://poligrafo.sapo.pt/sitemap_index.xml",
+      "editorias": [
+        "blog",
+        "fact-checks",
+        "fact-check",
+        "institucional",
+        "saude",
+        "especiais",
+        "eurofacts",
+        "artigos"
+      ],
+      "article_url_patterns": [
+        "/fact-check/",
+        "/fact-check/ingerir-agua-gelada-provoca-ataques-cardiacos-varios-tipos-de-cancro-e-outros-problemas-de-saude/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://poligrafo.sapo.pt/fact-check/ingerir-agua-gelada-provoca-ataques-cardiacos-varios-tipos-de-cancro-e-outros-problemas-de-saude/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "correiobraziliense-com-br",
+      "nome": "Ciência e Saúde",
+      "tipo": "geral",
+      "homepage": "https://www.correiobraziliense.com.br/",
+      "rss": [],
+      "sitemap": "https://www.correiobraziliense.com.br/sitemap.xml",
+      "editorias": [
+        "cidades-df",
+        "politica",
+        "busca",
+        "cb-brands",
+        "revista-do-correio",
+        "euestudante",
+        "${link}",
+        "colunistas"
+      ],
+      "article_url_patterns": [
+        "/ciencia-e-saude/",
+        "/ciencia-e-saude/2026/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.correiobraziliense.com.br/ciencia-e-saude/2026/03/7367973-o-que-a-agua-com-gas-faz-no-intestino-e-no-nosso-corpo.html"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "cooperativismodecredito-coop-br",
+      "nome": "Portal do Cooperativismo Financeiro",
+      "tipo": "geral",
+      "homepage": "https://cooperativismodecredito.coop.br/",
+      "rss": [],
+      "sitemap": "https://cooperativismodecredito.coop.br/sitemap.xml",
+      "editorias": [],
+      "article_url_patterns": [
+        "/2025/",
+        "/2025/08/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": ".post-content, .entry-content"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://cooperativismodecredito.coop.br/2025/08/o-confisco-da-poupanca-poderia-acontecer-novamente/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "www12-senado-leg-br",
+      "nome": "Senado Verifica",
+      "tipo": "geral",
+      "homepage": "https://www12.senado.leg.br/",
+      "rss": [
+        "https://www12.senado.leg.br/hpsenado/RSS",
+        "https://www12.senado.leg.br/hpsenado/rss.xml",
+        "https://www12.senado.leg.br/hpsenado/atom.xml"
+      ],
+      "sitemap": null,
+      "editorias": [
+        "institucional",
+        "noticias",
+        "transparencia",
+        "ecidadania",
+        "perguntas-frequentes",
+        "publicacoes",
+        "hpsenado",
+        "dados-abertos"
+      ],
+      "article_url_patterns": [
+        "/verifica/",
+        "/verifica/materias-especiais/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www12.senado.leg.br/verifica/materias-especiais/2026/pix-fui-vitima-de-golpe-como-recuperar-meu-dinheiro"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "spbancarios-com-br",
+      "nome": "Sindicato dos Bancários de SP",
+      "tipo": "geral",
+      "homepage": "https://spbancarios.com.br/",
+      "rss": [],
+      "sitemap": "https://spbancarios.com.br/sitemap.xml",
+      "editorias": [
+        "categoria",
+        "juridico",
+        "folhabancaria",
+        "canal-de-denuncias",
+        "homologacao",
+        "charges",
+        "banco-do-brasil",
+        "bradesco"
+      ],
+      "article_url_patterns": [
+        "/01/",
+        "/01/2026/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, .post-content"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://spbancarios.com.br/01/2026/banco-central-mantem-selic-em-15-e-sindicato-denuncia-transferencia-de-renda-aos-mais-ricos"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "cartacapital-com-br",
+      "nome": "CartaCapital",
+      "tipo": "geral",
+      "homepage": "https://www.cartacapital.com.br/",
+      "rss": [
+        "https://www.cartacapital.com.br/feed/",
+        "https://www.cartacapital.com.br/comments/feed/"
+      ],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/economia/",
+        "/economia/copom-corta-a-selic-para-1375-mas-brasil-segue-com-a-maior-taxa-real-de-juros-do-mundo/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.cartacapital.com.br/economia/copom-corta-a-selic-para-1375-mas-brasil-segue-com-a-maior-taxa-real-de-juros-do-mundo/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "ultimosegundo-ig-com-br",
+      "nome": "Portal iG",
+      "tipo": "geral",
+      "homepage": "https://ultimosegundo.ig.com.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "colunas",
+        "parceiros",
+        "mundo",
+        "brasil",
+        "educacao",
+        "meioambiente",
+        "policia",
+        "politica"
+      ],
+      "article_url_patterns": [
+        "/2026-10-04/",
+        "/2026-10-04/lula-e-flavio-bolsonaro-vao-disputar-o-segundo-turno.html/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody'], main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://ultimosegundo.ig.com.br/2026-10-04/lula-e-flavio-bolsonaro-vao-disputar-o-segundo-turno.html"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "amazonasatual-com-br",
+      "nome": "AMAZONAS ATUAL",
+      "tipo": "geral",
+      "homepage": "https://amazonasatual.com.br/",
+      "rss": [
+        "https://amazonasatual.com.br/feed/",
+        "https://amazonasatual.com.br/comments/feed/"
+      ],
+      "sitemap": null,
+      "editorias": [
+        "colunas",
+        "politica",
+        "dia-a-dia",
+        "economia",
+        "esporte",
+        "variedades",
+        "negocios",
+        "policia"
+      ],
+      "article_url_patterns": [
+        "/flavio-bolsonaro-e-lula-disputam-segundo-turno-com-menor-diferenca-da-historia/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://amazonasatual.com.br/flavio-bolsonaro-e-lula-disputam-segundo-turno-com-menor-diferenca-da-historia/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "sosergipe-com-br",
+      "nome": "Só Sergipe",
+      "tipo": "geral",
+      "homepage": "https://www.sosergipe.com.br/",
+      "rss": [
+        "https://www.sosergipe.com.br/feed/",
+        "https://www.sosergipe.com.br/comments/feed/"
+      ],
+      "sitemap": "https://www.sosergipe.com.br/sitemap.xml",
+      "editorias": [
+        "category",
+        "sergipe-recebe-forca-tarefa-para-prevenir-acidentes-e-fiscalizar-atividades-tecnicas",
+        "pix-por-aproximacao-deixa-de-ter-teto-de-r-500-a-partir-desta-quinta",
+        "soberba-ironia",
+        "a-infancia-e-um-chao-que-a-gente-pisa-o-tempo-inteiro",
+        "por-que-desenterrar-defunto-velho",
+        "bacteria-estudada-em-sergipe-pode-reduzir-em-ate-75-o-uso-de-ureia-no-milho",
+        "bnb-assina-r-105-milhoes-em-contratos-de-credito-na-expo-gloria"
+      ],
+      "article_url_patterns": [
+        "/flavio-bolsonaro-e-lula-vao-disputar-segundo-turno-da-eleicao-presidencial/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.sosergipe.com.br/flavio-bolsonaro-e-lula-vao-disputar-segundo-turno-da-eleicao-presidencial/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "piaui-uol-com-br",
+      "nome": "revista piauí",
+      "tipo": "geral",
+      "homepage": "https://piaui.uol.com.br/",
+      "rss": [],
+      "sitemap": "https://piaui.uol.com.br/sitemap.xml",
+      "editorias": [
+        "web",
+        "tags",
+        "acervo",
+        "colaborador",
+        "revista",
+        "dicas-culturais",
+        "the-piaui-herald",
+        "radio-piaui"
+      ],
+      "article_url_patterns": [
+        "/web/",
+        "/web/brasil-seu-lugar-no-mundo-lula-flavio/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://piaui.uol.com.br/web/brasil-seu-lugar-no-mundo-lula-flavio/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "iclnoticias-com-br",
+      "nome": "ICL Notícias",
+      "tipo": "geral",
+      "homepage": "https://iclnoticias.com.br/",
+      "rss": [
+        "https://iclnoticias.com.br/feed/"
+      ],
+      "sitemap": "https://iclnoticias.com.br/sitemap.xml",
+      "editorias": [
+        "economia",
+        "conhecimento",
+        "o-elogio-do-trabalho",
+        "video",
+        "youtube",
+        "lula-quer-camilo-na-coordenacao-de-campanha",
+        "dia-da-consciencia-negra-sera-feriado-nacional-em-sexta-feira-de-2026",
+        "colunistas"
+      ],
+      "article_url_patterns": [
+        "/lula-vence-na-australia-e-nova-zelandia-com-mais-de-50-dos-votos/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody'], main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://iclnoticias.com.br/lula-vence-na-australia-e-nova-zelandia-com-mais-de-50-dos-votos/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "valor-globo-com",
+      "nome": "Valor Econômico",
+      "tipo": "geral",
+      "homepage": "https://valor.globo.com/",
+      "rss": [
+        "https://valor.globo.com/rss/valor"
+      ],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/politica/",
+        "/politica/eleicoes-2026/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "[itemprop='articleBody'], .mc-article-body"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://valor.globo.com/politica/eleicoes-2026/noticia/2026/10/04/lula-admite-desapontamento-com-resultado-do-1-turno-mas-desafia-flvio-sou-bom-no-mata-mata.ghtml"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "ptsaopaulo-org-br",
+      "nome": "PT SP",
+      "tipo": "geral",
+      "homepage": "https://ptsaopaulo.org.br/",
+      "rss": [
+        "https://ptsaopaulo.org.br/feed/",
+        "https://ptsaopaulo.org.br/comments/feed/"
+      ],
+      "sitemap": "https://ptsaopaulo.org.br/sitemap.xml",
+      "editorias": [
+        "noticias",
+        "categoria",
+        "artigos",
+        "notas",
+        "pt-no-territorio",
+        "zonais",
+        "equipe",
+        "vozes-sp"
+      ],
+      "article_url_patterns": [
+        "/noticias/",
+        "/noticias/lula-confiante-para-o-2o-turno-sou-bom-de-mata-mata-a-familia-bolsonaro-que-se-cuide/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://ptsaopaulo.org.br/noticias/lula-confiante-para-o-2o-turno-sou-bom-de-mata-mata-a-familia-bolsonaro-que-se-cuide/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "brasil247-com",
+      "nome": "Brasil 247",
+      "tipo": "geral",
+      "homepage": "https://www.brasil247.com/",
+      "rss": [
+        "https://www.brasil247.com/feed/",
+        "https://www.brasil247.com/comments/feed/"
+      ],
+      "sitemap": "https://www.brasil247.com/sitemap.xml",
+      "editorias": [
+        "autor",
+        "blog",
+        "brasil",
+        "poder",
+        "sudeste",
+        "brasilia",
+        "mundo",
+        "economia"
+      ],
+      "article_url_patterns": [
+        "/poder/",
+        "/poder/lula-projeta-enfrentamento-direto-contra-flavio-bolsonaro-no-2o-turno-sou-muito-bom-no-mata-mata/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.brasil247.com/poder/lula-projeta-enfrentamento-direto-contra-flavio-bolsonaro-no-2o-turno-sou-muito-bom-no-mata-mata/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "cnnportugal-iol-pt",
+      "nome": "CNN Portugal",
+      "tipo": "geral",
+      "homepage": "https://cnnportugal.iol.pt/",
+      "rss": [
+        "https://cnnportugal.iol.pt/rss.xml"
+      ],
+      "sitemap": "https://cnnportugal.iol.pt/sitemap.xml",
+      "editorias": [
+        "desporto",
+        "liveevents",
+        "mundo",
+        "estilodevida",
+        "videos",
+        "politica",
+        "saude",
+        "artes"
+      ],
+      "article_url_patterns": [
+        "/brasil-2026/",
+        "/brasil-2026/lula-da-silva/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://cnnportugal.iol.pt/brasil-2026/lula-da-silva/flavio-bolsonaro-aos-gritos-lula-da-silva-ao-megafone-vem-ai-o-mata-mata/20261005/6ac30ed3d34e53c759c75055"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "diario360-com-br",
+      "nome": "Diário 360",
+      "tipo": "geral",
+      "homepage": "https://diario360.com.br/",
+      "rss": [
+        "https://diario360.com.br/feed/",
+        "https://diario360.com.br/comments/feed/"
+      ],
+      "sitemap": "https://diario360.com.br/sitemap.xml",
+      "editorias": [
+        "2026",
+        "category",
+        "2025",
+        "termos-de-uso",
+        "politica-de-privacidade",
+        "links-externos"
+      ],
+      "article_url_patterns": [
+        "/2026/",
+        "/2026/06/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody']"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://diario360.com.br/2026/06/02/de-adelio-a-tiradentes-lula-evoca-enforcamento-e-acirra-o-odio-que-quase-matou-bolsonaro/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "canaltech-com-br",
+      "nome": "Canaltech",
+      "tipo": "geral",
+      "homepage": "https://canaltech.com.br/",
+      "rss": [
+        "https://canaltech.com.br/rss/"
+      ],
+      "sitemap": null,
+      "editorias": [
+        "produto",
+        "games",
+        "empresa",
+        "smartphone",
+        "carros",
+        "colunas",
+        "eletro",
+        "entretenimento"
+      ],
+      "article_url_patterns": [
+        "/internet/",
+        "/internet/e-falso-que-beber-agua-com-limao-em-jejum-cura-doencas-e-desintoxica-o-corpo/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "main"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://canaltech.com.br/internet/e-falso-que-beber-agua-com-limao-em-jejum-cura-doencas-e-desintoxica-o-corpo/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "bandab-com-br",
+      "nome": "Banda B",
+      "tipo": "geral",
+      "homepage": "https://www.bandab.com.br/",
+      "rss": [
+        "https://www.bandab.com.br/feed/",
+        "https://www.bandab.com.br/web-stories/feed/"
+      ],
+      "sitemap": "https://www.bandab.com.br/sitemap.xml",
+      "editorias": [
+        "esporte",
+        "variedades",
+        "cultura",
+        "radio",
+        "ultimas-noticias",
+        "curitiba",
+        "tags",
+        "regiao-metropolitana-de-curitiba"
+      ],
+      "article_url_patterns": [
+        "/seguranca/",
+        "/seguranca/homem-preso-agua-molecular-cura-cancer-curitiba/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article, [itemprop='articleBody'], main, .post-content"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.bandab.com.br/seguranca/homem-preso-agua-molecular-cura-cancer-curitiba/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "sinait-org-br",
+      "nome": "Em Brasília, o Instituto Mosap promove ato público “Pelo Fim do Confisco” durant",
+      "tipo": "geral",
+      "homepage": "https://www.sinait.org.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [
+        "noticia",
+        "acervo",
+        "storage",
+        "auditoria",
+        "dentrodalei",
+        "filiar",
+        "cdn-cgi",
+        "livro"
+      ],
+      "article_url_patterns": [
+        "/noticia/",
+        "/noticia/23315/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.sinait.org.br/noticia/23315/em-brasilia-o-instituto-mosap-promove-ato-publico-pelo-fim-do-confisco-durante-o-20o-encontro-nacional-de-aposentados-e-pensionistas"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "sindjus-com-br",
+      "nome": "Sindjus/RS -",
+      "tipo": "geral",
+      "homepage": "https://www.sindjus.com.br/",
+      "rss": [
+        "https://www.sindjus.com.br/feed/",
+        "https://www.sindjus.com.br/comments/feed/"
+      ],
+      "sitemap": "https://www.sindjus.com.br/sitemap_index.xml",
+      "editorias": [
+        "nap",
+        "pccs",
+        "10o-encontro-estadual-do-nap",
+        "destaque",
+        "artigos_e_editoriais",
+        "gtass",
+        "coletivo-pela-igualdade-racial-do-sindjus",
+        "coletivo-diversa"
+      ],
+      "article_url_patterns": [
+        "/confisco-nao-e-justo-ato-reivindica-derrubada-da-reforma-da-previdencia-no-stf-e-aponta-luta-por-revogacao/",
+        "/confisco-nao-e-justo-ato-reivindica-derrubada-da-reforma-da-previdencia-no-stf-e-aponta-luta-por-revogacao/20882/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://www.sindjus.com.br/confisco-nao-e-justo-ato-reivindica-derrubada-da-reforma-da-previdencia-no-stf-e-aponta-luta-por-revogacao/20882/"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
+    },
+    {
+      "id": "economia-uol-com-br",
+      "nome": "Plano Collor: os 30 anos do confisco da poupança",
+      "tipo": "geral",
+      "homepage": "https://economia.uol.com.br/",
+      "rss": [],
+      "sitemap": null,
+      "editorias": [],
+      "article_url_patterns": [
+        "/noticias/",
+        "/noticias/bbc/"
+      ],
+      "css_selectors": {
+        "titulo": "h1",
+        "corpo": "article"
+      },
+      "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+      "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=False. [adicionado ao catálogo em 2026-10-05 (descoberta automática), curadoria posterior]",
+      "exemplo_urls": [
+        "https://economia.uol.com.br/noticias/bbc/2020/03/17/entre-infartos-falencias-e-suicidios-os-30-anos-do-confisco-da-poupanca.htm"
+      ],
+      "responsavel": null,
+      "subsecoes": [],
+      "origem_catalogo": "descoberta-automatica",
+      "adicionado_em": "2026-10-05"
     }
   ],
   "css_extraction_schemas": {

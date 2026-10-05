@@ -5,11 +5,14 @@ não se aplica a geração). Fallback 100% determinístico: splitter de sentenç
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import List
 
 from . import config
 from .schemas import Afirmacao
+
+log = logging.getLogger("factcheck.afirmacoes")
 
 _INSTRUCAO = (
     "Divida o texto abaixo em afirmações factuais atômicas e verificáveis, uma por linha, "
@@ -61,10 +64,11 @@ def _via_llm(texto: str, max_n: int) -> tuple[List[Afirmacao], str]:
             # Resposta recebida (mesmo filtrada): não cai no LLM local (timeout 15s).
             # VAZIO/filtragem vazio é tratado pelo caller com regex-fallback.
             return got, f"openrouter:{modelo_real}"
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("afirmações: openrouter falhou (%s); tentando LLM local", str(e)[:100])
     if not config.UNSLOTH_MODEL_NAME:
-        r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", timeout=15)
+        r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models",
+                      headers=config.UNSLOTH_HEADERS, timeout=15)
         r.raise_for_status()
         itens = r.json().get("data", [])
         modelo = itens[0]["id"] if itens else ""
@@ -79,8 +83,11 @@ def _via_llm(texto: str, max_n: int) -> tuple[List[Afirmacao], str]:
                       "content": _INSTRUCAO.format(n=max_n) + '\n\nTEXTO:\n"""\n' + texto[:4000] + '\n"""'}],
         "temperature": 0.0,
         "max_tokens": 600,
+        # Qwen3 com thinking ligado estoura o timeout (~5 tok/s local).
+        "chat_template_kwargs": {"enable_thinking": False},
     }
-    r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload, timeout=60)
+    r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload,
+                   headers=config.UNSLOTH_HEADERS, timeout=60)
     r.raise_for_status()
     bruto = r.json()["choices"][0]["message"]["content"] or ""
     if bruto.strip().upper() == "VAZIO":
@@ -105,6 +112,6 @@ def extrair_afirmacoes(texto: str, max_n: int = 0, usar_llm: bool = True) -> tup
             if fb:
                 return fb, "regex-fallback-apos-llm-vazio"
             return [], motor
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("afirmações: LLM local falhou (%s); usando regex", str(e)[:100])
     return _fallback(texto, limite), "regex-deterministico"

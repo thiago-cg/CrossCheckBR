@@ -30,6 +30,10 @@ def _int(name: str, default: int) -> int:
 
 TELEGRAM_TOKEN = _get("TELEGRAM_TOKEN")
 SERPAPI_KEY = _get("SERPAPI_KEY")
+# Google Fact Check Tools API (base de checagens; vazio = só índice local)
+FACTCHECK_API_KEY = _get("FACTCHECK_API_KEY")
+FACTCHECK_MAX_ITENS = _int("FACTCHECK_MAX_ITENS", 5)
+FACTCHECK_TIMEOUT_S = _int("FACTCHECK_TIMEOUT_S", 10)
 OPENROUTER_API_KEY = _get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = _get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 OPENROUTER_FALLBACK_MODEL = _get("OPENROUTER_FALLBACK_MODEL", "google/gemma-4-26b-a4b-it:free")
@@ -52,6 +56,8 @@ JUIZ_CONCORRENCIA = _int("JUIZ_CONCORRENCIA", 4)
 UNSLOTH_BASE_URL = _get("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1")
 UNSLOTH_MODEL_NAME = _get("UNSLOTH_MODEL_NAME")
 UNSLOTH_API_KEY = _get("UNSLOTH_API_KEY", "not-needed")
+# Unsloth Studio exige Bearer (API key sk-unsloth-…); servidores sem auth ignoram.
+UNSLOTH_HEADERS = {"Authorization": f"Bearer {UNSLOTH_API_KEY}"}
 LAYA_THRESHOLD = _float("LAYA_THRESHOLD", 0.80)
 LAYA_MODEL = _get("LAYA_MODEL", "auto")
 LAYA_DEVICE = _get("LAYA_DEVICE", "")  # vazio = cpu (seguro); cuda|mps só com teste local
@@ -63,7 +69,7 @@ CACHE_SERPAPI_TTL = _int("CACHE_SERPAPI_TTL", 3600)
 FAKE_MODEL_PATH = _get("FAKE_MODEL_PATH")  # vazio = mock explícito (RF08 até o modelo real)
 # Safety / cost caps (não quebram bot+API: só degradam p/ parcial/pulada)
 SERPAPI_DAILY_CAP = _int("SERPAPI_DAILY_CAP", 100)
-DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
+DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 12)  # todas as candidatas ao juiz: cada agente lê sua notícia
 DEEP_CRAWL_TIMEOUT_S = _int("DEEP_CRAWL_TIMEOUT_S", 15)
 DEEP_CRAWL_MAX_BYTES = _int("DEEP_CRAWL_MAX_BYTES", 500000)
 API_RATE_LIMIT_PER_MIN = _int("API_RATE_LIMIT_PER_MIN", 30)

@@ -47,7 +47,10 @@ def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) ->
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY ausente")
     payload: Dict[str, Any] = {"model": modelo, "messages": messages,
-                               "temperature": 0.0, "max_tokens": max_tokens}
+                               "temperature": 0.0, "max_tokens": max_tokens,
+                               # deepseek-v4-flash raciocina até estourar max_tokens
+                               # e devolve content vazio; sem reasoning responde direto.
+                               "reasoning": {"enabled": False}}
     prov = _provider()
     if prov:
         payload["provider"] = prov  # fallbacks p/ outros providers do MESMO modelo seguem ativos

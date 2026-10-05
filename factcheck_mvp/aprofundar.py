@@ -19,6 +19,13 @@ from . import config
 
 log = logging.getLogger("factcheck.aprofundar")
 _cache: Dict[str, tuple] = {}  # url -> (expira, CorpoLido)
+# UA de navegador: vários portais devolvem 403 p/ UA de robô desconhecido.
+_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/130.0 Safari/537.36 factcheck-mvp/0.2"),
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "pt-BR,pt;q=0.9",
+}
 
 
 @dataclass
@@ -100,8 +107,11 @@ def extrair_corpo(html: str) -> str:
     return (cabeca + corpo).strip()
 
 
-async def _baixar(url: str, catalogo, timeout_pag: float, max_bytes: int) -> CorpoLido:
-    if not catalogo.por_dominio(url):
+async def _baixar(url: str, catalogo, timeout_pag: float, max_bytes: int,
+                  exigir_catalogo: bool = True) -> CorpoLido:
+    """exigir_catalogo=False: qualquer site PÚBLICO (links vindos do Google
+    News, não do usuário). O anti-SSRF (_url_segura) vale sempre, a cada hop."""
+    if exigir_catalogo and not catalogo.por_dominio(url):
         return CorpoLido(url=url, erro="fora do catalogo")
     if not _url_segura(url):
         return CorpoLido(url=url, erro="url insegura (SSRF)")
@@ -112,14 +122,13 @@ async def _baixar(url: str, catalogo, timeout_pag: float, max_bytes: int) -> Cor
             atual = url
             for _ in range(3):  # max 3 redirects, revalida cada hop
                 # Streaming real: corpo nunca passa de max_bytes em memória.
-                async with cli.stream("GET", atual,
-                                      headers={"User-Agent": "factcheck-mvp/0.1"}) as r:
+                async with cli.stream("GET", atual, headers=_HEADERS) as r:
                     if r.status_code in (301, 302, 303, 307, 308):
                         nxt = r.headers.get("location", "")
                         if not nxt.startswith("http"):
                             from urllib.parse import urljoin
                             nxt = urljoin(atual, nxt)
-                        if not catalogo.por_dominio(nxt) or not _url_segura(nxt):
+                        if (exigir_catalogo and not catalogo.por_dominio(nxt)) or not _url_segura(nxt):
                             return CorpoLido(url=url, erro="redirect fora do catalogo/inseguro")
                         atual = nxt
                         continue
@@ -143,9 +152,20 @@ async def _baixar(url: str, catalogo, timeout_pag: float, max_bytes: int) -> Cor
         return CorpoLido(url=url, erro=str(e)[:120])
 
 
+def _motivo(erro: Optional[str]) -> str:
+    """Erro do httpx -> motivo curto (sem despejar a mensagem inteira no log)."""
+    e = erro or "?"
+    m = re.search(r"\b([45]\d\d)\b", e)
+    if m:
+        return "HTTP " + m.group(1)
+    if "CERTIFICATE_VERIFY_FAILED" in e:
+        return "certificado SSL inválido"
+    return e[:80]
+
+
 async def aprofundar(cands: List[dict], catalogo, por_afirm: int = 0,
                      timeout_pag: float = 5.0, budget_total: float = 0,
-                     max_bytes: int = 0) -> Dict[str, CorpoLido]:
+                     max_bytes: int = 0, exigir_catalogo: bool = True) -> Dict[str, CorpoLido]:
     """Baixa corpo top-N. Retorna {url: CorpoLido}. Nunca levanta."""
     por_afirm = por_afirm or config.DEEP_CRAWL_MAX_PAGES
     budget_total = budget_total or config.DEEP_CRAWL_TIMEOUT_S
@@ -167,7 +187,8 @@ async def aprofundar(cands: List[dict], catalogo, por_afirm: int = 0,
     async def _um(d):
         try:
             return d["url"], await asyncio.wait_for(
-                _baixar(d["url"], catalogo, timeout_pag, max_bytes), timeout=timeout_pag + 2)
+                _baixar(d["url"], catalogo, timeout_pag, max_bytes, exigir_catalogo),
+                timeout=timeout_pag + 2)
         except Exception as e:
             return d["url"], CorpoLido(url=d["url"], erro=str(e)[:120])
 
@@ -187,6 +208,10 @@ async def aprofundar(cands: List[dict], catalogo, por_afirm: int = 0,
             except Exception:
                 continue  # falha já virou CorpoLido(erro) em _um; nunca levanta
             saida[url] = corpo
+            if corpo.corpo_lido:
+                log.info("leitura ok (%d chars): %s", len(corpo.trecho_corpo), url[:120])
+            else:  # antes: falha silenciosa
+                log.info("leitura falhou %s: %s", url[:120], _motivo(corpo.erro))
             if len(_cache) >= 200:
                 velha = min(_cache, key=lambda k: _cache[k][0])
                 del _cache[velha]

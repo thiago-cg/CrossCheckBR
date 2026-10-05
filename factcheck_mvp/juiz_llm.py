@@ -27,7 +27,11 @@ FORA_DO_TEMA = "FORA_DO_TEMA"
 _RESUMO_INSTRUCAO = (
     "Resuma em até 3 frases, em português, o que a NOTÍCIA afirma sobre a AFIRMAÇÃO. "
     "Só fatos do texto, sem opinião e sem dar veredito. "
-    f'Se o texto NÃO trata do tema, responda EXATAMENTE: {FORA_DO_TEMA}.'
+    # Sem esta ressalva o deepseek marcava FORA_DO_TEMA até desmentidos diretos
+    # ("vacinas causam autismo?" p/ afirmação sobre a vacina da covid).
+    "Se a notícia trata do mesmo assunto de forma mais ampla ou parcial (ex.: vacinas em geral "
+    "para uma afirmação sobre uma vacina específica), resuma e diga o quanto ela cobre a afirmação. "
+    f"Responda EXATAMENTE {FORA_DO_TEMA} só se a notícia for sobre outro assunto."
 )
 
 _JUIZ_INSTRUCAO = (

@@ -66,6 +66,8 @@ class SerpAPIClient:
         chave = self._chave(params)
         hit = self._cache.get(chave)
         if hit and hit[0] > agora:
+            log.info("serpapi cache: %r (%d resultados)", params.get("q", "")[:100],
+                     len((hit[1] or {}).get("news_results", []) or []))
             return hit[1]
         # Teto diário de custo (check #7): cache-hit não conta, só chamada real
         hoje = datetime.now(timezone.utc).date().isoformat()
@@ -95,11 +97,15 @@ class SerpAPIClient:
                 del self._cache[mais_antiga]
             self._cache[chave] = (agora + self.ttl, payload)
             self.ultimo_motivo = "ok" if (payload or {}).get("news_results") else "vazio"
+            log.info("serpapi busca: %r -> %d resultados (uso hoje %d/%s)", params.get("q", "")[:100],
+                     len((payload or {}).get("news_results", []) or []), self._uso_n, cap)
             return payload
         except Exception as e:
             self.erros_rede += 1
             self.ultimo_motivo = "erro"
-            log.warning("SerpAPI falhou: %s", str(e)[:150])
+            # Nunca str(e): a mensagem do httpx traz a URL, que contém api_key.
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            log.warning("SerpAPI falhou: %s%s", type(e).__name__, f" HTTP {status}" if status else "")
             return None  # SerpAPI é opcional: falha vira etapa "pulada/falha", nunca exceção
 
 

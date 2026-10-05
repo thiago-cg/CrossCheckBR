@@ -98,8 +98,8 @@ AJUDA = (
     "• o texto da notícia, ou\n"
     "• o título, ou\n"
     "• o link (se for de um dos 20 portais monitorados, leio direto; senão, envie o texto).\n\n"
-    "Devolvo propensão (baixa/média/alta), % do modelo, evidências com links e o passo a passo. "
-    "Nunca digo que algo 'é falso' ou 'é verdade' — ajudo você a avaliar.\n\n"
+    "Devolvo a propensão de o conteúdo ser fake news (baixa, média ou alta), o que as fontes "
+    "dizem, com links, e o passo a passo. Não dou veredito: ajudo você a avaliar.\n\n"
     "Privacidade: o texto é comparado com bases públicas de checagem e notícias "
     "(inclui consulta web externa). Não envie dados pessoais."
 )
@@ -161,7 +161,7 @@ def formatar(rel: RelatorioChecagem) -> str:
     emoji = {"baixa": "🟢", "media": "🟡", "alta": "🔴", "indeterminada": "⚪"}.get(rel.propensao, "⚪")
     header = getattr(rel, "header", "") or f"{emoji} Propensão {rel.propensao.upper()}"
     why = getattr(rel, "why_1linha", "")
-    linhas = [header, "", why or rel.justificativa, ""]
+    linhas = [header, "", why or "", "", rel.justificativa, ""]
     # Filtro único de homepages/seções (fonte: pipeline._eh_generica, sem drift)
     try:
         from .pipeline import _eh_generica as _gen
@@ -175,22 +175,25 @@ def formatar(rel: RelatorioChecagem) -> str:
             except Exception:
                 pass
         return False
+    from .agregador import NOMES_ETAPAS, STATUS_ETAPA, postura_fonte
+    # Só fontes que o LLM-juiz julgou sobre o assunto: hit do índice por
+    # palavra solta não é evidência para o usuário.
     uteis = [f for f in (rel.fontes or [])
              if not _generica(f.url, f.titulo, getattr(f, "trecho_corpo", None) or "")
-             and getattr(f, "relevante", None) is not False]
-    if rel.fontes and not uteis:
-        linhas.append("Sem evidência relevante encontrada — não compartilhe como verdade/falso.")
+             and getattr(f, "relevante", None) is True]
+    if not uteis:
+        linhas.append("Não encontramos fontes que tratem do assunto. "
+                      "Na dúvida, não compartilhe.")
         linhas.append("")
-    # Top 2-3 lado a lado: portal | veredito | corpo_lido | link + quote
-    if uteis:
-        linhas.append("Fontes lado a lado (compare):")
+    else:
+        linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
-            selo = f" [selo: {f.veredito}]" if f.veredito else ""
-            corpo = "📄 corpo lido" if getattr(f, "corpo_lido", False) else "📰 só título"
-            term = f" 🌡{f.score_juiz:+d}" if getattr(f, "score_juiz", None) is not None else ""
-            linhas.append(f"{i}. {f.portal_nome or 'web'}{selo} ({corpo}{term}): {f.titulo[:90]}")
-            if getattr(f, "quote", None):
-                linhas.append(f"   “{f.quote[:140]}”")
+            selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
+            leitura = "📄 texto lido" if getattr(f, "corpo_lido", False) else "📰 só manchete"
+            linhas.append(f"{i}. {f.portal_nome or 'web'} {postura_fonte(f)}{selo} ({leitura}): {f.titulo[:90]}")
+            resumo = getattr(f, "resumo_juiz", None) or getattr(f, "quote", None)
+            if resumo:
+                linhas.append(f"   “{resumo[:160]}”")
             if f.url:
                 linhas.append(f"   {f.url}")
         if len(uteis) > 3:
@@ -206,16 +209,14 @@ def formatar(rel: RelatorioChecagem) -> str:
             else:
                 linhas.append(f"Modelo de detecção: {s.valor} ({s.rotulo}).")
             break
-    outros = [f"{s.motor} {s.confianca:.2f}" for s in rel.sinais if s.motor != "modelo-fake"]
-    if outros:
-        linhas.append("Sinais (confiança): " + "; ".join(outros[:6]) + ".")
     linhas.append("")
-    if rel.etapas:  # RF11 no canal principal: resumo nome:status
-        linhas.append("Passo a passo: " + "; ".join(f"{e.nome}:{e.status}" for e in rel.etapas) + ".")
+    if rel.etapas:  # RF11 no canal principal: etapa + status em linguagem simples
+        linhas.append("Como chegamos aqui: " + " · ".join(
+            f"{STATUS_ETAPA.get(e.status, '')} {NOMES_ETAPAS.get(e.nome, e.nome)}" for e in rel.etapas))
         linhas.append("")
     if rel.limitacoes:
-        for i, lim in enumerate(rel.limitacoes[:3], 1):
-            linhas.append(f"Limitação {i}: {lim}")
+        linhas.append("Limitações desta análise:")
+        linhas += [f"• {lim}" for lim in rel.limitacoes[:3]]
         linhas.append("")
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]
@@ -242,6 +243,9 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         await update.message.reply_text("Mensagem muito curta. " + AJUDA)
         return
+    from .logs import novo_id
+    novo_id()
+    log.info("mensagem recebida no telegram: tipo=%s, %d caracteres", entrada.tipo, len(entrada.conteudo))
     aviso = await update.message.reply_text("Recebi. Começando a checagem…")
     editados = 0
 
@@ -299,5 +303,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from .logs import configurar_logs
+    configurar_logs("bot")
     main()

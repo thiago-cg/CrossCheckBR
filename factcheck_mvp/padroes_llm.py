@@ -5,10 +5,13 @@ com fallback DETERMINÍSTICO por regex (funciona até sem modelo).
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List
 
 from . import config
+
+log = logging.getLogger("factcheck.padroes")
 
 _CATALOGO = [
     ("apelo_urgencia", "apelo a urgência/compartilhamento",
@@ -25,7 +28,8 @@ _CATALOGO = [
 
 _INSTRUCAO = (
     "Liste padrões típicos de desinformação presentes no texto, um por linha no formato "
-    "'PADRAO: trecho curto que evidencia'. Use só estes rótulos: {rotulos}. "
+    "'<rotulo>: trecho curto que evidencia' (ex.: 'clickbait: VOCÊ NÃO VAI ACREDITAR'). "
+    "Use só estes rótulos: {rotulos}. "
     "Se nenhum, responda NENHUM. Sem explicações extras."
 )
 
@@ -75,11 +79,12 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
                 # Lixo sem linhas parseáveis: falha p/ tentar local/regex
                 raise RuntimeError("openrouter sem padroes parseaveis")
             return saida, "llm-openrouter"
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("padrões: openrouter falhou (%s); tentando LLM local", str(e)[:100])
     modelo = config.UNSLOTH_MODEL_NAME
     if not modelo:
-        r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", timeout=15)
+        r = httpx.get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models",
+                      headers=config.UNSLOTH_HEADERS, timeout=15)
         r.raise_for_status()
         itens = r.json().get("data", [])
         modelo = itens[0]["id"] if itens else ""
@@ -90,8 +95,10 @@ def _via_llm(texto: str) -> tuple[List[Dict[str, str]], str]:
                "messages": [{"role": "user",
                              "content": _INSTRUCAO.format(rotulos=rotulos)
                              + '\n\nTEXTO:\n"""\n' + (texto or "")[:4000] + '\n"""'}],
-               "temperature": 0.0, "max_tokens": 500}
-    r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload, timeout=60)
+               "temperature": 0.0, "max_tokens": 500,
+               "chat_template_kwargs": {"enable_thinking": False}}
+    r = httpx.post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", json=payload,
+                   headers=config.UNSLOTH_HEADERS, timeout=60)
     r.raise_for_status()
     bruto = (r.json()["choices"][0]["message"]["content"] or "").strip()
     if bruto.upper() == "NENHUM":
@@ -114,6 +121,6 @@ def analisar_padroes(texto: str, usar_llm: bool = True) -> Dict[str, Any]:
         try:
             achados, motor = _via_llm(texto)
             return {"padroes": achados, "motor": motor}
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("padrões: LLM local falhou (%s); usando regex", str(e)[:100])
     return {"padroes": _fallback(texto), "motor": "regex-deterministico"}

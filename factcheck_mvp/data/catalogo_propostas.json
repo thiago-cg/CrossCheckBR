@@ -28,6 +28,82 @@
    "subsecoes": [],
    "status": "pendente",
    "coletado_em": "2026-09-22T01:58:37.984761+00:00"
+  },
+  {
+   "id": "saude-abril-com-br",
+   "nome": "Veja Saúde",
+   "tipo": "geral",
+   "homepage": "https://saude.abril.com.br/",
+   "dominio": "saude.abril.com.br",
+   "rss": [
+    "https://saude.abril.com.br/ultimas-noticias/rss"
+   ],
+   "sitemap": "https://saude.abril.com.br/sitemap.xml",
+   "editorias": [
+    "medicina",
+    "podcast",
+    "coluna",
+    "alimentacao",
+    "ofertas",
+    "web-stories-abril",
+    "vida-animal",
+    "leitura-saudavel"
+   ],
+   "article_url_patterns": [
+    "/coluna/",
+    "/coluna/e-verdade-ou-fake-news/"
+   ],
+   "css_selectors": {
+    "titulo": "h1",
+    "corpo": "article"
+   },
+   "titulo_exemplo": "Beber água gelada causa infarto, câncer e até gordura no fígado? É fake!",
+   "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+   "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True.",
+   "exemplo_urls": [
+    "https://saude.abril.com.br/coluna/e-verdade-ou-fake-news/beber-agua-gelada-causa-infarto-cancer-e-ate-gordura-no-figado-e-fake/"
+   ],
+   "responsavel": null,
+   "subsecoes": [],
+   "status": "pendente",
+   "coletado_em": "2026-10-05T13:25:05.765458+00:00"
+  },
+  {
+   "id": "gauchazh-clicrbs-com-br",
+   "nome": "GZH",
+   "tipo": "geral",
+   "homepage": "https://gauchazh.clicrbs.com.br/",
+   "dominio": "gauchazh.clicrbs.com.br",
+   "rss": [],
+   "sitemap": null,
+   "editorias": [
+    "politica",
+    "esportes",
+    "colunistas",
+    "viral",
+    "pioneiro",
+    "zona-sul",
+    "gaucha",
+    "passo-fundo"
+   ],
+   "article_url_patterns": [
+    "/saude/",
+    "/saude/vida/"
+   ],
+   "css_selectors": {
+    "titulo": "h1",
+    "corpo": "article, [itemprop='articleBody']"
+   },
+   "titulo_exemplo": "Beber água gelada não causa câncer nem problemas cardíacos",
+   "estrategia_recomendada": "JsonCssExtractionStrategy (barato) + LLM local como fallback/validação",
+   "observacoes": "Proposta automática do modo descoberta — curadoria pendente. Evidência na origem: corpo_lido=True.",
+   "exemplo_urls": [
+    "https://gauchazh.clicrbs.com.br/saude/vida/noticia/2019/12/beber-agua-gelada-nao-causa-cancer-nem-problemas-cardiacos-ck4j3fssr04a201qh3l715wew.html"
+   ],
+   "responsavel": null,
+   "subsecoes": [],
+   "status": "pendente",
+   "coletado_em": "2026-10-05T13:25:12.917875+00:00"
   }
  ]
 }
