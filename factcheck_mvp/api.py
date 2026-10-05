@@ -19,7 +19,7 @@ from .schemas import EntradaConsulta, RelatorioChecagem
 from .serpapi_layer import SerpAPIClient
 
 try:
-    from .telegram_bot import classificar_entrada, formatar
+    from .telegram_bot import LINK_SEM_TEXTO_MSG, _texto_link, classificar_entrada, formatar
 except Exception:  # telegram opcional p/ API/web (bot não quebra API)
     def classificar_entrada(texto: str) -> EntradaConsulta:  # type: ignore
         t = (texto or "").strip()
@@ -31,6 +31,9 @@ except Exception:  # telegram opcional p/ API/web (bot não quebra API)
 
     def formatar(rel) -> str:  # type: ignore
         return f"{rel.header or rel.propensao} {rel.why_1linha or rel.justificativa}"
+
+    _texto_link = None  # type: ignore
+    LINK_SEM_TEXTO_MSG = "Não consegui ler esse link. Cole aqui o título e o texto da notícia."
 
 log = logging.getLogger("factcheck.api")
 app = FastAPI(title="Checagem cruzada de fatos (MVP)", version="0.2.0")
@@ -103,13 +106,31 @@ def _rate_ok(request: Request | None) -> bool:
         return True
 
 
+async def _ler_link(entrada: EntradaConsulta) -> EntradaConsulta | None:
+    """Link -> texto da página (mesma regra do bot: só portais do catálogo, anti-SSRF).
+
+    Retorna a entrada pronta para o pipeline, ou None se o link não pôde ser lido —
+    aí, como no bot, pede-se o texto em vez de checar só o endereço."""
+    if entrada.tipo != "link":
+        return entrada
+    if _texto_link is None:
+        return None
+    texto = await asyncio.to_thread(_texto_link, entrada.conteudo, pipeline().catalogo)
+    if not texto:
+        return None
+    return EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto}"[:20000])
+
+
 @app.post("/checar", response_model=RelatorioChecagem)
 async def checar(entrada: EntradaConsulta, request: Request):
     if not _rate_ok(request):
         raise HTTPException(status_code=429, detail="muitas checagens; tente de novo em instantes")
     try:
         async with asyncio.timeout(180):
-            return await pipeline().executar(entrada)
+            pronta = await _ler_link(entrada)
+            if pronta is None:
+                raise HTTPException(status_code=422, detail=LINK_SEM_TEXTO_MSG)
+            return await pipeline().executar(pronta)
     except (asyncio.TimeoutError, TimeoutError):
         raise HTTPException(status_code=504, detail="checagem excedeu o tempo; tente um texto mais curto")
     except HTTPException:
@@ -180,7 +201,11 @@ async def checar_web(request: Request, conteudo: str = Form(...)):
         return HTMLResponse(_render_html(conteudo), status_code=400)
     try:
         async with asyncio.timeout(180):
-            rel = await pipeline().executar(entrada)
+            pronta = await _ler_link(entrada)
+            if pronta is None:
+                return HTMLResponse(_render_html(conteudo) + "<p style='color:#a00'><b>"
+                                    + html.escape(LINK_SEM_TEXTO_MSG) + "</b></p>", status_code=422)
+            rel = await pipeline().executar(pronta)
         return HTMLResponse(_render_html(conteudo, rel))
     except Exception:
         log.exception("falha no pipeline web")

@@ -56,7 +56,7 @@ uvicorn factcheck_mvp.api:app --port 8000 &
 python -m factcheck_mvp.telegram_bot  # @fn_tic_bot
 ```
 
-API: `GET /saude`, `GET /portais`, `POST /checar {"tipo":"texto|titulo|link","conteudo":"..."}`.
+API: `GET /saude`, `GET /portais`, `POST /checar {"tipo":"texto|titulo|link","conteudo":"..."}`. Com `tipo=link`, a API lê a página (só portais do catálogo, como o bot); se não conseguir, responde `422` pedindo o texto.
 Modelo de detecção real (BERTimbau v6, opcional) e avaliação do sistema inteiro: ver [MELHORIAS_ARQUITETURA.md](MELHORIAS_ARQUITETURA.md).
 Crawler: `pip install -r requirements.txt && crawl4ai-setup && python br_news_crawler.py --offline` (só contrato) ou `--classifier laya --max-artigos 2` (coleta real; LLM local em `http://127.0.0.1:8888/v1`).
 
