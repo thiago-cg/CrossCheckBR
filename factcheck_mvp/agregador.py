@@ -22,6 +22,13 @@ EXPRESSOES_PROIBIDAS = FRASES_BINARIAS + (
     "corrupto", "idiota", "chocante", "incrível",
 )
 EMOJI_PROPENSAO = {"baixa": "🟢", "media": "🟡", "alta": "🔴", "indeterminada": "⚪"}
+# Linguagem para o usuário: sempre "propensão de ser fake news", nunca veredito.
+TITULO_PROPENSAO = {
+    "alta": "Alta propensão de ser fake news",
+    "media": "Propensão média de ser fake news",
+    "baixa": "Baixa propensão de ser fake news",
+    "indeterminada": "Não foi possível estimar a propensão de ser fake news",
+}
 
 _PERGUNTAS_GUIA = [
     "Compare a data do fato com a data da publicação: o conteúdo é atual ou reciclado?",
@@ -40,8 +47,11 @@ def perguntas_guia() -> List[str]:
     return list(_PERGUNTAS_GUIA)
 
 
+def titulo_propensao(propensao: str) -> str:
+    return TITULO_PROPENSAO.get(propensao, TITULO_PROPENSAO["indeterminada"])
+
+
 def gerar_header(propensao: str, why: str = "") -> Dict[str, str]:
     """Header legível em segundos (check #1). O `why` vem de `Decisao.why_1linha()`."""
     emoji = EMOJI_PROPENSAO.get(propensao, "⚪")
-    return {"header": f"{emoji} Propensão {propensao.upper()} a se tratar de desinformação",
-            "why_1linha": why}
+    return {"header": f"{emoji} {titulo_propensao(propensao)}", "why_1linha": why}

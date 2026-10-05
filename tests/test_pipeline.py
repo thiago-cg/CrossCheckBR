@@ -136,7 +136,7 @@ def test_tres_fontes_refutam_da_alta(amb):
     assert rel.propensao == "alta", rel.justificativa
     assert rel.decisao["contagem"]["refuta"] == 3 and len(rel.decisao["votos"]) == 3
     assert all(f.postura == "REFUTA" and f.citacao_verificada for f in rel.fontes)
-    assert rel.header.startswith("🔴") and rel.justificativa.startswith("Propensão alta")
+    assert rel.header.startswith("🔴") and rel.justificativa.startswith("Alta propensão de ser fake news")
 
 
 def test_tres_fontes_sustentam_da_baixa(amb):

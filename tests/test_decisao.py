@@ -3,7 +3,7 @@ faixas simétricas, indeterminação por falta de evidência e coerência do tex
 import pytest
 
 from factcheck_mvp import decisao
-from factcheck_mvp.agregador import FRASES_BINARIAS, verificar_neutralidade
+from factcheck_mvp.agregador import FRASES_BINARIAS, verificar_neutralidade, titulo_propensao
 from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
 
 JUIZ = "llm-juiz:llm-local"
@@ -155,8 +155,9 @@ def test_opiniao_sem_selo_indeterminada_com_selo_decide():
 def test_texto_coerente_com_nivel_e_neutro(classe, pol):
     d = decidir(_ev(_tres(classe), pol=pol))
     j = d.justificativa()
-    assert j.startswith(f"Propensão {d.nivel} ")
-    assert d.header().endswith("a se tratar de desinformação") and d.nivel.upper() in d.header()
+    assert j.startswith(titulo_propensao(d.nivel) + ".")
+    assert d.header().endswith(titulo_propensao(d.nivel))
+    assert "propensão de ser fake news" in d.header().lower()
     assert not any(f in j.lower() for f in FRASES_BINARIAS)
     assert verificar_neutralidade(j + " " + d.why_1linha()) == []
 
