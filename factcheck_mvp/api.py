@@ -142,6 +142,7 @@ async def checar(entrada: EntradaConsulta, request: Request):
 
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
     from .agregador import NOMES_ETAPAS, STATUS_ETAPA, direcoes_por_url, postura_legivel
+    from .confiabilidade import ROTULO
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
         f"<textarea name='conteudo' rows='4' style='width:100%' placeholder='Cole o texto, o título ou o link da notícia (pode ser um “ouvi dizer que…”)'>{esc(entrada_txt)}</textarea><br/>" \
@@ -158,7 +159,8 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                     f"<b>{esc(f.portal_nome or 'web')}</b> "
                     f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
                     f"{' · selo da agência: ' + esc(f.veredito) if f.veredito else ''}"
-                    f" · {'📄 texto lido' if f.corpo_lido else '📰 só manchete'}<br/>"
+                    f" · {'📄 texto lido' if f.corpo_lido else '📰 só manchete'}"
+                    f"{' · ' + esc(ROTULO[f.confiabilidade]) if f.confiabilidade in ROTULO else ''}<br/>"
                     f"{esc(f.titulo[:200])}<br/>"
                     f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
                     f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")
