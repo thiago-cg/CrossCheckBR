@@ -39,7 +39,6 @@ OPENROUTER_MODEL_JUIZ = _get("OPENROUTER_MODEL_JUIZ")  # vazio = mesmo modelo do
 OPENROUTER_PROVIDER_ORDER = _get("OPENROUTER_PROVIDER_ORDER", "StreamLake")
 OPENROUTER_TIMEOUT_S = _int("OPENROUTER_TIMEOUT_S", 30)
 OPENROUTER_MAX_TOKENS = _int("OPENROUTER_MAX_TOKENS", 600)
-LLM_DAILY_CAP = _int("LLM_DAILY_CAP", 50)
 # TypeSafe Jev (Decisions API): 1 request = 3 noul (~centenas de ms).
 # Uso restrito à classificação de schema (descoberta_site); o julgamento de
 # notícias é do LLM-juiz (juiz_llm.py).

@@ -8,8 +8,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections import defaultdict
-from datetime import date
 from typing import Any, Dict, List, Tuple
 
 from . import config, replay, telemetria
@@ -18,22 +16,6 @@ log = logging.getLogger("factcheck.llm_openrouter")
 _URL = "https://openrouter.ai/api/v1/chat/completions"
 # Jev/TypeSafe: endpoint Decisions (NÃO chat/completions — 400 se usar /v1/...).
 _URL_DECISIONS = "https://openrouter.ai/api/alpha/decisions"
-_uso_dia: defaultdict = defaultdict(int)
-_dia_atual: str = date.today().isoformat()
-
-
-def _hoje() -> str:
-    global _dia_atual
-    hoje = date.today().isoformat()
-    if hoje != _dia_atual:
-        _dia_atual = hoje
-        _uso_dia.clear()
-    return hoje
-
-
-def _cap_estourado() -> bool:
-    _hoje()
-    return sum(_uso_dia.values()) >= (config.LLM_DAILY_CAP or 50)
 
 
 def _provider() -> Dict[str, Any]:
@@ -78,14 +60,11 @@ def _post(modelo: str, messages: List[dict], max_tokens: int, timeout_s: int) ->
 
 def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
          timeout_s: int = 0, modelos: List[str] | None = None) -> Tuple[str, str]:
-    """Retorna (texto, modelo_usado). Tenta primary -> fallback. Respeita cap diário.
+    """Retorna (texto, modelo_usado). Tenta primary -> fallback. Sem limite diário.
 
     Resposta vazia (200 com conteúdo vazio, comum no StreamLake) ganha 1 retry
     no MESMO modelo antes de cair p/ o próximo — evita queimar o fallback à toa.
     """
-    if _cap_estourado():
-        telemetria.fallback("openrouter.chat", "teto LLM diário atingido")
-        raise RuntimeError("teto LLM diário atingido")
     mt = max_tokens or config.OPENROUTER_MAX_TOKENS
     ts = timeout_s or config.OPENROUTER_TIMEOUT_S
     if not modelos:  # `modelos` = ordem própria da chamada (ex.: modelo do juiz); vazio = padrão global
@@ -96,8 +75,6 @@ def chat(messages: List[dict], max_tokens: int = 0, temperature: float = 0.0,
             try:
                 t0 = time.time()
                 texto = _post(modelo, messages, mt, ts)
-                _hoje()
-                _uso_dia[modelo] += 1
                 log.info("openrouter model=%s lat=%.1fs", modelo, time.time() - t0)
                 return texto, modelo
             except Exception as e:  # tenta de novo 1x se vazio, senão próximo
@@ -115,13 +92,11 @@ def decisions(model: str, state: Any, questions: Dict[str, Any],
               timeout_s: int = 0) -> Dict[str, Any]:
     """POST /api/alpha/decisions (Jev). Retorna JSON {model, answers, usage}.
 
-    Mesmo cap diário do chat. Sem provider.order StreamLake (Jev é TypeSafe).
+    Sem limite diário. Sem provider.order StreamLake (Jev é TypeSafe).
     Nunca envia a chave no log. Levanta em erro/HTTP não-2xx (caller tem fallback).
     """
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY ausente")
-    if _cap_estourado():
-        raise RuntimeError("teto LLM diário atingido")
     payload: Dict[str, Any] = {"model": model, "state": state, "questions": questions}
     r = replay.llm_post(
         _URL_DECISIONS, payload,
@@ -141,8 +116,6 @@ def decisions(model: str, state: Any, questions: Dict[str, Any],
     answers = data.get("answers")
     if not isinstance(answers, dict) or not answers:
         raise RuntimeError("decisions sem answers")
-    _hoje()
-    _uso_dia[model] += 1
     uso = data.get("usage") or {}
     log.info("decisions ok model=%s resolved=%s in=%s out=%s",
              model, data.get("model"), uso.get("input_tokens"), uso.get("output_tokens"))

@@ -150,8 +150,7 @@ class Pipeline:
                        "AGENTE_MAX_BUSCAS": getattr(config, "AGENTE_MAX_BUSCAS", None),
                        "AGENTE_MAX_ONDAS_EXTRAS": getattr(config, "AGENTE_MAX_ONDAS_EXTRAS", None),
                        "JUIZ_MAX_NOTICIAS": config.JUIZ_MAX_NOTICIAS, "JUIZ_LOTE": config.JUIZ_LOTE,
-                       "JUIZ_TRECHO_MAX": config.JUIZ_TRECHO_MAX,
-                       "LLM_DAILY_CAP": config.LLM_DAILY_CAP}})
+                        "JUIZ_TRECHO_MAX": config.JUIZ_TRECHO_MAX}})
         try:
             rel = await self._executar(entrada, progresso, usar_llm)
         except BaseException as e:
