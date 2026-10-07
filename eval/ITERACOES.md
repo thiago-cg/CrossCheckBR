@@ -187,3 +187,38 @@ vem do juiz live re-gravado (não-determinismo) + 10 queries novas do record par
 Sem validação: replay 70/70 idêntico duas vezes (aborts nativos flaky SIGABRT/SIGSEGV em
 trafilatura/PDF impediram a 3ª perna; 2 pernas OK ±1 caso) e holdout (nível 4, ~25 casos record:
 pedir aprovação antes).
+
+## Iteração E1 — base primeiro, web condicional (Task 3: medição nível 0; 2026-10-07)
+
+Branch `feat/e1-base-primeiro`. Docs/metrificação, sem mudança de código de produto nesta task.
+
+- Hipótese: quando a base (índice de checagens) já contém checagem **aplicável** ao fato
+  (selo com direção, citação verificada, corpo lido, mesmo fato, data compatível), pular a
+  descoberta web economiza buscas (custo SerpAPI + latência) sem perder acerto — o veredito
+  da base já decide.
+- Mudança (Tasks 1–2, commits `b40bf25` + `810a4f3`): Task 1 = gate `e_aplicavel(...) ->
+  tuple[bool, str]` + `data_compativel(...)` (`factcheck_mvp/aplicabilidade.py`); Task 2 =
+  pipeline base→leitura→juiz→aplicabilidade com web condicional + recibo `descoberta/pulada`
+  (`"web pulada: checagem aplicável na base"`). Fora de escopo de propósito: E2
+  (`onde_encontrado`), E3 (título não vota), E5 (selo atribuído), E4-elevação de propensão.
+- **eval.run completo não roda aqui (sem cassetes)**: só medição offline (nível 0 + bench).
+  Sem rede, sem custo SerpAPI.
+- Nível 0 (decisão, snapshot antigo `eval/snapshots/a3-dev.jsonl`, 69 casos — traces de
+  2026-09-30, anteriores ao E1, logo o E1 **não move** este número por construção; o ganho
+  esperado é custo/web pulada, só mensurável em `eval.run` futuro):
+
+| métrica | referência | E1 (esta medição) | delta |
+|---|---|---|---|
+| acerto | 24,6% | 0,2464 (17/69) | 0 |
+| acerto+parcial | 56,5% | 0,5652 (39/69) | 0 |
+| erro_grave | 1 | 1 (`cr_jn_soltura_vorcaro`, FE→baixa) | 0 |
+| indeterminada | 39% | 0,3913 (27/69) | 0 |
+
+- Bench índice (`python3 scripts/bench_indice_checagens.py`): `recall@3 0,8636 (~0,86)`,
+  `FP 0,0789 (~7,9%)` — sem regressão vs referência.
+- Testes: suite completa `368 passed` (inclui os 5 novos do E1 — Task 1:
+  `test_aplicavel_exige_corpo_citacao_selo_data`, `test_data_incompativel_barra_bolsonaro`;
+  Task 2: `test_base_aplicavel_pula_web`, `test_base_inaplicavel_chama_web`,
+  `test_checagem_antiga_para_fato_de_hoje_nao_pula_web`). Sem run_ids novos de trace:
+  nenhum `eval.run`/CLI `checar` foi executado nesta task (sem cassetes); os run_ids no
+  snapshot (`20260930-...`) são dos traces antigos reutilizados.

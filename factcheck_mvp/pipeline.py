@@ -23,7 +23,7 @@ import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import (afirmacoes, confiabilidade, config, corroboracao, decisao, juiz_llm, padroes_llm, replay,
+from . import (afirmacoes, aplicabilidade, confiabilidade, config, corroboracao, decisao, juiz_llm, padroes_llm, replay,
                selos, telemetria)
 from . import agente as _agente
 from .agregador import perguntas_guia
@@ -295,8 +295,8 @@ class Pipeline:
                                    limitacoes + ["Nenhuma afirmação factual encontrada."])
         await avisar(f"Buscando fontes sobre {len(afs)} afirmação(ões)…")
 
-        # 3. Atalho opcional: índice de checagens (ClaimReview/RSS)
-        pecas: List[Dict[str, Any]] = []
+        # 3. Atalho opcional: índice de checagens (ClaimReview/RSS) — só a base (E1)
+        pecas_base: List[Dict[str, Any]] = []
         estado_agente: Optional[_agente.EstadoBusca] = None
         if _indice.habilitado() and hasattr(self.idx_ver, "buscar_checagens"):
             n_hits = 0
@@ -310,7 +310,7 @@ class Pipeline:
                     if not h.get("url"):
                         continue
                     n_hits += 1
-                    pecas.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
+                    pecas_base.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
                                   "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
                                   "afs": {ai}, "origens": {"indice"}, "trecho": h.get("trecho") or "",
                                   "data_pub": h.get("data_pub"), "agencia": h.get("agencia"),
@@ -321,57 +321,115 @@ class Pipeline:
                                   "origem_veredito": "indice", "score_rel": h.get("score_rel")})
             etapa("base-checagem", "ok" if n_hits else "parcial",
                   f"{n_hits} checagem(ns) no índice (atalho INDICE_CHECAGENS=1).",
-                  [p["url"] for p in pecas[:5]])
+                  [p["url"] for p in pecas_base[:5]])
         else:
             etapa("base-checagem", "pulada", "Atalho do índice desligado (INDICE_CHECAGENS=0): núcleo = busca aberta.")
 
-        # 4. Busca aberta (SerpAPI)
-        if self.serpapi.ativo:
-            await avisar("Consultando a web…")
-            pecas_web, estado_agente = await self._buscar_web(afs, avisar, etapa, limitacoes)
-            pecas += pecas_web
-        else:
-            etapa("descoberta", "pulada", "SERPAPI_KEY ausente: sem busca aberta.")
-            limitacoes.append("Descoberta web desligada (sem SERPAPI_KEY).")
-
-        # 5. Dedupe canônico global (antes do juiz): mesma URL do índice e da web = 1 peça
-        pecas, fusoes = corroboracao.fundir_por_url(pecas)
-        for mantida, fundida in fusoes:
+        # 3b. Base primeiro (E1): dedupe + catálogo da base ANTES da fase base (índices estáveis p/ o gate)
+        pecas_base, _fusoes_base = corroboracao.fundir_por_url(pecas_base)
+        for mantida, fundida in _fusoes_base:
             telemetria.evento("fonte", url=fundida, estagio="dedupe", decisao="fundida",
                               motivo=f"mesma URL canônica de {mantida}")
-        uteis = []
-        for p in pecas:
+        _uteis_base = []
+        for p in pecas_base:
             if _eh_homepage(p["url"]):
                 telemetria.evento("fonte", url=p["url"], estagio="dedupe", decisao="descartada",
                                   motivo="homepage/seção (não é artigo)")
                 continue
             self._catalogar(p)
-            uteis.append(p)
-        pecas = uteis
-        if self.serpapi.ativo:
-            etapa("descoberta", "ok" if pecas else "parcial",
-                  f"{len(pecas)} peça(s) única(s) após dedupe ({len(fusoes)} fundida(s)); "
-                  f"{sum(1 for p in pecas if p.get('curada'))} de fonte curada."
-                  + (f" [serpapi: {getattr(self.serpapi, 'ultimo_motivo', '')}]" if not pecas else ""),
-                  [p["url"] for p in pecas[:5]])
-            if not pecas:
-                motivo = getattr(self.serpapi, "ultimo_motivo", "vazio")
-                if motivo == "cap":
-                    limitacoes.append(f"SerpAPI pausada: teto diário atingido "
-                                      f"({getattr(config, 'SERPAPI_DAILY_CAP', 100)}/dia).")
-                elif motivo == "erro":
-                    limitacoes.append("SerpAPI falhou nesta consulta (detalhe no log do servidor).")
-                else:
-                    limitacoes.append("SerpAPI sem resultados para as afirmações.")
+            _uteis_base.append(p)
+        pecas_base = _uteis_base
 
-        # 6. Seleção p/ juiz (teto) + deep crawl das selecionadas
-        selecionados = self._selecionar(afs, pecas)
-        n_lidas, n_alvo, selecionados = await self._ler(afs, pecas, selecionados, avisar)
-        if n_alvo:
-            etapa("deep-crawl", "ok" if n_lidas else "parcial",
-                  f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
-                  f"{sum(1 for p in pecas if p.get('origem_veredito') == 'pagina')} com ClaimReview.",
-                  [p["url"] for p in pecas if p.get("corpo")][:5])
+        # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1)
+        julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar)
+
+        # Gate (E1): checagem aplicável na base → pula web e ondas extras.
+        # Telemetria do gate é evento("etapa"), nunca fallback. Com SERPAPI_KEY ausente
+        # mantém a mensagem existente (web já desligada; fluxo normal só com a base).
+        pulou_web = bool(houve_aplicavel and self.serpapi.ativo)
+        if pulou_web:
+            pecas = pecas_base
+            julg: Dict[Tuple[int, int], Dict[str, Any]] = julg_base
+            selecionados = list(julg.keys())
+            n_lidas = sum(1 for p in pecas if p.get("corpo"))
+            juiz_ok = any(r.get("classe") is not None for r in julg.values())
+            etapa("descoberta", "pulada", "web pulada: checagem aplicável na base",
+                  [p["url"] for p in pecas[:5]])
+            limitacoes.append("Web pulada: checagem aplicável na base.")
+            if selecionados:
+                _n_alvo_base = len({pi for pi, _ in selecionados})
+                etapa("deep-crawl", "ok" if n_lidas else "parcial",
+                      f"{n_lidas}/{_n_alvo_base} página(s) com corpo lido; "
+                      f"{sum(1 for p in pecas if p.get('origem_veredito') == 'pagina')} com ClaimReview.",
+                      [p["url"] for p in pecas if p.get("corpo")][:5])
+            if selecionados:
+                _n = {k: sum(1 for r in julg.values() if r.get("classe") == k) for k in juiz_llm.CLASSES}
+                _n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
+                _n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
+                _motor_j = next((r.get("motor") for r in julg.values() if r.get("classe")),
+                                juiz_llm.MOTOR_FALLBACK)
+                etapa("juiz", "ok" if juiz_ok and not _n_sem else ("parcial" if juiz_ok else "falha"),
+                      f"{len(julg)} julgamento(s) via {_motor_j}: {_n['SUSTENTA']} sustentam, "
+                      f"{_n['REFUTA']} refutam, {_n['RELATA_SEM_ENDOSSO']} só relatam, "
+                      f"{_n['NAO_TRATA']} fora do tema ({_n_reb} rebaixada(s) por citação não verificada); "
+                      f"{_n_sem} sem julgamento.",
+                      [pecas[pi]["url"] for (pi, _), r in julg.items()
+                       if r.get("classe") in juiz_llm.COM_POSTURA][:5])
+                if not juiz_ok:
+                    limitacoes.append("Sem julgamento de conteúdo (LLM-juiz indisponível): "
+                                      "o nível fica indeterminado; as fontes estão listadas para comparação.")
+            else:
+                etapa("juiz", "pulada", "Nenhuma fonte candidata para julgar.")
+
+        if not pulou_web:
+            # 4. Busca aberta (SerpAPI) — fluxo inalterado quando a base não resolve
+            pecas = list(pecas_base)
+            if self.serpapi.ativo:
+                await avisar("Consultando a web…")
+                pecas_web, estado_agente = await self._buscar_web(afs, avisar, etapa, limitacoes)
+                pecas += pecas_web
+            else:
+                etapa("descoberta", "pulada", "SERPAPI_KEY ausente: sem busca aberta.")
+                limitacoes.append("Descoberta web desligada (sem SERPAPI_KEY).")
+
+            # 5. Dedupe canônico global (antes do juiz): mesma URL do índice e da web = 1 peça
+            pecas, fusoes = corroboracao.fundir_por_url(pecas)
+            for mantida, fundida in fusoes:
+                telemetria.evento("fonte", url=fundida, estagio="dedupe", decisao="fundida",
+                                  motivo=f"mesma URL canônica de {mantida}")
+            uteis = []
+            for p in pecas:
+                if _eh_homepage(p["url"]):
+                    telemetria.evento("fonte", url=p["url"], estagio="dedupe", decisao="descartada",
+                                      motivo="homepage/seção (não é artigo)")
+                    continue
+                self._catalogar(p)
+                uteis.append(p)
+            pecas = uteis
+            if self.serpapi.ativo:
+                etapa("descoberta", "ok" if pecas else "parcial",
+                      f"{len(pecas)} peça(s) única(s) após dedupe ({len(fusoes)} fundida(s)); "
+                      f"{sum(1 for p in pecas if p.get('curada'))} de fonte curada."
+                      + (f" [serpapi: {getattr(self.serpapi, 'ultimo_motivo', '')}]" if not pecas else ""),
+                      [p["url"] for p in pecas[:5]])
+                if not pecas:
+                    motivo = getattr(self.serpapi, "ultimo_motivo", "vazio")
+                    if motivo == "cap":
+                        limitacoes.append(f"SerpAPI pausada: teto diário atingido "
+                                          f"({getattr(config, 'SERPAPI_DAILY_CAP', 100)}/dia).")
+                    elif motivo == "erro":
+                        limitacoes.append("SerpAPI falhou nesta consulta (detalhe no log do servidor).")
+                    else:
+                        limitacoes.append("SerpAPI sem resultados para as afirmações.")
+
+            # 6. Seleção p/ juiz (teto) + deep crawl das selecionadas
+            selecionados = self._selecionar(afs, pecas)
+            n_lidas, n_alvo, selecionados = await self._ler(afs, pecas, selecionados, avisar)
+            if n_alvo:
+                etapa("deep-crawl", "ok" if n_lidas else "parcial",
+                      f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
+                      f"{sum(1 for p in pecas if p.get('origem_veredito') == 'pagina')} com ClaimReview.",
+                      [p["url"] for p in pecas if p.get("corpo")][:5])
 
         # 7. Clusters de independência (agência / grupo / corpo quase idêntico)
         grupos = corroboracao.agrupar(pecas)
@@ -386,25 +444,27 @@ class Pipeline:
         etapa("corroboracao", "ok", f"{grupos['n']} grupo(s) independente(s) entre {len(pecas)} peça(s).")
 
         # 8. Juiz de 4 classes (citação verificada), por afirmação
-        julg: Dict[Tuple[int, int], Dict[str, Any]] = {}
-        juiz_ok = False
-        if selecionados:
-            await avisar("Julgando o que cada fonte diz sobre a afirmação…")
-            julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm)
-            n = {k: sum(1 for r in julg.values() if r.get("classe") == k) for k in juiz_llm.CLASSES}
-            n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
-            n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
-            motor_j = next((r.get("motor") for r in julg.values() if r.get("classe")), juiz_llm.MOTOR_FALLBACK)
-            etapa("juiz", "ok" if juiz_ok and not n_sem else ("parcial" if juiz_ok else "falha"),
-                  f"{len(julg)} julgamento(s) via {motor_j}: {n['SUSTENTA']} sustentam, {n['REFUTA']} refutam, "
-                  f"{n['RELATA_SEM_ENDOSSO']} só relatam, {n['NAO_TRATA']} fora do tema "
-                  f"({n_reb} rebaixada(s) por citação não verificada); {n_sem} sem julgamento.",
-                  [pecas[pi]["url"] for (pi, _), r in julg.items() if r.get("classe") in juiz_llm.COM_POSTURA][:5])
-            if not juiz_ok:
-                limitacoes.append("Sem julgamento de conteúdo (LLM-juiz indisponível): "
-                                  "o nível fica indeterminado; as fontes estão listadas para comparação.")
-        else:
-            etapa("juiz", "pulada", "Nenhuma fonte candidata para julgar.")
+        # (gate E1: com checagem aplicável na base, julg/juiz_ok já vêm da fase base)
+        if not pulou_web:
+            julg = {}
+            juiz_ok = False
+            if selecionados:
+                await avisar("Julgando o que cada fonte diz sobre a afirmação…")
+                julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm)
+                n = {k: sum(1 for r in julg.values() if r.get("classe") == k) for k in juiz_llm.CLASSES}
+                n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
+                n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
+                motor_j = next((r.get("motor") for r in julg.values() if r.get("classe")), juiz_llm.MOTOR_FALLBACK)
+                etapa("juiz", "ok" if juiz_ok and not n_sem else ("parcial" if juiz_ok else "falha"),
+                      f"{len(julg)} julgamento(s) via {motor_j}: {n['SUSTENTA']} sustentam, {n['REFUTA']} refutam, "
+                      f"{n['RELATA_SEM_ENDOSSO']} só relatam, {n['NAO_TRATA']} fora do tema "
+                      f"({n_reb} rebaixada(s) por citação não verificada); {n_sem} sem julgamento.",
+                      [pecas[pi]["url"] for (pi, _), r in julg.items() if r.get("classe") in juiz_llm.COM_POSTURA][:5])
+                if not juiz_ok:
+                    limitacoes.append("Sem julgamento de conteúdo (LLM-juiz indisponível): "
+                                      "o nível fica indeterminado; as fontes estão listadas para comparação.")
+            else:
+                etapa("juiz", "pulada", "Nenhuma fonte candidata para julgar.")
 
         # 8b. Agente: crítico PÓS-JUIZ decide, por afirmação, se gasta uma onda extra
         if estado_agente is not None:
@@ -446,6 +506,43 @@ class Pipeline:
         return self._relatorio(entrada, dec, sinais, fontes, etapas, limitacoes)
 
     # ------------------------------------------------------------------ seleção / juiz
+    async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
+                         usar_llm: bool = True, avisar=None
+                         ) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], bool]:
+        """Fase base (E1): seleciona/lê/julga SÓ a base e testa aplicabilidade.
+
+        Para cada par (peça, afirmação) chama
+        `aplicabilidade.e_aplicavel(classe, citacao_verificada, corpo_lido, veredito,
+        afs[ai].texto, data_pub)` e emite `telemetria.evento("fonte",
+        estagio="aplicabilidade", decisao=...)` por decisão. O gate (pular a web) é
+        evento("etapa"), nunca fallback — fallback só em erro real.
+
+        -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido).
+        Base vazia (INDICE_CHECAGENS=0) → ({}, False): fluxo web normal.
+        """
+        if not pecas_base:
+            return {}, False
+        if avisar is None:
+            avisar = _nada
+        selecionados = self._selecionar(afs, pecas_base)
+        _, _, selecionados = await self._ler(afs, pecas_base, selecionados, avisar)
+        if not selecionados:
+            return {}, False
+        julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
+        houve = False
+        for (pi, ai), r in julg.items():
+            p = pecas_base[pi]
+            aplicavel, motivo = aplicabilidade.e_aplicavel(
+                r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
+                p.get("veredito"), afs[ai].texto, p.get("data_pub"))
+            telemetria.evento("fonte", url=p.get("url"), estagio="aplicabilidade",
+                              decisao="aplicavel" if aplicavel else "inaplicavel",
+                              motivo=motivo, afirmacao=ai, classe=r.get("classe"),
+                              corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"))
+            if aplicavel:
+                houve = True
+        return julg, houve
+
     async def _ler(self, afs: List[Afirmacao], pecas: List[Dict[str, Any]],
                    selecionados: List[Tuple[int, int]], avisar) -> Tuple[int, int, List[Tuple[int, int]]]:
         """Deep crawl das peças selecionadas ainda sem corpo. -> (n lidas, n alvo, selecionados sem genéricas)."""
