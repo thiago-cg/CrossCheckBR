@@ -295,11 +295,19 @@ def test_base_inaplicavel_chama_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")
     idx = Indice.de_checagens([{"url": "https://lupa.uol.com.br/x", "titulo": "Reportagem sobre café",
         "afirmacao_checada": "Café cura câncer", "selo_original": None, "veredito": None,
-        "agencia": "lupa", "trecho": "Reportagem sobre café."}])
+        "agencia": "lupa", "trecho": "Reportagem sobre café."}]
+        # Distratores p/ o BM25 ter IDF (índice de 1 doc só nunca casa; ver teste acima).
+        + [{"url": f"https://lupa.uol.com.br/y{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(["Vacina altera o DNA humano", "Urnas foram fraudadas em 2022",
+                                  "Limão em jejum cura diabetes", "Governo vai confiscar poupança",
+                                  "Água gelada causa gripe"])])
     r, corpo = _pag("https://g1.globo.com/x", "Café cura câncer? Checagem", "É falso que café cura câncer, segundo o INCA.")
     amb["https://g1.globo.com/x"] = corpo
     import asyncio
     rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([r]), detector=MockDetector()).executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    # Guarda anti-vácuo: a base precisa ter devolvido a checagem (senão o gate nem é exercitado)
+    assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
 
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
@@ -308,8 +316,16 @@ def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     idx = Indice.de_checagens([{"url": url, "titulo": "Bolsonaro alta hospital",
         "afirmacao_checada": "Bolsonaro recebeu alta do hospital", "selo_original": "Falso",
         "veredito": "FALSO", "agencia": "boatos-org", "data_pub": "2020-01-01",
-        "trecho": "É falso que Bolsonaro recebeu alta do hospital, segundo apuração."}])
+        "trecho": "É falso que Bolsonaro recebeu alta do hospital, segundo apuração."}]
+        # Distratores p/ o BM25 ter IDF (índice de 1 doc só nunca casa; ver teste acima).
+        + [{"url": f"https://lupa.uol.com.br/z{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(["Vacina altera o DNA humano", "Urnas foram fraudadas em 2022",
+                                  "Limão em jejum cura diabetes", "Governo vai confiscar poupança",
+                                  "Água gelada causa gripe"])])
     amb[url] = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
     import asyncio
     rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([]), detector=MockDetector()).executar(EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje")))
+    # Guarda anti-vácuo: a base precisa ter devolvido a checagem antiga (o gate barra pela data)
+    assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
