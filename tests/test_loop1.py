@@ -46,7 +46,6 @@ def test_openrouter_fallback(monkeypatch):
     monkeypatch.setattr(oo.config, "OPENROUTER_API_KEY", "k")
     monkeypatch.setattr(oo.config, "OPENROUTER_MODEL", "prim")
     monkeypatch.setattr(oo.config, "OPENROUTER_FALLBACK_MODEL", "fb")
-    monkeypatch.setattr(oo, "_cap_estourado", lambda: False)
 
     def fake_post(modelo, messages, mt, ts):
         if modelo == "prim":
@@ -70,7 +69,6 @@ def test_chat_repete_resposta_vazia_1x_no_mesmo_modelo(monkeypatch):
     monkeypatch.setattr(oo.config, "OPENROUTER_API_KEY", "k")
     monkeypatch.setattr(oo.config, "OPENROUTER_MODEL", "prim")
     monkeypatch.setattr(oo.config, "OPENROUTER_FALLBACK_MODEL", "fb")
-    monkeypatch.setattr(oo, "_cap_estourado", lambda: False)
     calls = []
 
     def _fake(modelo, messages, max_tokens, timeout_s):
@@ -82,3 +80,15 @@ def test_chat_repete_resposta_vazia_1x_no_mesmo_modelo(monkeypatch):
     monkeypatch.setattr(oo, "_post", _fake)
     txt, modelo = oo.chat([{"role": "user", "content": "x"}])
     assert txt == "recuperado" and modelo == "prim" and calls == ["prim", "prim"]
+
+
+def test_sem_cap_diario_llm(monkeypatch):
+    """Sem cap diário de LLM: 60 chats seguidos passam (N×1 do avaliador)."""
+    monkeypatch.setattr(oo.config, "OPENROUTER_API_KEY", "k")
+    monkeypatch.setattr(oo.config, "OPENROUTER_MODEL", "m")
+    monkeypatch.setattr(oo.config, "OPENROUTER_FALLBACK_MODEL", "fb")
+    monkeypatch.setattr(oo, "_post", lambda modelo, messages, max_tokens, timeout_s: "ok")
+    resultados = [oo.chat([{"role": "user", "content": "x"}]) for _ in range(60)]
+    assert len(resultados) == 60 and all(t == "ok" for t, _ in resultados)
+    assert not hasattr(oo, "_cap_estourado")
+    assert not hasattr(oo.config, "LLM_DAILY_CAP")

@@ -194,6 +194,7 @@ def test_mesma_url_no_indice_e_na_web_conta_uma_vez(amb, monkeypatch):
                                                          "Água gelada causa gripe"])])
     web = [{"link": url + "?utm_source=twitter", "title": "É falso que café cura câncer",
             "snippet": "É falso que café cura câncer, segundo especialistas."}]
+    amb[url] = "É falso que café cura câncer, segundo especialistas. " * 50
     assert idx.buscar_checagens("Café cura câncer")  # o atalho acha a checagem
     rel = _rodar("Café cura câncer", web, indice=idx)
     assert len([f for f in rel.fontes if "aosfatos" in f.url]) == 1
@@ -309,6 +310,144 @@ def test_base_inaplicavel_chama_web(amb, monkeypatch):
     # Guarda anti-vácuo: a base precisa ter devolvido a checagem (senão o gate nem é exercitado)
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+
+def test_crawl_antes_do_filtro_lexical(amb, monkeypatch):
+    """Crawl-primeiro: overlap baixo no título/snippet não exclui do crawl nem do juiz.
+
+    3 peças com teto JUIZ_MAX_NOTICIAS=2 (reproduz o corte de hoje com 3 peças):
+    as 3 têm corpo lido e as 3 são julgadas; a de overlap ~0, cujo corpo traz os
+    termos da afirmação, é julgada pelo corpo (REFUTA)."""
+    monkeypatch.setattr(config, "JUIZ_MAX_NOTICIAS", 2)
+    a1, c1 = _pag("https://g1.globo.com/saude/noticia/2024/01/cafe-cura-cancer-a.ghtml",
+                  "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    a2, c2 = _pag("https://www.estadao.com.br/estadao-verifica/2024/02/cafe-cancer-b/",
+                  "Café e câncer: o que diz a ciência",
+                  "Não há evidência de que café cura câncer, dizem oncologistas.")
+    url_b = "https://www.exemplo.com.br/saude/2024/03/boletim-semanal-c/"
+    b = {"link": url_b, "title": "Boletim de saúde da semana",
+         "snippet": "Resumo semanal da redação com notas curtas."}
+    dom_b = "www.exemplo.com.br"
+    contexto_b = " ".join(f"Apuração própria de {dom_b}, parágrafo {k}, com detalhes do caso." for k in range(12))
+    corpo_b = (f"Boletim de saúde da semana. {contexto_b} "
+               "É falso que café cura câncer, segundo o INCA. "
+               f"Mais contexto de {dom_b} sem relação direta.")
+    amb[a1["link"]] = c1
+    amb[a2["link"]] = c2
+    amb[url_b] = corpo_b
+    rel = _rodar("Café cura câncer", [a1, a2, b])
+    juiz = next(e for e in rel.etapas if e.nome == "juiz")
+    assert "3 julgamento" in juiz.detalhe, juiz.detalhe
+    assert all(f.corpo_lido for f in rel.fontes), [(f.url, f.corpo_lido) for f in rel.fontes]
+    baixa = next(f for f in rel.fontes if "boletim" in f.url)
+    assert baixa.postura == "REFUTA", baixa
+
+
+def test_julga_cada_peca_com_corpo(amb, monkeypatch):
+    """Pipeline chama o avaliador 1× por peça com corpo lido (manchete+corpo).
+
+    4 peças com corpo lido: `avaliador.avaliar` deve ser chamado 4×, uma vez
+    por par (peça, afirmação), e cada chamada recebe `titulo` e corpo
+    (`corpo`/`trecho_juiz`/`texto_completo`) não-vazios."""
+    from factcheck_mvp import avaliador as _aval
+    pags = [
+        _pag(f"https://www.{dom}/saude/2024/01/cafe-cancer-checagem/",
+             "Café cura câncer? Checagem",
+             "É falso que café cura câncer, segundo o INCA.")
+        for dom in ("g1.globo.com", "estadao.com.br", "bbc.com", "folha.uol.com.br")
+    ]
+    resultados = _prep(amb, pags)
+    chamadas = []
+
+    def fake_avaliar(nucleo, peca):
+        chamadas.append((nucleo, dict(peca)))
+        return {"posicao": "REFUTA", "citacao": "É falso que café cura câncer",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página diz que é falso que café cura câncer.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = _rodar("Café cura câncer", resultados)
+    assert len(chamadas) == 4, chamadas
+    for nucleo, peca in chamadas:
+        assert (nucleo or "").strip()
+        assert (peca.get("titulo") or "").strip()
+        corpo = peca.get("corpo") or peca.get("trecho_juiz") or peca.get("texto_completo") or ""
+        assert corpo.strip()
+    assert rel.propensao == "alta", rel.justificativa
+
+
+def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
+    """Wiring avaliador→juiz (Task 4): `ItemEvidencia.corpo_lido` vem da flag da
+    peça (`p.get("corpo_lido", p.get("corpo"))`), não de `bool(p.get("corpo"))`.
+
+    Uma peça com corpo presente mas flag `corpo_lido=False` chega ao juiz como
+    não-lida (desconto `F_SO_TITULO`); outra sem corpo chega como não-lida
+    também. Espiona `decidir` para pinar o `ItemEvidencia` que o pipeline monta.
+    """
+    from factcheck_mvp import avaliador as _aval
+    from factcheck_mvp import decisao as _dec
+
+    r1, c1 = _pag("https://g1.globo.com/saude/2024/01/cafe-cancer-wiring-a/",
+                  "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    r2, c2 = _pag("https://www.estadao.com.br/estadao-verifica/2024/02/cafe-cancer-wiring-b/",
+                  "Café e câncer: o que diz a ciência",
+                  "Não há evidência de que café cura câncer, dizem oncologistas.")
+    r3, _c3 = _pag("https://www.bbc.com/portuguese/articles/cafe-wiring-c",
+                   "O que a ciência diz sobre café",
+                   "Pesquisadores desmente que café cura câncer em revisão ampla.")
+    resultados = _prep(amb, [(r1, c1), (r2, c2)]) + [r3]
+    # r3 fora de `amb`: o crawl falha (sem corpo, flag False).
+    url_lida, url_so_titulo, url_sem_corpo = r1["link"], r2["link"], r3["link"]
+
+    tinha_corpo, vistos = {}, {}
+    orig_decidir = _dec.decidir
+
+    def _espiar(ev):
+        vistos["itens"] = list(ev.itens)
+        return orig_decidir(ev)
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+
+    def fake_avaliar(nucleo, peca):
+        url = peca.get("url") or ""
+        tinha_corpo[url] = bool(peca.get("corpo"))
+        if url == url_so_titulo:
+            # Divergência coberta: corpo presente, mas a peça não foi lida.
+            peca["corpo_lido"] = False
+        return {"posicao": "REFUTA", "citacao": "É falso que café cura câncer",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página diz que é falso que café cura câncer.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = _rodar("Café cura câncer", resultados)
+
+    # Guarda anti-vácuo: a divergência existe de fato no wiring.
+    assert tinha_corpo[url_so_titulo] is True
+    assert tinha_corpo[url_sem_corpo] is False
+
+    por_url = {it.url: it for it in vistos["itens"]}
+    assert set(por_url) == {url_lida, url_so_titulo, url_sem_corpo}
+    assert por_url[url_lida].corpo_lido is True
+    assert por_url[url_so_titulo].corpo_lido is False
+    assert por_url[url_sem_corpo].corpo_lido is False
+    assert all(it.classe == "REFUTA" and it.citacao_verificada is True for it in vistos["itens"])
+
+    fontes = {f.url: f for f in rel.fontes}
+    assert fontes[url_lida].corpo_lido is True
+    assert fontes[url_so_titulo].corpo_lido is False
+    assert fontes[url_sem_corpo].corpo_lido is False
+
+    # Caminho do desconto: só-título pesa F_SO_TITULO × corpo lido (mesma
+    # confiabilidade nas 3 — todas curadas — então a razão é exata).
+    pesos = {u: v["peso"] for v in rel.decisao["votos"] for u in v["urls"]}
+    assert set(pesos) == {url_lida, url_so_titulo, url_sem_corpo}
+    assert pesos[url_so_titulo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
+    assert pesos[url_sem_corpo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
+    assert rel.propensao == "alta", rel.justificativa
+
 
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")

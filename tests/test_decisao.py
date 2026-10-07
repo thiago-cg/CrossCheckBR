@@ -169,6 +169,29 @@ def test_recibo_conta_fontes_lidas_e_fora_do_tema():
     assert "4 fora do tema" in d.justificativa() and "Lidas 4" in d.justificativa()
 
 
+# ------------------------------------------------------------------ juiz-agregador (Task 4)
+def test_juiz_agrega_avaliacoes():
+    """Juiz-agregador sobre outputs do avaliador 1:1 (manchete+corpo).
+
+    Replica o wiring do pipeline (`ItemEvidencia.classe = julg posicao`,
+    `corpo_lido` da peça, `citacao_verificada` do avaliador): 2 clusters
+    REFUTA curados com citação verificada e corpo lido → alta; só
+    RELATA/NAO_TRATA (0 posturas) → indeterminada ("nenhuma fonte ...
+    confirma ou contesta").
+    """
+    refutas = [_it(f"https://{d}/a", "REFUTA", cluster=d, curada=True, corpo=True, citacao=True)
+               for d in ("g1.globo.com", "estadao.com.br")]
+    d = decidir(_ev(refutas))
+    assert d.nivel == "alta" and len(d.votos) == 2
+    assert all(v.direcao == 1 for v in d.votos)
+
+    so_relatos = [_it("https://g1.globo.com/b", "RELATA_SEM_ENDOSSO", corpo=True),
+                  _it("https://estadao.com.br/c", "NAO_TRATA", corpo=True)]
+    d2 = decidir(_ev(so_relatos))
+    assert d2.nivel == "indeterminada" and not d2.votos
+    assert "nenhuma fonte" in d2.motivo and "confirma ou contesta" in d2.motivo
+
+
 # ------------------------------------------------------------------ mutação
 CASOS = [
     (lambda: _ev(_tres("REFUTA")), "alta"),

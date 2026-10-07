@@ -1,5 +1,11 @@
 """Núcleo de decisão: UMA função pura `decidir(evidencias) -> Decisao`.
 
+Este módulo é o juiz-agregador determinístico sobre os outputs do avaliador 1:1
+(`avaliador.avaliar`, manchete+corpo, 1 chamada por par peça×afirmação): o pipeline
+monta cada `ItemEvidencia` com `classe = julg posicao`, `corpo_lido` da peça
+(com `F_SO_TITULO` quando só título/snippet) e `citacao_verificada` do avaliador;
+`decidir` agrega em 1 voto por cluster. Não chama LLM nem faz I/O.
+
 O nível é propensão a a entrada ser desinformação, só a partir de VERACIDADE:
 (a) postura das fontes julgadas (juiz de 4 classes, citação verificada), um voto
 por CLUSTER independente; (b) vereditos tipados de checagem (ClaimReview da página

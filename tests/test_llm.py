@@ -106,7 +106,7 @@ def test_openrouter_falha_cai_no_local(monkeypatch):
 
     def orr(messages, max_tokens, timeout_s, finalidade):
         ordem.append("openrouter")
-        raise RuntimeError("teto LLM diário atingido")
+        raise RuntimeError("openrouter falhou")
 
     def loc(messages, max_tokens, timeout_s, finalidade):
         ordem.append("local")
