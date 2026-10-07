@@ -98,9 +98,10 @@ AGENTE_TIMEOUT_S = _int("AGENTE_TIMEOUT_S", 60)
 AGENTE_MAX_POR_AFIRMACAO = _int("AGENTE_MAX_POR_AFIRMACAO", 12)
 # Hosts extras de agências de checagem além das derivadas do catálogo (vírgula).
 SERP_SITES_EXTRAS = _get("SERP_SITES_EXTRAS", "")
-DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
-# Teto total de páginas lidas por consulta (todas as afirmações) antes do juiz
-DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", 10)
+DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", AGENTE_MAX_POR_AFIRMACAO)
+# Teto total de páginas lidas por consulta (todas as afirmações) antes do juiz.
+# Crawl-primeiro: cobre todas as relevantes (3 afirmações x teto por afirmação).
+DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", MAX_AFIRMACOES * AGENTE_MAX_POR_AFIRMACAO)
 # Confiabilidade (confiabilidade.py): fora do catálogo, "site muito acessado" = entre os
 # N domínios mais acessados da lista Tranco (data/trafego_tranco.csv.gz guarda até 200 mil).
 TRAFEGO_RANK_MAX = _int("TRAFEGO_RANK_MAX", 200_000)

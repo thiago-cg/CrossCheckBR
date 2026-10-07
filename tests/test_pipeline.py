@@ -310,6 +310,38 @@ def test_base_inaplicavel_chama_web(amb, monkeypatch):
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
 
+def test_crawl_antes_do_filtro_lexical(amb, monkeypatch):
+    """Crawl-primeiro: overlap baixo no título/snippet não exclui do crawl nem do juiz.
+
+    3 peças com teto JUIZ_MAX_NOTICIAS=2 (reproduz o corte de hoje com 3 peças):
+    as 3 têm corpo lido e as 3 são julgadas; a de overlap ~0, cujo corpo traz os
+    termos da afirmação, é julgada pelo corpo (REFUTA)."""
+    monkeypatch.setattr(config, "JUIZ_MAX_NOTICIAS", 2)
+    a1, c1 = _pag("https://g1.globo.com/saude/noticia/2024/01/cafe-cura-cancer-a.ghtml",
+                  "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    a2, c2 = _pag("https://www.estadao.com.br/estadao-verifica/2024/02/cafe-cancer-b/",
+                  "Café e câncer: o que diz a ciência",
+                  "Não há evidência de que café cura câncer, dizem oncologistas.")
+    url_b = "https://www.exemplo.com.br/saude/2024/03/boletim-semanal-c/"
+    b = {"link": url_b, "title": "Boletim de saúde da semana",
+         "snippet": "Resumo semanal da redação com notas curtas."}
+    dom_b = "www.exemplo.com.br"
+    contexto_b = " ".join(f"Apuração própria de {dom_b}, parágrafo {k}, com detalhes do caso." for k in range(12))
+    corpo_b = (f"Boletim de saúde da semana. {contexto_b} "
+               "É falso que café cura câncer, segundo o INCA. "
+               f"Mais contexto de {dom_b} sem relação direta.")
+    amb[a1["link"]] = c1
+    amb[a2["link"]] = c2
+    amb[url_b] = corpo_b
+    rel = _rodar("Café cura câncer", [a1, a2, b])
+    juiz = next(e for e in rel.etapas if e.nome == "juiz")
+    assert "3 julgamento" in juiz.detalhe, juiz.detalhe
+    assert all(f.corpo_lido for f in rel.fontes), [(f.url, f.corpo_lido) for f in rel.fontes]
+    baixa = next(f for f in rel.fontes if "boletim" in f.url)
+    assert baixa.postura == "REFUTA", baixa
+
+
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")
     url = "https://boatos.org/x-antiga"

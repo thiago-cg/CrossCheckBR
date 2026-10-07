@@ -5,7 +5,8 @@ Núcleo = CHECAGEM CRUZADA via busca aberta (fase 2):
   afirmações JSON {afirmacao, nucleo, polaridade, consulta}
    → [índice ClaimReview, só se INDICE_CHECAGENS=1]  +  busca aberta (SerpAPI, agente)
    → dedupe canônico (URL normalizada; índice+web = 1 peça)
-   → seleção (teto JUIZ_MAX_NOTICIAS) → deep crawl (qualquer URL pública; ClaimReview da página)
+   → deep crawl de todas as relevantes (qualquer URL pública; ClaimReview da página)
+   → seleção (só ordena: overlap nunca exclui do crawl nem do juiz)
    → clusters de independência (agência/grupo/corpo quase idêntico)
    → juiz de 4 classes com citação verificada (1 chamada por lote)
    → [SERP_ESTRATEGIA=agente] crítico pós-juiz por afirmação: parar (≥2 clusters com postura ou
@@ -421,9 +422,9 @@ class Pipeline:
                     else:
                         limitacoes.append("SerpAPI sem resultados para as afirmações.")
 
-            # 6. Seleção p/ juiz (teto) + deep crawl das selecionadas
+            # 6. Crawl-primeiro: deep crawl de TODAS as relevantes, depois a seleção só ordena
+            n_lidas, n_alvo = await self._ler(afs, pecas, avisar)
             selecionados = self._selecionar(afs, pecas)
-            n_lidas, n_alvo, selecionados = await self._ler(afs, pecas, selecionados, avisar)
             if n_alvo:
                 etapa("deep-crawl", "ok" if n_lidas else "parcial",
                       f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
@@ -523,8 +524,8 @@ class Pipeline:
             return {}, False
         if avisar is None:
             avisar = _nada
+        await self._ler(afs, pecas_base, avisar)
         selecionados = self._selecionar(afs, pecas_base)
-        _, _, selecionados = await self._ler(afs, pecas_base, selecionados, avisar)
         if not selecionados:
             return {}, False
         julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
@@ -543,64 +544,74 @@ class Pipeline:
         return julg, houve
 
     async def _ler(self, afs: List[Afirmacao], pecas: List[Dict[str, Any]],
-                   selecionados: List[Tuple[int, int]], avisar) -> Tuple[int, int, List[Tuple[int, int]]]:
-        """Deep crawl das peças selecionadas ainda sem corpo. -> (n lidas, n alvo, selecionados sem genéricas)."""
+                     avisar) -> Tuple[int, int]:
+        """Crawl-primeiro: deep crawl de TODAS as peças ainda sem corpo (até
+        DEEP_CRAWL_TOTAL), ANTES de qualquer seleção lexical. Preenche
+        corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não lidas
+        seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
+        Marca `_generica` nas homepages/seções reveladas genéricas após a leitura.
+        -> (n lidas, n alvo)."""
         alvo_crawl: List[Dict[str, Any]] = []
         vistos = set()
-        for pi, ai in selecionados:
-            p = pecas[pi]
+        for p in pecas:
             if p["url"] not in vistos and not p.get("corpo"):
                 vistos.add(p["url"])
-                alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""), "_afirmacao": afs[ai].alvo()})
-        alvo_crawl = alvo_crawl[: max(1, config.DEEP_CRAWL_TOTAL or 10)]
+                ai0 = next((ai for ai in sorted(p.get("afs") or {0}) if ai < len(afs)), None)
+                alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""),
+                                   "_afirmacao": afs[ai0].alvo() if ai0 is not None and afs else ""})
+        alvo_crawl = alvo_crawl[: max(1, config.DEEP_CRAWL_TOTAL or 36)]
         n_lidas = 0
-        if not alvo_crawl:
-            return 0, 0, selecionados
-        await avisar("Lendo o corpo das fontes…")
-        try:
-            corpos = await aprofundar(alvo_crawl, self.catalogo,
-                                      por_afirm=math.ceil(len(alvo_crawl) / 2),
-                                      budget_total=max(config.DEEP_CRAWL_TIMEOUT_S or 15, 25))
-        except Exception as e:
-            telemetria.fallback("deep-crawl", f"{type(e).__name__}: {e}")
-            corpos = {}
-        por_url = {p["url"]: p for p in pecas}
-        for url, c in corpos.items():
-            p = por_url.get(url)
-            if not p or c is None:
-                continue
-            if getattr(c, "corpo_lido", False):
-                p["corpo"] = getattr(c, "texto_completo", "") or c.trecho_corpo
-                p["trecho_juiz"] = c.trecho_corpo  # início + parágrafos com termos/conclusão
-                p["metodo"] = getattr(c, "metodo", "")
-                n_lidas += 1
-            if getattr(c, "titulo", "") and not p.get("titulo"):
-                p["titulo"] = c.titulo
-            if getattr(c, "data_pub", None) and not p.get("data_pub"):
-                p["data_pub"] = c.data_pub
-            vp = getattr(c, "veredito_pagina", None)
-            if vp and not p.get("veredito"):
-                v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
-                if v:
-                    p.update(veredito=v, selo_original=vp.get("selo_original"),
-                             afirmacao_checada=vp.get("afirmacao_checada"), origem_veredito="pagina",
-                             agencia=vp.get("agencia"))
+        if alvo_crawl:
+            await avisar("Lendo o corpo das fontes…")
+            try:
+                corpos = await aprofundar(alvo_crawl, self.catalogo,
+                                          por_afirm=math.ceil(len(alvo_crawl) / 2),
+                                          budget_total=max(config.DEEP_CRAWL_TIMEOUT_S or 15, 25))
+            except Exception as e:
+                telemetria.fallback("deep-crawl", f"{type(e).__name__}: {e}")
+                corpos = {}
+            por_url = {p["url"]: p for p in pecas}
+            for url, c in corpos.items():
+                p = por_url.get(url)
+                if not p or c is None:
+                    continue
+                if getattr(c, "corpo_lido", False):
+                    p["corpo"] = getattr(c, "texto_completo", "") or c.trecho_corpo
+                    p["trecho_juiz"] = c.trecho_corpo  # início + parágrafos com termos/conclusão
+                    p["metodo"] = getattr(c, "metodo", "")
+                    p["corpo_lido"] = True
+                    n_lidas += 1
+                else:
+                    p["corpo_lido"] = False
+                if getattr(c, "titulo", "") and not p.get("titulo"):
+                    p["titulo"] = c.titulo
+                if getattr(c, "data_pub", None) and not p.get("data_pub"):
+                    p["data_pub"] = c.data_pub
+                vp = getattr(c, "veredito_pagina", None)
+                if vp and not p.get("veredito"):
+                    v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
+                    if v:
+                        p.update(veredito=v, selo_original=vp.get("selo_original"),
+                                 afirmacao_checada=vp.get("afirmacao_checada"), origem_veredito="pagina",
+                                 agencia=vp.get("agencia"))
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
-        sel_pis = {pi for pi, _ in selecionados}
-        genericas = {i for i, p in enumerate(pecas)
-                     if p.get("corpo") and _eh_generica(p["url"], p.get("titulo", ""), p["corpo"])}
-        for i in genericas & sel_pis:
-            telemetria.evento("fonte", url=pecas[i]["url"], estagio="deep-crawl", decisao="descartada",
-                              motivo="página genérica (homepage/seção) após leitura")
-        return n_lidas, len(alvo_crawl), [(pi, ai) for pi, ai in selecionados if pi not in genericas]
+        for p in pecas:
+            if p.get("corpo") and not p.get("_generica") \
+                    and _eh_generica(p["url"], p.get("titulo", ""), p["corpo"]):
+                p["_generica"] = True
+                telemetria.evento("fonte", url=p["url"], estagio="deep-crawl", decisao="descartada",
+                                  motivo="página genérica (homepage/seção) após leitura")
+        return n_lidas, len(alvo_crawl)
 
     def _selecionar(self, afs: List[Afirmacao], pecas: List[Dict[str, Any]],
                     excluir: Optional[set] = None, afs_alvo: Optional[set] = None) -> List[Tuple[int, int]]:
-        """Pares (peça, afirmação) p/ o juiz, até JUIZ_MAX_NOTICIAS, round-robin por afirmação.
+        """Pares (peça, afirmação) p/ o juiz, em round-robin por afirmação, SEM teto:
+        todas as peças relevantes vão ao julgamento (lidas ou marcadas sem corpo).
         Ordem por afirmação: overlap (título+snippet × núcleo+consulta), selo, fonte curada e
         confiabilidade (muito acessada/institucional sobe; rede social e site pouco acessado descem).
+        `_overlap` é só ordenação: nunca exclui do crawl nem do julgamento. Só ficam de
+        fora homepages/seções reveladas genéricas após a leitura (marcadas por `_ler`).
         `excluir`: pares já julgados; `afs_alvo`: só estas afirmações (onda extra do agente)."""
-        teto = max(0, config.JUIZ_MAX_NOTICIAS or 10)
         excluir = excluir or set()
         filas: List[List[int]] = []
         for ai, af in enumerate(afs):
@@ -608,7 +619,8 @@ class Pipeline:
             if afs_alvo is not None and ai not in afs_alvo:
                 filas.append([])
                 continue
-            cands = [i for i, p in enumerate(pecas) if ai in (p.get("afs") or {0}) and (i, ai) not in excluir]
+            cands = [i for i, p in enumerate(pecas)
+                     if ai in (p.get("afs") or {0}) and (i, ai) not in excluir and not p.get("_generica")]
             cands.sort(key=lambda i: (_overlap(ref, f"{pecas[i].get('titulo','')} {pecas[i].get('snippet','')}")
                                       + (0.3 if pecas[i].get("veredito") else 0)
                                       + (0.15 if pecas[i].get("curada") else 0)
@@ -618,9 +630,9 @@ class Pipeline:
             filas.append(cands)
         saida: List[Tuple[int, int]] = []
         k = 0
-        while len(saida) < teto and any(k < len(f) for f in filas):
+        while any(k < len(f) for f in filas):
             for ai, f in enumerate(filas):
-                if k < len(f) and len(saida) < teto:
+                if k < len(f):
                     saida.append((f[k], ai))
             k += 1
         return saida
@@ -751,9 +763,9 @@ class Pipeline:
                     idx[k] = len(pecas) - 1
                     n_novas += 1
                 alvo_afs = {ai for ai, _, _ in pedidos_q}
-                sel = self._selecionar(afs, pecas, excluir=set(julg), afs_alvo=alvo_afs)
-                lidas, _, sel = await self._ler(afs, pecas, sel, avisar)
+                lidas, _ = await self._ler(afs, pecas, avisar)
                 n_lidas += lidas
+                sel = self._selecionar(afs, pecas, excluir=set(julg), afs_alvo=alvo_afs)
                 if sel:
                     corroboracao.agrupar(pecas)  # clusters com as peças novas (1 voto por cluster)
                     await avisar("Julgando as fontes da nova busca…")
