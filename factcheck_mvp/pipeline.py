@@ -594,6 +594,9 @@ class Pipeline:
                         p.update(veredito=v, selo_original=vp.get("selo_original"),
                                  afirmacao_checada=vp.get("afirmacao_checada"), origem_veredito="pagina",
                                  agencia=vp.get("agencia"))
+        for p in pecas:
+            if "corpo_lido" not in p:
+                p["corpo_lido"] = bool(p.get("corpo"))
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
         for p in pecas:
             if p.get("corpo") and not p.get("_generica") \
