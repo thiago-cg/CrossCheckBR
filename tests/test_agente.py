@@ -497,3 +497,84 @@ def test_orcamento_parcial_preservado(amb, monkeypatch):
     assert any(d.get("onde") in ("avaliador", "juiz") for d in fbs), [d.get("onde") for d in fbs]
     assert any("parcial" in (l or "").lower() or "teto" in (l or "").lower()
                for l in rel.limitacoes), rel.limitacoes
+
+
+def _corpo_ler(url, titulo, frase):
+    dom = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
+    contexto = " ".join(f"Apuração própria de {dom}, parágrafo {k}, com detalhes do caso." for k in range(12))
+    return f"{titulo}. {contexto} {frase} Mais contexto de {dom} sem relação direta."
+
+
+def _pecas_e_corpos(n, prefixo):
+    afs = [Afirmacao(texto="Ibuprofeno cura dengue em 3 dias", nucleo="ibuprofeno cura dengue",
+                     consulta="ibuprofeno dengue")]
+    pecas = [{"url": f"{prefixo}{i:02d}.com/noticia/{i}", "titulo": f"Ibuprofeno e dengue {i}",
+              "snippet": "snip", "afs": {0}} for i in range(n)]
+    corpos = {p["url"]: _corpo_ler(p["url"], p["titulo"],
+                                   "É falso que o ibuprofeno cura dengue; o remédio aumenta o risco.")
+              for p in pecas}
+    return afs, pecas, corpos
+
+
+def _pipe_novo():
+    return Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp(lambda q: []), detector=MockDetector())
+
+
+def _sem_fallback_deep_crawl(amb):
+    return [d for t, d in amb["eventos"] if t == "fallback" and d.get("onde") == "deep-crawl"]
+
+
+def test_ler_total_cobre_por_afirm_elevado(amb, monkeypatch):
+    """Finding 1 (review Task 5): teto = max(DEEP_CRAWL_TOTAL, 3×por_afirm).
+
+    Com AGENTE_MAX_POR_AFIRMACAO=20 o teto é max(36, 60)=60: 40 peças relevantes
+    são todas tentadas (o `or` antigo travava no literal 36) e cada chamada de
+    crawl repassa por_afirm=20."""
+    monkeypatch.setattr(config, "AGENTE_MAX_POR_AFIRMACAO", 20)
+    monkeypatch.setattr(config, "DEEP_CRAWL_TOTAL", 36)
+    afs, pecas, corpos = _pecas_e_corpos(40, "https://tx")
+    chamadas = []
+
+    async def completo(cands, catalogo, **kw):
+        chamadas.append((len(cands), kw.get("por_afirm")))
+        return {d["url"]: CorpoLido(url=d["url"], final_url=d["url"],
+                                     trecho_corpo=corpos[d["url"]][:3000], corpo_lido=True,
+                                     texto_completo=corpos[d["url"]], metodo="fake")
+                for d in cands}
+
+    monkeypatch.setattr(pl, "aprofundar", completo)
+    n_lidas, n_alvo = asyncio.run(_pipe_novo()._ler(afs, pecas, pl._nada))
+    assert n_alvo == 40, n_alvo
+    assert sum(n for n, _ in chamadas) == 40, chamadas
+    assert all(pa == 20 for _, pa in chamadas), chamadas
+    assert n_lidas == n_alvo == 40, (n_lidas, n_alvo)
+    assert not _sem_fallback_deep_crawl(amb), amb["eventos"]
+
+
+def test_ler_fatia_crawl_acima_do_cap_por_chamada(amb, monkeypatch):
+    """Finding 3 (review Task 5): `aprofundar` atende por_afirm*2 por chamada.
+
+    36 candidatas no happy path (por_afirm=12): o _ler fatia em lotes 24+12 com
+    por_afirm intacto e todas as 36 são tentadas — n_lidas==n_alvo sem fallback
+    deep-crawl espúrio. O falso emula o cap real (só responde os por_afirm*2
+    primeiros de cada chamada)."""
+    monkeypatch.setattr(config, "AGENTE_MAX_POR_AFIRMACAO", 12)
+    afs, pecas, corpos = _pecas_e_corpos(36, "https://tz")
+    chamadas = []
+
+    async def com_cap(cands, catalogo, **kw):
+        pa = kw.get("por_afirm") or 12
+        chamadas.append((len(cands), pa))
+        return {d["url"]: CorpoLido(url=d["url"], final_url=d["url"],
+                                     trecho_corpo=corpos[d["url"]][:3000], corpo_lido=True,
+                                     texto_completo=corpos[d["url"]], metodo="fake")
+                for d in cands[: pa * 2]}
+
+    monkeypatch.setattr(pl, "aprofundar", com_cap)
+    n_lidas, n_alvo = asyncio.run(_pipe_novo()._ler(afs, pecas, pl._nada))
+    assert n_alvo == 36, n_alvo
+    assert [n for n, _ in chamadas] == [24, 12], chamadas
+    assert all(pa == 12 for _, pa in chamadas), chamadas
+    assert n_lidas == n_alvo == 36, (n_lidas, n_alvo)
+    assert not _sem_fallback_deep_crawl(amb), amb["eventos"]

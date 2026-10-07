@@ -44,7 +44,10 @@ OPENROUTER_MAX_TOKENS = _int("OPENROUTER_MAX_TOKENS", 600)
 # notícias é do LLM-juiz (juiz_llm.py).
 JEV_TIMEOUT_S = _int("JEV_TIMEOUT_S", 12)
 # Juiz N×1: avalia cada relevante 1:1 (manchete+corpo) sem corte prévio.
-# JUIZ_MAX_NOTICIAS é só teto de EXIBIÇÃO em `pipeline._fontes`, nunca de avaliação.
+# JUIZ_MAX_NOTICIAS é teto de EXIBIÇÃO em `pipeline._fontes`, nunca de avaliação —
+# com piso 10: valores abaixo de 10 não cortam a exibição (compat com testes
+# legados que fixam 2 e exigem a 3ª fonte no relatório); na prática só eleva o
+# teto acima de 10.
 JUIZ_MAX_NOTICIAS = _int("JUIZ_MAX_NOTICIAS", 10)
 # Juiz de 4 classes (fase 2): itens por chamada, tamanho do trecho, tokens de saída
 # (o modelo local é de raciocínio: reserve folga) e limiar da citação verificada.
@@ -108,7 +111,8 @@ DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 12)
 # Teto total de páginas lidas por consulta (todas as afirmações) antes do juiz.
 # Crawl-primeiro N×1: cobre cada relevante — 3 afirmações × teto por afirmação = 36.
 # Literais (não `MAX_AFIRMACOES * AGENTE_MAX_POR_AFIRMACAO` no import): o pipeline
-# resolve `total = 3 × por_afirm` em runtime p/ respeitar env/monkeypatch.
+# resolve `total = max(DEEP_CRAWL_TOTAL, 3 × por_afirm)` em runtime p/ respeitar
+# env/monkeypatch e sempre cobrir cada relevante.
 DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", 36)
 # Confiabilidade (confiabilidade.py): fora do catálogo, "site muito acessado" = entre os
 # N domínios mais acessados da lista Tranco (data/trafego_tranco.csv.gz guarda até 200 mil).

@@ -564,7 +564,12 @@ class Pipeline:
                      avisar) -> Tuple[int, int]:
         """Crawl-primeiro N×1: deep crawl de `min(relevantes, teto)` peças, ANTES de
         qualquer seleção lexical. `por_afirm = AGENTE_MAX_POR_AFIRMACAO` e
-        `teto = DEEP_CRAWL_TOTAL (default 3×por_afirm)` resolvidos em runtime.
+        `teto = max(DEEP_CRAWL_TOTAL, 3×por_afirm)` resolvidos em runtime (o total
+        sempre cobre cada relevante, mesmo com por_afirm elevado). O crawl é
+        fatiado em lotes de `por_afirm*2` — cap de tarefas por chamada de
+        `aprofundar` — p/ todas as candidatas serem tentadas no happy path
+        (1 chamada de 36 com por_afirm=12 deixaria 12 sem resposta → fallback
+        espúrio); `por_afirm` segue intacto em cada chamada.
         Preenche corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não
         lidas seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
         Timeout/cap (URLs sem resposta, ausentes do dict): parcial preservado +
@@ -580,19 +585,24 @@ class Pipeline:
                 alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""),
                                    "_afirmacao": afs[ai0].alvo() if ai0 is not None and afs else ""})
         por_afirm = max(1, int(getattr(config, "AGENTE_MAX_POR_AFIRMACAO", 12) or 12))
-        teto_total = max(1, int(getattr(config, "DEEP_CRAWL_TOTAL", 0) or 3 * por_afirm))
+        teto_total = max(1, int(getattr(config, "DEEP_CRAWL_TOTAL", 0) or 0), 3 * por_afirm)
         alvo_crawl = alvo_crawl[: teto_total]
         n_lidas = 0
         if alvo_crawl:
             await avisar("Lendo o corpo das fontes…")
             budget = max(getattr(config, "DEEP_CRAWL_TIMEOUT_S", 15) or 15, 25)
+            lote = max(1, por_afirm * 2)  # espelha o cap de tarefas por chamada de aprofundar()
+            corpos: Dict[str, Any] = {}
             try:
-                corpos = await aprofundar(alvo_crawl, self.catalogo,
-                                          por_afirm=por_afirm,
-                                          budget_total=budget)
+                n_lotes = max(1, -(-len(alvo_crawl) // lote))
+                for i in range(0, len(alvo_crawl), lote):
+                    parcial = await aprofundar(alvo_crawl[i:i + lote], self.catalogo,
+                                               por_afirm=por_afirm,
+                                               budget_total=budget / n_lotes)
+                    corpos.update(parcial or {})
             except Exception as e:
                 telemetria.fallback("deep-crawl", f"{type(e).__name__}: {e}")
-                corpos = {}
+                # corpos preserva o que os lotes anteriores já devolveram
             faltantes = [d["url"] for d in alvo_crawl if d["url"] not in (corpos or {})]
             if faltantes:
                 telemetria.fallback("deep-crawl",
@@ -979,8 +989,9 @@ class Pipeline:
                 afirmacao=afs[ai].texto if ai is not None else None)))
         fontes.sort(key=lambda x: x[:3])
         # N×1 avalia cada relevante (sem corte por JUIZ_MAX_NOTICIAS); o teto aqui é
-        # só de EXIBIÇÃO no relatório. Piso 10 preserva o comportamento anterior
-        # quando o env está baixo (ex.: testes legados com JUIZ_MAX_NOTICIAS=2).
+        # só de EXIBIÇÃO no relatório — com PISO 10 (compat: testes legados fixam
+        # JUIZ_MAX_NOTICIAS=2 e exigem a 3ª fonte no relatório). Na prática
+        # JUIZ_MAX_NOTICIAS só eleva o teto acima de 10, nunca corta abaixo disso.
         teto_exib = max(int(getattr(config, "JUIZ_MAX_NOTICIAS", 10) or 10),
                         int(getattr(config, "MAX_EVIDENCIAS", 5) or 5) * 2, 10)
         return [f for *_, f in fontes][: teto_exib]
