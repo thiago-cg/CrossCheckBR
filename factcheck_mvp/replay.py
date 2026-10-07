@@ -5,7 +5,7 @@ Modo (`IO_MODO` no ambiente, padrão `live`; override com `definir_modo` ou
   live    rede de verdade, nada gravado
   record  rede de verdade + grava cada resposta como cassete
   replay  só lê cassetes; se faltar, levanta `ReplayMiss` (subclasse de
-          httpx.HTTPError — os try/except de rede existentes já tratam)
+          HTTPError — os try/except de rede existentes já tratam)
   (record REUSA cassete existente em vez de chamar de novo: apague o cassete
   p/ regravar. Assim record nunca gasta SerpAPI com query já gravada.)
 
@@ -19,8 +19,8 @@ ordenada) + corpo JSON canônico). Para LLM o corpo inclui modelo, mensagens,
 temperatura e max_tokens: mudar o prompt = cassete novo (miss em replay).
 
 API (todas emitem evento `http` de telemetria; `llm_post` também `llm`):
-  http_get(url, params=None, **kw) -> Resposta          (sync, ~httpx.get)
-  http_post(url, json=None, **kw) -> Resposta           (sync, ~httpx.post)
+  http_get(url, params=None, **kw) -> Resposta          (sync, ~curl_cffi get)
+  http_post(url, json=None, **kw) -> Resposta           (sync, ~curl_cffi post)
   await ahttp_get(url, max_bytes=None, headers=None, timeout=10.0)
         -> Resposta   (async, streaming com teto de bytes, SEM seguir redirect:
                        o chamador vê 3xx + headers["location"] e decide)
@@ -29,8 +29,10 @@ API (todas emitem evento `http` de telemetria; `llm_post` também `llm`):
 
 `Resposta`: status_code, headers (case-insensitive), content (bytes), text,
 url (final), json(), raise_for_status(), cache ("live"|"hit"), truncado.
-Em live as funções chamam `httpx.get/post` pelo atributo do módulo em tempo de
-chamada, então monkeypatch em `httpx.get` nos testes continua valendo.
+Em live as funções chamam `curl_cffi.requests.get/post/AsyncSession` pelo
+atributo do módulo em tempo de chamada, então monkeypatch em
+`curl_cffi.requests.get` nos testes continua valendo.
+Transporte: curl_cffi (fingerprint TLS de navegador via `impersonate`).
 """
 from __future__ import annotations
 
@@ -46,7 +48,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-import httpx
+import curl_cffi.requests
+from curl_cffi.requests.exceptions import RequestException as _CurlRequestException
 
 from . import telemetria
 
@@ -54,13 +57,19 @@ MODOS = ("live", "record", "replay")
 _SEGREDOS_QUERY = {"api_key", "apikey", "api-key", "key", "token", "access_token",
                    "secret", "password", "senha", "auth"}
 _REDIRECTS = (301, 302, 303, 307, 308)
+# Fingerprint TLS de navegador (curl_cffi): dribla bloqueios anti-bot simples.
+IMPERSONATE_PADRAO = "chrome"
 
 
-class ReplayMiss(httpx.HTTPError):
+class HTTPError(_CurlRequestException):
+    """Erro de rede/HTTP do transporte (curl_cffi)."""
+
+
+class ReplayMiss(HTTPError):
     """Modo replay sem cassete para a requisição (rode em record para gravar)."""
 
 
-class ErroStatusHTTP(httpx.HTTPError):
+class ErroStatusHTTP(HTTPError):
     """raise_for_status() de uma Resposta com status >= 400."""
 
     def __init__(self, mensagem: str, status_code: int = 0):
@@ -120,7 +129,7 @@ def dir_cassetes() -> Path:
 
 
 # --------------------------------------------------------------------------
-# Resposta simples (mesma superfície que o código chamador usa do httpx)
+# Resposta simples (mesma superfície que o código chamador usava do httpx)
 
 class _Cabecalhos(dict):
     """dict com chaves minúsculas; get/[]/in ignoram caixa."""
@@ -172,8 +181,17 @@ class Resposta:
         return self
 
 
-def _de_httpx(r: Any, url: str) -> Resposta:
-    """Converte httpx.Response (ou fake de teste) em Resposta."""
+def _args_curl(kw: Dict[str, Any]) -> Dict[str, Any]:
+    """Traduz kwargs estilo-httpx p/ curl_cffi + impersonate padrão."""
+    args = dict(kw)
+    if "follow_redirects" in args:
+        args["allow_redirects"] = args.pop("follow_redirects")
+    args.setdefault("impersonate", IMPERSONATE_PADRAO)
+    return args
+
+
+def _de_resposta(r: Any, url: str) -> Resposta:
+    """Converte curl_cffi.Response (ou fake de teste) em Resposta."""
     status = getattr(r, "status_code", 200)
     hdrs = getattr(r, "headers", None) or {}
     try:
@@ -192,6 +210,10 @@ def _de_httpx(r: Any, url: str) -> Resposta:
     final = str(getattr(r, "url", "") or url)
     return Resposta(status if isinstance(status, int) else 200, hdrs, bytes(conteudo), final,
                     cache="live", _json_pronto=pronto)
+
+
+def _de_httpx(r: Any, url: str) -> Resposta:  # alias de compat (testes antigos)
+    return _de_resposta(r, url)
 
 
 # --------------------------------------------------------------------------
@@ -290,11 +312,11 @@ def _ler(k: str, url: str, max_bytes: Optional[int] = None) -> Resposta:
 # Cota da CONTA esgotada/chave inválida (HTTP 401/403/429 da SerpAPI) ->
 # CotaSerpAPIEsgotada + fallback com pedido explícito de nova SERPAPI_KEY.
 
-class OrcamentoSerpAPIEsgotado(httpx.HTTPError):
+class OrcamentoSerpAPIEsgotado(HTTPError):
     """Chamada live à SerpAPI recusada: orçamento (arquivo ou teto do processo) esgotado."""
 
 
-class CotaSerpAPIEsgotada(httpx.HTTPError):
+class CotaSerpAPIEsgotada(HTTPError):
     """A SerpAPI recusou a chave (sem buscas na conta / chave inválida): troque SERPAPI_KEY no .env."""
 
 
@@ -499,12 +521,12 @@ def _executar(metodo: str, url_chave: str, corpo_chave: Any, ao_vivo: Callable[[
 
 
 def http_get(url: str, params: Optional[Dict[str, Any]] = None, **kw: Any) -> Resposta:
-    """GET síncrono (~httpx.get). `params` entram na chave (sem segredos)."""
+    """GET síncrono (curl_cffi). `params` entram na chave (sem segredos)."""
     def _vivo() -> Resposta:
-        args = dict(kw)
+        args = _args_curl(kw)
         if params is not None:
             args["params"] = params
-        return _de_httpx(httpx.get(url, **args), _url_com_params(url, params))
+        return _de_resposta(curl_cffi.requests.get(url, **args), _url_com_params(url, params))
     return _executar("GET", _url_com_params(url, params), None, _vivo)
 
 
@@ -536,21 +558,21 @@ def _esperar_limite_openrouter() -> None:
         time.sleep(espera)
 
 
-def http_post(url: str, json: Any = None, **kw: Any) -> Resposta:  # noqa: A002 (espelha httpx)
-    """POST síncrono (~httpx.post). Corpo JSON entra na chave (headers não)."""
+def http_post(url: str, json: Any = None, **kw: Any) -> Resposta:  # noqa: A002 (espelha requests)
+    """POST síncrono (curl_cffi). Corpo JSON entra na chave (headers não)."""
     def _vivo() -> Resposta:
-        args = dict(kw)
+        args = _args_curl(kw)
         if json is not None:
             args["json"] = json
         if "openrouter.ai" not in url:
-            return _de_httpx(httpx.post(url, **args), url)
+            return _de_resposta(curl_cffi.requests.post(url, **args), url)
         # OpenRouter: ritmo limitado e 429 tratado AQUI, para que só a resposta final
         # (nunca um 429) chegue ao cassete.
         for tentativa in range(3):
             _esperar_limite_openrouter()
-            r = httpx.post(url, **args)
+            r = curl_cffi.requests.post(url, **args)
             if r.status_code != 429 or tentativa == 2:
-                return _de_httpx(r, url)
+                return _de_resposta(r, url)
             try:
                 espera = float(r.headers.get("retry-after", "") or 0)
             except ValueError:
@@ -558,7 +580,7 @@ def http_post(url: str, json: Any = None, **kw: Any) -> Resposta:  # noqa: A002 
             espera = min(max(espera, 30.0), 120.0)
             telemetria.evento("rate_limit", alvo="openrouter", http=429, espera_s=espera)
             time.sleep(espera)
-        return _de_httpx(r, url)
+        return _de_resposta(r, url)
     return _executar("POST", url, json, _vivo)
 
 
@@ -569,7 +591,7 @@ async def ahttp_get(url: str, max_bytes: Optional[int] = None, headers: Optional
     Semântica p/ os crawlers (aprofundar/descoberta_site): devolve 3xx com
     headers["location"] (o chamador revalida o próximo hop), e o corpo lido até
     `max_bytes` (resp.truncado=True se cortou). Não levanta por status: use
-    raise_for_status(). Erros de rede levantam como no httpx.
+    raise_for_status(). Erros de rede levantam como RequestException (curl_cffi).
     """
     m = _modo_efetivo(url)
     k = chave("GET", url, None)
@@ -580,20 +602,30 @@ async def ahttp_get(url: str, max_bytes: Optional[int] = None, headers: Optional
     try:
         if _eh_serpapi(url):
             _reservar_serpapi(url)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects) as cli:
-            async with cli.stream("GET", url, headers=headers, **kw) as r:
+        args = _args_curl(kw)
+        async with curl_cffi.requests.AsyncSession(timeout=timeout,
+                                                  allow_redirects=follow_redirects,
+                                                  impersonate=args.pop("impersonate",
+                                                                       IMPERSONATE_PADRAO)) as sess:
+            async with sess.stream("GET", url, headers=headers, **args) as r:
                 buf = b""
                 truncado = False
                 if r.status_code not in _REDIRECTS:
-                    async for chunk in r.aiter_bytes(65536):
+                    async for chunk in r.aiter_content():
+                        if not chunk:
+                            continue
                         buf += chunk
                         if max_bytes is not None and len(buf) > max_bytes:
                             truncado = True
                             break
                 if max_bytes is not None and len(buf) > max_bytes:
                     buf = buf[:max_bytes]
-                resp = Resposta(r.status_code, dict(r.headers), buf, str(r.url), cache="live",
-                                truncado=truncado)
+                try:
+                    hdrs = dict(r.headers)
+                except Exception:
+                    hdrs = {}
+                resp = Resposta(r.status_code, hdrs, buf, str(getattr(r, "url", url)),
+                                cache="live", truncado=truncado)
     except Exception as e:
         _evento_http("GET", url, None, (time.perf_counter() - t0) * 1000, "live",
                      f"{type(e).__name__}: {e}"[:300])

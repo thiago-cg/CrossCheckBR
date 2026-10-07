@@ -1,6 +1,6 @@
 """Cascata de extracao de checagens: JSON-LD ClaimReview -> trafilatura -> ReaderLM-v2 -> falha explicita.
 
-Experimento (nao producao). Dependencias: httpx, pydantic>=2, beautifulsoup4 (ja vem com crawl4ai), trafilatura (opcional).
+Experimento (nao producao). Dependencias: curl_cffi, pydantic>=2, beautifulsoup4 (ja vem com crawl4ai), trafilatura (opcional).
 """
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import re
 import unicodedata
 from typing import Any, Optional
 
-import httpx
+import curl_cffi.requests as _curl
+from curl_cffi.requests.exceptions import RequestException as _HTTPError
 from pydantic import BaseModel, ValidationError
 
 BASE_URL = os.getenv("READERLM_BASE_URL", os.getenv("UNSLOTH_BASE_URL", "http://127.0.0.1:8888/v1"))
@@ -147,8 +148,8 @@ def chamar_readerlm(conteudo: str, max_tokens: int = 1024, timeout: float = 300)
         "top_k": 1,
         "enable_tools": False,        # Unsloth Studio: desliga web-search/code-exec server-side
     }
-    r = httpx.post(f"{BASE_URL}/chat/completions", json=body, timeout=timeout,
-                   headers={"Authorization": f"Bearer {API_KEY}"})
+    r = _curl.post(f"{BASE_URL}/chat/completions", json=body, timeout=timeout,
+                   headers={"Authorization": f"Bearer {API_KEY}"}, impersonate="chrome")
     r.raise_for_status()
     choice = r.json()["choices"][0]
     if choice.get("finish_reason") == "length":
@@ -201,7 +202,7 @@ def extrair_checagem(url: str, html: str, seletor_corpo: Optional[str] = None) -
         return ck                                                    # deterministico, fonte "oficial"
     try:
         ck = via_readerlm(url, html, seletor_corpo)
-    except (httpx.HTTPError, RuntimeError, ValueError, ValidationError) as e:
+    except (_HTTPError, RuntimeError, ValueError, ValidationError) as e:
         return Checagem(url=url, metodo="falha", avisos=[f"readerlm: {type(e).__name__}: {e}"], **(meta or {}))
     if meta:  # metadados do trafilatura (deterministicos) tem prioridade sobre os do LLM
         for k, v in meta.items():
@@ -215,5 +216,5 @@ def extrair_checagem(url: str, html: str, seletor_corpo: Optional[str] = None) -
 if __name__ == "__main__":
     import sys
     u = sys.argv[1]
-    h = httpx.get(u, follow_redirects=True, timeout=30, headers={"User-Agent": "Mozilla/5.0"}).text
+    h = _curl.get(u, allow_redirects=True, timeout=30, headers={"User-Agent": "Mozilla/5.0"}, impersonate="chrome").text
     print(extrair_checagem(u, h, sys.argv[2] if len(sys.argv) > 2 else None).model_dump_json(indent=2))

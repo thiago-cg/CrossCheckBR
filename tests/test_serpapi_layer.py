@@ -46,7 +46,7 @@ def test_cliente_sem_chave_desliga():
 
 
 def test_teto_diario_bloqueia_sem_rede_e_marca_motivo(monkeypatch):
-    import httpx as _hx
+    import curl_cffi.requests as _hx
     import factcheck_mvp.config as cfg
     monkeypatch.setattr(cfg, "SERPAPI_DAILY_CAP", 1)
     calls = []
@@ -68,8 +68,9 @@ def test_teto_diario_bloqueia_sem_rede_e_marca_motivo(monkeypatch):
 
 
 def test_erro_rede_marca_motivo(monkeypatch):
-    import httpx as _hx
-    monkeypatch.setattr(_hx, "get", lambda *a, **k: (_ for _ in ()).throw(_hx.ConnectError("dns")))
+    import curl_cffi.requests as _hx
+    from curl_cffi.requests.exceptions import ConnectionError as _ConnErr
+    monkeypatch.setattr(_hx, "get", lambda *a, **k: (_ for _ in ()).throw(_ConnErr("dns")))
     c = camada.SerpAPIClient(api_key="k")
     assert c.buscar({"q": "a"}) is None
     assert c.ultimo_motivo == "erro" and c.erros_rede == 1
@@ -140,7 +141,7 @@ def test_queries_nunca_passam_de_32_palavras():
 
 
 def test_buscar_ex_motivo_por_chamada_e_cache(monkeypatch):
-    import httpx as _hx
+    import curl_cffi.requests as _hx
 
     class R:
         def raise_for_status(self):
@@ -198,7 +199,7 @@ def test_construir_queries_agente_levanta():
 
 
 def test_vazio_nao_cola_no_cache(monkeypatch):
-    import httpx as _hx
+    import curl_cffi.requests as _hx
     calls = []
 
     class FakeResp:
@@ -289,7 +290,7 @@ def test_normaliza_top_story_sem_snippet():
 
 
 def test_cliente_respeita_engine_por_query_e_result_key(monkeypatch):
-    import httpx as _hx
+    import curl_cffi.requests as _hx
     vistos = []
 
     class FakeResp:
@@ -304,7 +305,7 @@ def test_cliente_respeita_engine_por_query_e_result_key(monkeypatch):
 
     cargas = [{}, {"organic_results": [{"link": "https://x.com/a", "title": "T"}]}]
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, **kw):
         vistos.append(dict(params or {}))
         return FakeResp(cargas[min(len(vistos) - 1, 1)])
 

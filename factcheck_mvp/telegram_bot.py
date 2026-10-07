@@ -175,7 +175,7 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> str | None:
     Teto de 1,5 MB, timeout curto, e a URL final (após redirects) precisa
     continuar no catálogo. Fora disso: None (pipeline registra limitação).
     """
-    import httpx
+    import curl_cffi.requests as _curl
 
     try:
         from .catalogo import _dominio as _dom
@@ -184,7 +184,8 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> str | None:
     if not catalogo.por_dominio(url):
         return None
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as cli:
+        with _curl.Session(timeout=timeout, allow_redirects=True,
+                           impersonate="chrome") as cli:
             r = cli.get(url, headers={"User-Agent": "factcheck-mvp/0.1"})
             final = str(r.url)
             if not catalogo.por_dominio(final):

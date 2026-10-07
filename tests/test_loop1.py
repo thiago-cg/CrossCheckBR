@@ -42,7 +42,7 @@ def test_openrouter_cap_e_sem_chave(monkeypatch):
 
 
 def test_openrouter_fallback(monkeypatch):
-    import httpx as _hx
+    from factcheck_mvp.replay import HTTPError as _HxErr
     monkeypatch.setattr(oo.config, "OPENROUTER_API_KEY", "k")
     monkeypatch.setattr(oo.config, "OPENROUTER_MODEL", "prim")
     monkeypatch.setattr(oo.config, "OPENROUTER_FALLBACK_MODEL", "fb")
@@ -57,7 +57,7 @@ def test_openrouter_fallback(monkeypatch):
     def _fake(modelo, messages, max_tokens, timeout_s):
         calls.append(modelo)
         if modelo == "prim":
-            raise _hx.HTTPError("500")
+            raise _HxErr("500")
         return "linhas ok"
     monkeypatch.setattr(oo, "_post", _fake)
     txt, modelo = oo.chat([{"role": "user", "content": "x"}])

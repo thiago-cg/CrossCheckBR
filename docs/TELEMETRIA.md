@@ -104,23 +104,24 @@ Modo: env `IO_MODO=live|record|replay` (padrão `live`), `replay.definir_modo(m)
 |---|---|
 | `live` | rede de verdade, nada gravado |
 | `record` | se já há cassete, **reusa** (não chama); senão chama e grava |
-| `replay` | só cassete; faltou → `ReplayMiss` (subclasse de `httpx.HTTPError`) + evento `http` com `cache=miss` |
+| `replay` | só cassete; faltou → `ReplayMiss` (subclasse de `replay.HTTPError`/curl_cffi) + evento `http` com `cache=miss` |
 
 Wrappers (todos emitem `http`; `llm_post` também `llm`):
 
 ```python
-replay.http_get(url, params=None, **kw) -> Resposta            # ~httpx.get
-replay.http_post(url, json=None, **kw) -> Resposta             # ~httpx.post
+replay.http_get(url, params=None, **kw) -> Resposta            # ~curl_cffi get
+replay.http_post(url, json=None, **kw) -> Resposta             # ~curl_cffi post
 await replay.ahttp_get(url, max_bytes=None, headers=None, timeout=10.0, follow_redirects=False)
 replay.llm_post(url, payload, headers=None, timeout=60, motor="", finalidade=None, extrair=None)
 ```
 
 `Resposta`: `status_code`, `headers` (case-insensitive), `content` (bytes), `text`, `url` (final),
-`json()`, `raise_for_status()` (levanta `ErroStatusHTTP`, subclasse de `httpx.HTTPError`), `cache`,
+`json()`, `raise_for_status()` (levanta `ErroStatusHTTP`, subclasse de `replay.HTTPError`), `cache`,
 `truncado`. `ahttp_get` **não segue redirect**: devolve o 3xx com `headers["location"]` para o chamador
 revalidar o próximo hop (semântica anti-SSRF do aprofundar/descoberta), e lê o corpo em streaming até
-`max_bytes`. Em live, os wrappers chamam `httpx.get/post/AsyncClient` pelo atributo do módulo, então
-`monkeypatch.setattr(httpx, "get", ...)` nos testes continua valendo.
+`max_bytes`. Em live, os wrappers chamam `curl_cffi.requests.get/post/AsyncSession` pelo atributo
+do módulo (com `impersonate="chrome"` por padrão), então
+`monkeypatch.setattr(curl_cffi.requests, "get", ...)` nos testes continua valendo.
 
 Cassetes: `eval/cassettes/<sha256>.json` (`CASSETES_DIR`). Chave = sha256 de
 `{método, URL canônica (sem api_key/key/token…, query ordenada, sem fragmento), corpo JSON}`. Para LLM
