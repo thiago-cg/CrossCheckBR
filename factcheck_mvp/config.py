@@ -43,7 +43,8 @@ OPENROUTER_MAX_TOKENS = _int("OPENROUTER_MAX_TOKENS", 600)
 # Uso restrito à classificação de schema (descoberta_site); o julgamento de
 # notícias é do LLM-juiz (juiz_llm.py).
 JEV_TIMEOUT_S = _int("JEV_TIMEOUT_S", 12)
-# LLM-juiz: 1 resumo por notícia relevante (teto) + 1 juiz-termômetro em lote.
+# Juiz N×1: avalia cada relevante 1:1 (manchete+corpo) sem corte prévio.
+# JUIZ_MAX_NOTICIAS é só teto de EXIBIÇÃO em `pipeline._fontes`, nunca de avaliação.
 JUIZ_MAX_NOTICIAS = _int("JUIZ_MAX_NOTICIAS", 10)
 # Juiz de 4 classes (fase 2): itens por chamada, tamanho do trecho, tokens de saída
 # (o modelo local é de raciocínio: reserve folga) e limiar da citação verificada.
@@ -51,6 +52,8 @@ JUIZ_LOTE = _int("JUIZ_LOTE", 5)
 JUIZ_TRECHO_MAX = _int("JUIZ_TRECHO_MAX", 2500)
 JUIZ_MAX_TOKENS = _int("JUIZ_MAX_TOKENS", 4000)
 JUIZ_CITACAO_MIN = _float("JUIZ_CITACAO_MIN", 0.9)
+# Teto total do julgamento 1:1 (N avaliações por consulta): timeout/cap preserva
+# o parcial já avaliado (ver `pipeline._julgar`); nunca descarta tudo.
 JUIZ_TIMEOUT_TOTAL_S = _int("JUIZ_TIMEOUT_TOTAL_S", 600)
 # Lotes do juiz em paralelo (o Studio local serve 1 slot bem; OpenRouter aguenta mais)
 JUIZ_CONCORRENCIA = _int("JUIZ_CONCORRENCIA", 1)
@@ -98,13 +101,20 @@ AGENTE_TIMEOUT_S = _int("AGENTE_TIMEOUT_S", 60)
 AGENTE_MAX_POR_AFIRMACAO = _int("AGENTE_MAX_POR_AFIRMACAO", 12)
 # Hosts extras de agências de checagem além das derivadas do catálogo (vírgula).
 SERP_SITES_EXTRAS = _get("SERP_SITES_EXTRAS", "")
-DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", AGENTE_MAX_POR_AFIRMACAO)
+# Teto por afirmação p/ crawl+avaliação (N×1: cada relevante). Literal = 12
+# (= `AGENTE_MAX_POR_AFIRMACAO`); literal (não alias no import) p/ não congelar
+# quando o env muda em runtime — o pipeline lê `AGENTE_MAX_POR_AFIRMACAO` direto.
+DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 12)
 # Teto total de páginas lidas por consulta (todas as afirmações) antes do juiz.
-# Crawl-primeiro: cobre todas as relevantes (3 afirmações x teto por afirmação).
-DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", MAX_AFIRMACOES * AGENTE_MAX_POR_AFIRMACAO)
+# Crawl-primeiro N×1: cobre cada relevante — 3 afirmações × teto por afirmação = 36.
+# Literais (não `MAX_AFIRMACOES * AGENTE_MAX_POR_AFIRMACAO` no import): o pipeline
+# resolve `total = 3 × por_afirm` em runtime p/ respeitar env/monkeypatch.
+DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", 36)
 # Confiabilidade (confiabilidade.py): fora do catálogo, "site muito acessado" = entre os
 # N domínios mais acessados da lista Tranco (data/trafego_tranco.csv.gz guarda até 200 mil).
 TRAFEGO_RANK_MAX = _int("TRAFEGO_RANK_MAX", 200_000)
+# Teto do deep crawl por consulta (N×1): timeout/cap preserva o parcial já lido
+# (ver `pipeline._ler` + `aprofundar.aprofundar`); nunca descarta tudo.
 DEEP_CRAWL_TIMEOUT_S = _int("DEEP_CRAWL_TIMEOUT_S", 15)
 DEEP_CRAWL_MAX_BYTES = _int("DEEP_CRAWL_MAX_BYTES", 5_000_000)
 API_RATE_LIMIT_PER_MIN = _int("API_RATE_LIMIT_PER_MIN", 30)

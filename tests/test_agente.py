@@ -420,3 +420,80 @@ def test_estado_nao_vaza_entre_execucoes_concorrentes(amb, monkeypatch):
         det = _etapa(rel, "descoberta-agente").detalhe
         assert det.startswith("Agente onda 1: 2/2 busca(s)"), det
         assert rel.fontes and all(chave in f.url for f in rel.fontes)
+
+
+def test_orcamento_parcial_preservado(amb, monkeypatch):
+    """N×1: 20 relevantes com DEEP_CRAWL_TIMEOUT_S estourado no meio.
+
+    Orçamento realinhado (por_afirm = AGENTE_MAX_POR_AFIRMACAO, total = 3×):
+    as 20 são tentadas (min(20, teto)); o crawl devolve só as 10 primeiras
+    (restantes sem resposta = timeout/cap) e o juiz tem teto curto com avaliação
+    lenta — as avaliadas até ali permanecem em `julg` (visíveis em fontes
+    REFUTA), e o trace tem fonte `avaliador` por peça + fallback
+    deep-crawl/avaliador com `limitacoes` de parcial preservado."""
+    import time as _time
+
+    from factcheck_mvp import avaliador as _aval
+
+    monkeypatch.setattr(config, "AGENTE_MAX_BUSCAS", 40)
+    monkeypatch.setattr(config, "AGENTE_MAX_ONDAS_EXTRAS", 0)
+    monkeypatch.setattr(config, "AGENTE_MAX_POR_AFIRMACAO", 20)
+    monkeypatch.setattr(config, "DEEP_CRAWL_TIMEOUT_S", 5)
+    monkeypatch.setattr(config, "JUIZ_TIMEOUT_TOTAL_S", 0.15)
+    monkeypatch.setattr(config, "DISCOVERY_MAX_SITES", 0)
+    paginas = [_pag(amb, f"https://ex{i:02d}.com/noticia/{i}", f"Ibuprofeno e dengue {i}",
+                    "É falso que o ibuprofeno cura dengue; o remédio aumenta o risco.")
+               for i in range(20)]
+
+    class DualSerp:
+        """2 buscas da onda 1 devolvem metades distintas (orgânico 8 + top stories):
+        11 + 9 = 20 URLs únicas (o FakeSerp só cobre organic_results, teto 8/busca)."""
+        ativo = True
+
+        def buscar(self, params):
+            q = params.get("q", "")
+            if "site:" in q:
+                return {"organic_results": paginas[11:19], "top_stories": paginas[19:20]}
+            return {"organic_results": paginas[0:8], "top_stories": paginas[8:11]}
+    serp = DualSerp()
+
+    async def parcial(cands, catalogo, **kw):
+        parcial.cands_n = len(cands)
+        parcial.por_afirm = kw.get("por_afirm")
+        out = {}
+        for d in cands[:10]:  # timeout no meio: só as 10 primeiras responderam
+            c = amb["corpos"].get(d["url"])
+            out[d["url"]] = CorpoLido(url=d["url"], final_url=d["url"], trecho_corpo=c[:3000],
+                                      corpo_lido=True, texto_completo=c, metodo="fake")
+        return out
+    monkeypatch.setattr(pl, "aprofundar", parcial)
+
+    def avaliador_lento(nucleo, peca):
+        if peca.get("corpo") or peca.get("trecho_juiz") or peca.get("texto_completo"):
+            _time.sleep(0.02)  # N×1 lento: o teto total estoura no meio
+            return {"posicao": "REFUTA", "citacao": "É falso que o ibuprofeno cura dengue",
+                    "citacao_score": 1.0, "citacao_verificada": True,
+                    "pagina_diz": "A página diz que é falso.", "motor": "fake-avaliador",
+                    "erro": None, "corpo_lido": True}
+        return {"posicao": None, "citacao": "", "citacao_score": None, "citacao_verificada": None,
+                "pagina_diz": "", "motor": "fallback-sem-corpo", "erro": "sem corpo lido",
+                "corpo_lido": False}
+    monkeypatch.setattr(_aval, "avaliar", avaliador_lento)
+
+    rel = asyncio.run(_rodar("Ibuprofeno cura dengue em 3 dias", serp))
+    # orçamento: min(20, teto) tentado com por_afirm do agente
+    assert parcial.cands_n == 20, parcial.cands_n
+    assert parcial.por_afirm == 20, parcial.por_afirm
+    # parcial preservado: alguma das avaliadas até o teto permanece (não descartada)
+    refutas = [f for f in rel.fontes if f.postura == "REFUTA"]
+    assert len(refutas) >= 1, [(f.url, f.postura) for f in rel.fontes]
+    # trace: fonte avaliador por peça com os campos do contrato
+    aval = [d for t, d in amb["eventos"] if t == "fonte" and d.get("estagio") == "avaliador"]
+    assert len(aval) >= 5, len(aval)
+    assert all({"posicao", "n_chars_trecho", "corpo_lido", "metodo"} <= set(d) for d in aval), aval[:1]
+    # fallback deep-crawl/avaliador + limitação de parcial preservado
+    fbs = [d for t, d in amb["eventos"] if t == "fallback"]
+    assert any(d.get("onde") == "deep-crawl" for d in fbs), [d.get("onde") for d in fbs]
+    assert any(d.get("onde") in ("avaliador", "juiz") for d in fbs), [d.get("onde") for d in fbs]
+    assert any("parcial" in (l or "").lower() or "teto" in (l or "").lower()
+               for l in rel.limitacoes), rel.limitacoes

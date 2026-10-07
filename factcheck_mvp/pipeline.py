@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from dataclasses import asdict
 import re
 import unicodedata
@@ -368,6 +367,10 @@ class Pipeline:
                 _n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
                 _motor_j = next((r.get("motor") for r in julg.values() if r.get("classe")),
                                 juiz_llm.MOTOR_FALLBACK)
+                etapa("avaliador", "ok" if juiz_ok and not _n_sem else ("parcial" if juiz_ok else "falha"),
+                      f"{len(julg) - _n_sem}/{len(julg)} avaliação(ões) 1:1 (manchete+corpo, base).",
+                      [pecas[pi]["url"] for (pi, _), r in julg.items()
+                       if r.get("classe") in juiz_llm.COM_POSTURA][:5])
                 etapa("juiz", "ok" if juiz_ok and not _n_sem else ("parcial" if juiz_ok else "falha"),
                       f"{len(julg)} julgamento(s) via {_motor_j}: {_n['SUSTENTA']} sustentam, "
                       f"{_n['REFUTA']} refutam, {_n['RELATA_SEM_ENDOSSO']} só relatam, "
@@ -426,10 +429,13 @@ class Pipeline:
             n_lidas, n_alvo = await self._ler(afs, pecas, avisar)
             selecionados = self._selecionar(afs, pecas)
             if n_alvo:
-                etapa("deep-crawl", "ok" if n_lidas else "parcial",
+                etapa("deep-crawl", "ok" if n_lidas == n_alvo else "parcial",
                       f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
                       f"{sum(1 for p in pecas if p.get('origem_veredito') == 'pagina')} com ClaimReview.",
                       [p["url"] for p in pecas if p.get("corpo")][:5])
+                if n_lidas < n_alvo:
+                    limitacoes.append(f"Deep crawl parcial: {n_lidas}/{n_alvo} página(s) com corpo lido "
+                                      "(teto de tempo/cap; parcial preservado).")
 
         # 7. Clusters de independência (agência / grupo / corpo quase idêntico)
         grupos = corroboracao.agrupar(pecas)
@@ -455,6 +461,16 @@ class Pipeline:
                 n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
                 n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
                 motor_j = next((r.get("motor") for r in julg.values() if r.get("classe")), juiz_llm.MOTOR_FALLBACK)
+                etapa("avaliador", "ok" if juiz_ok and not n_sem else ("parcial" if juiz_ok else "falha"),
+                      f"{len(julg) - n_sem}/{len(julg)} avaliação(ões) 1:1 (manchete+corpo): "
+                      f"{n['SUSTENTA']} sustentam, {n['REFUTA']} refutam, "
+                      f"{n['RELATA_SEM_ENDOSSO']} só relatam, {n['NAO_TRATA']} fora do tema; "
+                      f"{n_sem} sem avaliar.",
+                      [pecas[pi]["url"] for (pi, _), r in julg.items()
+                       if r.get("classe") in juiz_llm.COM_POSTURA][:5])
+                if n_sem and juiz_ok:
+                    limitacoes.append(f"Avaliação parcial: {len(julg) - n_sem}/{len(julg)} peça(s) avaliada(s) "
+                                      "(teto de tempo/cap; parcial preservado).")
                 etapa("juiz", "ok" if juiz_ok and not n_sem else ("parcial" if juiz_ok else "falha"),
                       f"{len(julg)} julgamento(s) via {motor_j}: {n['SUSTENTA']} sustentam, {n['REFUTA']} refutam, "
                       f"{n['RELATA_SEM_ENDOSSO']} só relatam, {n['NAO_TRATA']} fora do tema "
@@ -546,11 +562,14 @@ class Pipeline:
 
     async def _ler(self, afs: List[Afirmacao], pecas: List[Dict[str, Any]],
                      avisar) -> Tuple[int, int]:
-        """Crawl-primeiro: deep crawl de TODAS as peças ainda sem corpo (até
-        DEEP_CRAWL_TOTAL), ANTES de qualquer seleção lexical. Preenche
-        corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não lidas
-        seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
-        Marca `_generica` nas homepages/seções reveladas genéricas após a leitura.
+        """Crawl-primeiro N×1: deep crawl de `min(relevantes, teto)` peças, ANTES de
+        qualquer seleção lexical. `por_afirm = AGENTE_MAX_POR_AFIRMACAO` e
+        `teto = DEEP_CRAWL_TOTAL (default 3×por_afirm)` resolvidos em runtime.
+        Preenche corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não
+        lidas seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
+        Timeout/cap (URLs sem resposta, ausentes do dict): parcial preservado +
+        `fallback deep-crawl`. Marca `_generica` nas homepages/seções reveladas
+        genéricas após a leitura.
         -> (n lidas, n alvo)."""
         alvo_crawl: List[Dict[str, Any]] = []
         vistos = set()
@@ -560,17 +579,25 @@ class Pipeline:
                 ai0 = next((ai for ai in sorted(p.get("afs") or {0}) if ai < len(afs)), None)
                 alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""),
                                    "_afirmacao": afs[ai0].alvo() if ai0 is not None and afs else ""})
-        alvo_crawl = alvo_crawl[: max(1, config.DEEP_CRAWL_TOTAL or 36)]
+        por_afirm = max(1, int(getattr(config, "AGENTE_MAX_POR_AFIRMACAO", 12) or 12))
+        teto_total = max(1, int(getattr(config, "DEEP_CRAWL_TOTAL", 0) or 3 * por_afirm))
+        alvo_crawl = alvo_crawl[: teto_total]
         n_lidas = 0
         if alvo_crawl:
             await avisar("Lendo o corpo das fontes…")
+            budget = max(getattr(config, "DEEP_CRAWL_TIMEOUT_S", 15) or 15, 25)
             try:
                 corpos = await aprofundar(alvo_crawl, self.catalogo,
-                                          por_afirm=math.ceil(len(alvo_crawl) / 2),
-                                          budget_total=max(config.DEEP_CRAWL_TIMEOUT_S or 15, 25))
+                                          por_afirm=por_afirm,
+                                          budget_total=budget)
             except Exception as e:
                 telemetria.fallback("deep-crawl", f"{type(e).__name__}: {e}")
                 corpos = {}
+            faltantes = [d["url"] for d in alvo_crawl if d["url"] not in (corpos or {})]
+            if faltantes:
+                telemetria.fallback("deep-crawl",
+                                    f"teto {budget:.0f}s/cap: {len(faltantes)}/{len(alvo_crawl)} "
+                                    "sem resposta, parcial preservado")
             por_url = {p["url"]: p for p in pecas}
             for url, c in corpos.items():
                 p = por_url.get(url)
@@ -648,7 +675,11 @@ class Pipeline:
         "citacao_verificada", "pagina_diz", "motor", "erro", "rebaixado", ...}`.
         `rebaixado` deriva da citação (`citacao_verificada is False`, como no juiz
         em lote). `_overlap` segue só como ordenação em `_selecionar`, nunca como
-        gate. Ondas extras e fase base reutilizam este caminho."""
+        gate. Timeout/cap (teto `JUIZ_TIMEOUT_TOTAL_S`): o parcial já avaliado é
+        preservado (nunca descartado) + `fallback juiz/avaliador`. Por peça emite
+        `fonte` com `estagio="avaliador"` (posicao, n_chars_trecho, corpo_lido,
+        metodo) e depois `estagio="juiz"` (agregação). Ondas extras e fase base
+        reutilizam este caminho."""
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
@@ -663,32 +694,59 @@ class Pipeline:
                 corpo = p.get("trecho_juiz") or p.get("corpo") or p.get("trecho") or p.get("snippet") or ""
                 trechos[(pi, ai)] = juiz_llm.montar_trecho(p.get("titulo") or "", corpo, alvo)
 
-        def _rodar() -> Dict[Tuple[int, int], Dict[str, Any]]:
-            saida: Dict[Tuple[int, int], Dict[str, Any]] = {}
-            for ai in sorted(por_af):
-                alvo = afs[ai].alvo()
-                for pi in por_af[ai]:
-                    a = avaliador.avaliar(alvo, pecas[pi])
-                    saida[(pi, ai)] = {
-                        "classe": a.get("posicao"), "citacao": a.get("citacao") or "",
-                        "citacao_score": a.get("citacao_score"),
-                        "citacao_verificada": a.get("citacao_verificada"),
-                        "pagina_diz": a.get("pagina_diz") or "",
-                        "motor": a.get("motor") or "", "erro": a.get("erro"),
-                        "rebaixado": (a.get("rebaixado") if "rebaixado" in a
-                                      else a.get("citacao_verificada") is False),
-                        "classe_original": a.get("classe_original"),
-                    }
-            return saida
+        def _normalizar(a: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "classe": a.get("posicao"), "citacao": a.get("citacao") or "",
+                "citacao_score": a.get("citacao_score"),
+                "citacao_verificada": a.get("citacao_verificada"),
+                "pagina_diz": a.get("pagina_diz") or "",
+                "motor": a.get("motor") or "", "erro": a.get("erro"),
+                "rebaixado": (a.get("rebaixado") if "rebaixado" in a
+                              else a.get("citacao_verificada") is False),
+                "classe_original": a.get("classe_original"),
+            }
+
+        def _evento_avaliador(pi: int, ai: int, a: Dict[str, Any]) -> None:
+            p = pecas[pi]
+            pos = a.get("posicao")
+            if pos is None:
+                dec_a, mot_a = "nao-julgada", f"sem avaliador: {a.get('erro')}"
+            elif pos == "NAO_TRATA":
+                dec_a, mot_a = "descartada", "avaliador: NAO_TRATA (fora do tema)"
+            else:
+                dec_a, mot_a = "mantida", f"avaliador: {pos}"
+            telemetria.evento("fonte", url=p["url"], estagio="avaliador", decisao=dec_a, motivo=mot_a,
+                              afirmacao=ai, posicao=pos, classe=pos,
+                              n_chars_trecho=len(trechos.get((pi, ai)) or ""),
+                              corpo_lido=bool(a.get("corpo_lido")), metodo=a.get("motor") or "")
 
         resultados: Dict[Tuple[int, int], Dict[str, Any]] = {}
         if usar_llm:
+            budget = config.JUIZ_TIMEOUT_TOTAL_S or 600
+
+            async def _todos() -> None:
+                for ai in sorted(por_af):
+                    alvo = afs[ai].alvo()
+                    for pi in por_af[ai]:
+                        try:
+                            a = await asyncio.to_thread(avaliador.avaliar, alvo, pecas[pi])
+                        except Exception as e:  # 1 par falhou: registra e segue (parcial preservado)
+                            telemetria.fallback("avaliador", f"{type(e).__name__}: {e}", afirmacao=ai)
+                            a = {"posicao": None, "citacao": "", "citacao_score": None,
+                                 "citacao_verificada": None, "pagina_diz": "",
+                                 "motor": "fallback-avaliador-erro",
+                                 "erro": f"{type(e).__name__}: {e}"[:300], "corpo_lido": False}
+                        resultados[(pi, ai)] = _normalizar(a)
+                        _evento_avaliador(pi, ai, a)
+
             try:
-                resultados = await asyncio.wait_for(asyncio.to_thread(_rodar),
-                                                    timeout=config.JUIZ_TIMEOUT_TOTAL_S or 600)
+                await asyncio.wait_for(_todos(), timeout=budget)
             except asyncio.TimeoutError:
-                telemetria.fallback("juiz", f"teto {config.JUIZ_TIMEOUT_TOTAL_S}s: julgamento descartado")
-                resultados = {}
+                telemetria.fallback("juiz", f"teto {budget}s: parcial preservado "
+                                            f"({len(resultados)}/{len(selecionados)})")
+                telemetria.fallback("avaliador", f"teto {budget}s: "
+                                                 f"{len(selecionados) - len(resultados)} sem avaliar, "
+                                                 "parcial preservado")
         else:
             telemetria.fallback("juiz", "usar_llm=False: sem julgamento de conteúdo")
         julg: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -920,7 +978,12 @@ class Pipeline:
                 confiabilidade=p.get("confiabilidade"),
                 afirmacao=afs[ai].texto if ai is not None else None)))
         fontes.sort(key=lambda x: x[:3])
-        return [f for *_, f in fontes][: max(10, config.MAX_EVIDENCIAS * 2)]
+        # N×1 avalia cada relevante (sem corte por JUIZ_MAX_NOTICIAS); o teto aqui é
+        # só de EXIBIÇÃO no relatório. Piso 10 preserva o comportamento anterior
+        # quando o env está baixo (ex.: testes legados com JUIZ_MAX_NOTICIAS=2).
+        teto_exib = max(int(getattr(config, "JUIZ_MAX_NOTICIAS", 10) or 10),
+                        int(getattr(config, "MAX_EVIDENCIAS", 5) or 5) * 2, 10)
+        return [f for *_, f in fontes][: teto_exib]
 
     @staticmethod
     def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes) -> RelatorioChecagem:

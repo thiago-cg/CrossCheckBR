@@ -24,7 +24,10 @@ Fluxo (orquestrado por `pipeline.Pipeline`; este módulo não chama extração n
 Estado POR REQUISIÇÃO (`EstadoBusca`, criado a cada execução do pipeline): contador de
 buscas próprio (nada de delta de contador compartilhado do cliente), dedupe por URL
 canônica que ACUMULA afirmações (url → {afirmações}), corte por afirmação (round-robin
-preservado), resultado parcial preservado em timeout.
+preservado), resultado parcial preservado em timeout. O crítico conta AVALIAÇÕES
+(1 por par peça×afirmação no corte) além das buscas: onda extra para quando o
+orçamento de avaliações (`max_por_afirmacao` por afirmação) já foi atingido, mesmo
+com buscas restantes — o N×1 multiplica o custo por busca.
 
 Telemetria: evento `etapa` (nome `agente-onda`) por busca de cada onda — afirmação, query,
 n resultados, n novos — e evento `agente` por decisão do crítico (parar|nova_onda, motivo,
@@ -91,6 +94,7 @@ class EstadoBusca:
     timeout_s: float = 60.0
     buscas: int = 0            # buscas emitidas por esta requisição (inclui cache do cliente)
     buscas_cache: int = 0      # das quais vieram do cache em memória do cliente
+    avaliacoes: int = 0        # peças no corte p/ crawl+avaliador 1:1 (atualizado por _executar_onda)
     ondas: int = 0
     parar_motivo: str = ""     # cap | timeout (nada mais é lançado)
     queries: Dict[int, List[str]] = field(default_factory=dict)
@@ -185,14 +189,16 @@ class EstadoBusca:
 
     def traco(self) -> Dict[str, Any]:
         return {"buscas": self.buscas, "buscas_cache": self.buscas_cache, "teto": self.teto,
-                "ondas": self.ondas, "unicos": len(self.docs), "parar_motivo": self.parar_motivo,
+                "ondas": self.ondas, "unicos": len(self.docs), "avaliacoes": self.avaliacoes,
+                "parar_motivo": self.parar_motivo,
                 "por_afirmacao": {ai: len(v) for ai, v in sorted(self.ordem.items())},
                 "queries": {ai: list(v) for ai, v in sorted(self.queries.items())},
                 "extras": dict(self.extras), "decisoes": list(self.decisoes),
                 "criticas": list(self.criticas)}
 
     def resumo(self) -> str:
-        return (f"{self.buscas}/{self.teto} busca(s) em {self.ondas} onda(s), {len(self.docs)} URL(s) única(s)"
+        return (f"{self.buscas}/{self.teto} busca(s) em {self.ondas} onda(s), {len(self.docs)} URL(s) única(s), "
+                f"{self.avaliacoes} no corte p/ avaliar"
                 + (f" [{self.parar_motivo}]" if self.parar_motivo else ""))
 
 
@@ -215,7 +221,9 @@ async def _executar_onda(estado: EstadoBusca, cliente: Any,
                          plano: List[Tuple[Dict[str, Any], List[int], str]], onda: int,
                          limite: Optional[int] = None) -> int:
     """Executa um plano [(query, [afirmações], motivo)] na ordem dada (a ordem define quem
-    recebe orçamento). Buscas em paralelo; timeout preserva o que já voltou. -> n buscas lançadas."""
+    recebe orçamento). Buscas em paralelo; timeout/cap preserva o que já voltou
+    (buscas E avaliações pendentes: o corte p/ o avaliador 1:1 é recalculado ao
+    final). -> n buscas lançadas."""
     lancados: List[Tuple[Dict[str, Any], List[int], str, Optional[asyncio.Task]]] = []
     for q, ais, motivo in plano:
         if q["q"] in estado.resultados_q or any(q["q"] == l[0]["q"] for l in lancados):
@@ -268,6 +276,10 @@ async def _executar_onda(estado: EstadoBusca, cliente: Any,
                               detalhe=f"onda {onda} af{ai} ({motivo}): {novos} nova(s) de {n} resultado(s) "
                                       f"[{res.motivo}{', reuso' if reuso else ''}]")
     estado.ondas = max(estado.ondas, onda)
+    try:  # peças no corte p/ o avaliador 1:1 (o crítico usa além das buscas)
+        estado.avaliacoes = len(estado.pecas())
+    except Exception:
+        pass
     return len(tarefas)
 
 
@@ -362,8 +374,15 @@ def resumir_julgamento(ai: int, itens: Iterable[Dict[str, Any]]) -> ResumoJulgam
 
 
 def criticar(estado: EstadoBusca, resumo: ResumoJulgamento, juiz_disponivel: bool = True) -> Dict[str, Any]:
-    """Decide, por afirmação, entre parar e gastar mais uma onda. Emite o evento `agente`."""
+    """Decide, por afirmação, entre parar e gastar mais uma onda. Emite o evento `agente`.
+
+    Conta AVALIAÇÕES além das buscas (N×1: cada busca rende várias peças 1:1):
+    com o corte de avaliações por afirmação (`max_por_afirmacao`) ou o total no
+    corte (`avaliacoes`) já atingido, para mesmo havendo buscas restantes."""
     ai = resumo.afirmacao
+    n = resumo.n
+    julgadas = sum(v for k, v in n.items() if k != "sem_juiz")
+    teto_total_aval = estado.max_por_afirmacao * max(1, len(estado.ordem) or 1)
     if resumo.veredito_aplicavel:
         acao, motivo = "parar", "veredito de checagem aplicável"
     elif resumo.clusters_postura >= 2:
@@ -376,10 +395,14 @@ def criticar(estado: EstadoBusca, resumo: ResumoJulgamento, juiz_disponivel: boo
         acao, motivo = "parar", f"busca interrompida ({estado.parar_motivo})"
     elif estado.restante() <= 0:
         acao, motivo = "parar", f"teto de {estado.teto} buscas da requisição"
+    elif julgadas >= estado.max_por_afirmacao:
+        acao, motivo = "parar", (f"orçamento de avaliações por afirmação "
+                                 f"({julgadas}/{estado.max_por_afirmacao})")
+    elif estado.avaliacoes >= teto_total_aval and julgadas > 0:
+        acao, motivo = "parar", (f"orçamento de avaliações ({estado.avaliacoes}/"
+                                  f"{teto_total_aval} no corte)")
     else:
         acao = "nova_onda"
-        n = resumo.n
-        julgadas = sum(v for k, v in n.items() if k != "sem_juiz")
         if resumo.clusters_postura == 1:
             motivo = "só 1 cluster com postura (evidência suficiente pede 2)"
         elif not julgadas:
@@ -389,7 +412,8 @@ def criticar(estado: EstadoBusca, resumo: ResumoJulgamento, juiz_disponivel: boo
         else:
             motivo = "0 posturas: fontes fora do tema"
     d = {"afirmacao": ai, "decisao": acao, "motivo": motivo, "contagens": resumo.contagens(),
-         "extras_feitas": estado.extras.get(ai, 0), "buscas_restantes": estado.restante()}
+         "extras_feitas": estado.extras.get(ai, 0), "buscas_restantes": estado.restante(),
+         "avaliacoes": julgadas, "avaliacoes_no_corte": estado.avaliacoes}
     estado.criticas.append(d)
     estado.decisoes.append(f"crítico af{ai}: {acao} ({motivo})")
     telemetria.evento("agente", **d)

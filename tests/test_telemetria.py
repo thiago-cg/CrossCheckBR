@@ -144,3 +144,20 @@ def test_run_context_manager_registra_erro(tdir):
             raise RuntimeError("falhou")
     res = json.loads((tdir / rid / "resultado.json").read_text())
     assert "falhou" in res["erro"]
+
+
+def test_trace_avaliador_por_peca_tem_campos(tdir):
+    """Contrato do N×1: fonte `avaliador` por peça carrega posicao/n_chars_trecho/
+    corpo_lido/metodo; timeout/cap vira fallback com parcial preservado."""
+    with tel.run({"entrada": "Ibuprofeno cura dengue"}) as rid:
+        tel.evento("fonte", url="https://ex00.com/noticia/0", estagio="avaliador", decisao="mantida",
+                   motivo="avaliador: REFUTA", afirmacao=0, posicao="REFUTA", classe="REFUTA",
+                   n_chars_trecho=1234, corpo_lido=True, metodo="llm-juiz:fake")
+        tel.fallback("deep-crawl", "teto 25s/cap: 10/20 sem resposta, parcial preservado")
+        tel.fallback("avaliador", "teto 600s: 2 sem avaliar, parcial preservado")
+    ev = _eventos(tdir, rid)
+    fontes = [e for e in ev if e["tipo"] == "fonte" and e["dados"].get("estagio") == "avaliador"]
+    assert len(fontes) == 1
+    assert {"posicao", "n_chars_trecho", "corpo_lido", "metodo"} <= set(fontes[0]["dados"])
+    ondes = {e["dados"].get("onde") for e in ev if e["tipo"] == "fallback"}
+    assert {"deep-crawl", "avaliador"} <= ondes
