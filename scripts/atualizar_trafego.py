@@ -32,13 +32,17 @@ DOWNLOAD = "https://tranco-list.eu/download_daily/{lista}"
 
 
 def _linhas_da_rede(lista: str | None) -> tuple[list[list[str]], str, str]:
-    import httpx
+    import curl_cffi.requests as _curl
 
     criada = ""
     if not lista:
-        meta = httpx.get(API, timeout=30).raise_for_status().json()
+        _m = _curl.get(API, timeout=30, impersonate="chrome")
+        _m.raise_for_status()
+        meta = _m.json()
         lista, criada = meta["list_id"], meta.get("created_on", "")[:10]
-    r = httpx.get(DOWNLOAD.format(lista=lista), timeout=180, follow_redirects=True).raise_for_status()
+    r = _curl.get(DOWNLOAD.format(lista=lista), timeout=180, allow_redirects=True,
+                  impersonate="chrome")
+    r.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(r.content)) as z:
         texto = z.read(z.namelist()[0]).decode("utf-8")
     return list(csv.reader(io.StringIO(texto))), lista, criada

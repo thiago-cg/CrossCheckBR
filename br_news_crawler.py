@@ -44,7 +44,7 @@ LLM local (Unsloth):
                 base_url="http://127.0.0.1:8888/v1")
 
 Uso:
-  pip install -U crawl4ai pydantic httpx python-dotenv
+  pip install -U crawl4ai pydantic curl_cffi python-dotenv
   crawl4ai-setup            # instala o browser (1ª vez)
   python -m playwright install --with-deps chromium   # se necessário
 
@@ -119,10 +119,12 @@ except Exception:  # pragma: no cover
     PYDANTIC_AVAILABLE = False
 
 try:
-    import httpx
-    HTTPX_AVAILABLE = True
+    import curl_cffi.requests as _curl_requests
+    CURL_AVAILABLE = True
+    HTTPX_AVAILABLE = CURL_AVAILABLE  # alias de compat
 except Exception:  # pragma: no cover
-    httpx = None  # type: ignore
+    _curl_requests = None  # type: ignore
+    CURL_AVAILABLE = False
     HTTPX_AVAILABLE = False
 
 try:
@@ -985,11 +987,11 @@ def get_llm_config(modelo: str = "", base_url: str = DEFAULT_BASE_URL, api_token
 
 def detect_local_model(base_url: str = DEFAULT_BASE_URL, timeout: float = 8.0) -> str:
     """Tenta GET {base_url}/models e retorna o id do 1º modelo. Retorna '' se falhar."""
-    if not HTTPX_AVAILABLE:
+    if not CURL_AVAILABLE:
         return ""
     url = base_url.rstrip("/") + "/models"
     try:
-        r = httpx.get(url, timeout=timeout)
+        r = _curl_requests.get(url, timeout=timeout, impersonate="chrome")
         r.raise_for_status()
         data = r.json()
         items = data.get("data", []) if isinstance(data, dict) else []

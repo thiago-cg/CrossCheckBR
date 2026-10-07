@@ -163,7 +163,7 @@ def test_sem_cliente_nao_busca():
 
 def test_cliente_real_conta_por_requisicao_e_cache(monkeypatch):
     """buscar_ex devolve o motivo DESTA chamada; o estado conta suas buscas, não o uso do cliente."""
-    import httpx as _hx
+    import curl_cffi.requests as _hx
 
     class R:
         def raise_for_status(self):

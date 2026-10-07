@@ -115,8 +115,8 @@ def _seletor(url: str) -> Optional[str]:
 
 def _servidor_ok(cfg: Dict) -> bool:
     try:
-        import httpx
-        r = httpx.get(f"{cfg['base_url']}/models", timeout=3,
+        import curl_cffi.requests as _curl
+        r = _curl.get(f"{cfg['base_url']}/models", timeout=3, impersonate="chrome",
                       headers={"Authorization": f"Bearer {cfg['api_key']}"})
         return r.status_code == 200
     except Exception:

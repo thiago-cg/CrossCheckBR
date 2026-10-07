@@ -2,7 +2,7 @@
 import asyncio
 import json
 
-import httpx
+import curl_cffi.requests as _curl
 import pytest
 
 from factcheck_mvp import replay, telemetria as tel
@@ -59,14 +59,14 @@ def test_chave_ignora_segredos_e_ordem_da_query():
 
 def test_record_grava_e_replay_reproduz_sem_rede(amb, monkeypatch):
     chamadas = []
-    monkeypatch.setattr(httpx, "get", lambda url, **k: (chamadas.append(k), FakeResp({"ok": 1}))[1])
+    monkeypatch.setattr(_curl, "get", lambda url, **k: (chamadas.append(k), FakeResp({"ok": 1}))[1])
     with replay.modo("record"):
         r = replay.http_get("http://exemplo.test/api", params={"q": "a", "api_key": "SEGREDO"}, timeout=5)
     assert r.json() == {"ok": 1} and r.cache == "live" and chamadas[0]["params"]["q"] == "a"
     arqs = list((amb / "cass").glob("*.json"))
     assert len(arqs) == 1 and "SEGREDO" not in arqs[0].read_text()
     # replay: rede proibida, mesma resposta
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
+    monkeypatch.setattr(_curl, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
     with replay.modo("replay"):
         r2 = replay.http_get("http://exemplo.test/api", params={"api_key": "OUTRA", "q": "a"})
         assert r2.json() == {"ok": 1} and r2.cache == "hit"
@@ -78,7 +78,7 @@ def test_record_grava_e_replay_reproduz_sem_rede(amb, monkeypatch):
 def test_replay_miss_e_erro_de_rede_tratavel(amb):
     rid = tel.iniciar_run({})
     with replay.modo("replay"):
-        with pytest.raises(httpx.HTTPError) as ei:  # chamadores já capturam HTTPError/Exception
+        with pytest.raises(replay.HTTPError) as ei:  # chamadores já capturam HTTPError/Exception
             replay.http_post("http://exemplo.test/v1/chat/completions", json={"model": "m"})
     tel.finalizar_run(None)
     assert isinstance(ei.value, replay.ReplayMiss)
@@ -89,7 +89,7 @@ def test_replay_miss_e_erro_de_rede_tratavel(amb):
 def test_raise_for_status_e_headers_case_insensitive():
     r = replay.Resposta(404, {"Location": "https://x/y"}, b"nao", "https://x/?api_key=S")
     assert r.headers.get("location") == "https://x/y" and "LOCATION" in r.headers
-    with pytest.raises(httpx.HTTPError) as ei:
+    with pytest.raises(replay.HTTPError) as ei:
         r.raise_for_status()
     assert "api_key=REDACTED" in str(ei.value) and "404" in str(ei.value)
 
@@ -97,7 +97,7 @@ def test_raise_for_status_e_headers_case_insensitive():
 def test_llm_post_emite_evento_llm(amb, monkeypatch):
     payload = {"model": "m1", "messages": [{"role": "user", "content": "Divida o texto"}], "temperature": 0}
     resp = {"choices": [{"message": {"content": "Café cura câncer"}}]}
-    monkeypatch.setattr(httpx, "post", lambda url, **k: FakeResp(resp))
+    monkeypatch.setattr(_curl, "post", lambda url, **k: FakeResp(resp))
     rid = tel.iniciar_run({})
     r = replay.llm_post("http://127.0.0.1:8888/v1/chat/completions", payload, motor="llm-local",
                         finalidade="afirmacoes", headers={"Authorization": "Bearer sk-or-v1-segredosegredo123"})
@@ -110,7 +110,7 @@ def test_llm_post_emite_evento_llm(amb, monkeypatch):
 
 
 def test_finalidade_inferida_do_chamador(amb, monkeypatch):
-    monkeypatch.setattr(httpx, "post", lambda url, **k: FakeResp({"choices": [{"message": {"content": "x"}}]}))
+    monkeypatch.setattr(_curl, "post", lambda url, **k: FakeResp({"choices": [{"message": {"content": "x"}}]}))
     rid = tel.iniciar_run({})
 
     def termometro():  # simula juiz_llm.termometro chamando via llm_openrouter
@@ -124,19 +124,45 @@ def test_finalidade_inferida_do_chamador(amb, monkeypatch):
 
 
 def _cliente_mock(monkeypatch, handler):
-    original = httpx.AsyncClient
+    """Fake AsyncSession do curl_cffi: handler(url) -> (status, headers, body)."""
+    from contextlib import asynccontextmanager
 
-    def fabrica(*a, **k):
-        k["transport"] = httpx.MockTransport(handler)
-        return original(*a, **k)
-    monkeypatch.setattr(httpx, "AsyncClient", fabrica)
+    class _StreamResp:
+        def __init__(self, status, headers, url, body):
+            self.status_code = status
+            self.headers = headers
+            self.url = url
+            self._body = body
+
+        async def aiter_content(self):
+            yield self._body
+
+        async def aclose(self):
+            pass
+
+    class _Sess:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        @asynccontextmanager
+        async def stream(self, method, url, **kw):
+            status, headers, body = handler(url)
+            yield _StreamResp(status, headers, url, body)
+
+    monkeypatch.setattr(_curl, "AsyncSession", _Sess)
 
 
 def test_ahttp_get_nao_segue_redirect_e_respeita_teto(amb, monkeypatch):
-    def handler(req):
-        if req.url.path == "/antigo":
-            return httpx.Response(302, headers={"location": "/novo"})
-        return httpx.Response(200, content=b"a" * 1000, headers={"content-type": "text/html"})
+    def handler(url):
+        if url.endswith("/antigo"):
+            return 302, {"location": "/novo"}, b""
+        return 200, {"content-type": "text/html"}, b"a" * 1000
     _cliente_mock(monkeypatch, handler)
 
     async def _go():
@@ -151,7 +177,8 @@ def test_ahttp_get_nao_segue_redirect_e_respeita_teto(amb, monkeypatch):
     async def _rep(mb):
         with replay.modo("replay"):
             return await replay.ahttp_get("https://site.test/novo", max_bytes=mb)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
+    monkeypatch.setattr(_curl, "AsyncSession",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
     assert asyncio.run(_rep(50)).content == b"a" * 50
     with pytest.raises(replay.ReplayMiss):  # cassete truncado em 100 não serve p/ teto maior
         asyncio.run(_rep(500))
@@ -160,7 +187,7 @@ def test_ahttp_get_nao_segue_redirect_e_respeita_teto(amb, monkeypatch):
 def test_orcamento_serpapi_bloqueia_live_e_cassete_nao_conta(amb, monkeypatch):
     (amb / "uso.json").write_text(json.dumps({"total_live": 2}))
     monkeypatch.setenv("SERPAPI_ORCAMENTO_RESTANTE", "3")
-    monkeypatch.setattr(httpx, "get", lambda url, **k: FakeResp({"organic_results": [1]}))
+    monkeypatch.setattr(_curl, "get", lambda url, **k: FakeResp({"organic_results": [1]}))
     url = "https://serpapi.com/search.json"
     rid = tel.iniciar_run({})
     with replay.modo("record"):
@@ -179,7 +206,7 @@ def test_orcamento_serpapi_bloqueia_live_e_cassete_nao_conta(amb, monkeypatch):
 def test_sem_env_nao_ha_teto_mas_conta(amb, monkeypatch):
     monkeypatch.delenv("SERPAPI_ORCAMENTO_RESTANTE", raising=False)
     (amb / "uso.json").write_text(json.dumps({"total_live": 500}))
-    monkeypatch.setattr(httpx, "get", lambda url, **k: FakeResp({"organic_results": [1]}))
+    monkeypatch.setattr(_curl, "get", lambda url, **k: FakeResp({"organic_results": [1]}))
     replay.http_get("https://serpapi.com/search.json", params={"q": "z", "api_key": "k"})
     u = replay.uso_serpapi()
     assert u["usadas"] == 501 and u["orcamento"] is None and u["restantes"] is None
@@ -187,7 +214,7 @@ def test_sem_env_nao_ha_teto_mas_conta(amb, monkeypatch):
 
 def test_cota_da_conta_esgotada_vira_erro_explicito(amb, monkeypatch):
     from factcheck_mvp.serpapi_layer import SerpAPIClient
-    monkeypatch.setattr(httpx, "get", lambda url, **k: FakeResp(
+    monkeypatch.setattr(_curl, "get", lambda url, **k: FakeResp(
         {"error": "Your account has run out of searches."}, status=429))
     c = SerpAPIClient(api_key="k")
     rid = tel.iniciar_run({})
@@ -201,7 +228,7 @@ def test_cota_da_conta_esgotada_vira_erro_explicito(amb, monkeypatch):
 
 def test_teto_do_processo_e_serpapi_client(amb, monkeypatch):
     from factcheck_mvp.serpapi_layer import SerpAPIClient
-    monkeypatch.setattr(httpx, "get", lambda url, **k: FakeResp({"organic_results": [{"link": "u"}]}))
+    monkeypatch.setattr(_curl, "get", lambda url, **k: FakeResp({"organic_results": [{"link": "u"}]}))
     replay.definir_teto_serpapi(1)
     c = SerpAPIClient(api_key="k")
     rid = tel.iniciar_run({})
