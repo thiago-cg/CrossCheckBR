@@ -61,6 +61,11 @@ FONTES: List[Dict[str, Any]] = [
      "wpjson": "https://www.agencialupa.org/wp-json/wp/v2/posts"},
     {"agencia": "boatos", "nome": "Boatos.org",
      "feeds": ["https://www.boatos.org/feed"], "paginar": True,
+     # API REST pagina o histórico inteiro (~15 mil posts em 10/2026; o RSS só os recentes)
+     "wpjson": "https://www.boatos.org/wp-json/wp/v2/posts",
+     # fora: Eleições-2026 (páginas de resultado por município), English, Español, Lista, Opinião
+     "wpjson_params": "&categories_exclude=9312,1721,3684,1533,535",
+     "ignorar_titulo": r"^resultado das eleicoes",  # mesmas páginas de resultado, vindas pelo RSS
      "ignorar_url": r"/(espanol|english)/"},  # traduções da mesma checagem
     {"agencia": "e-farsas", "nome": "E-Farsas",
      "feeds": ["https://www.e-farsas.com/feed"], "paginar": True,
@@ -346,8 +351,12 @@ _PADROES_TITULO: List[Tuple[re.Pattern, Any, int]] = [
                 r"(?:de\s+que\s+|de\s+|que\s+)?(.+)$", re.I), 1, 2),
     # Selo como prefixo: "[Falso] …", "Falso: …", "Enganoso – …"
     (re.compile(r"^\s*[\[(]?\s*(falso|enganoso|verdadeiro|sem contexto|s[áa]tira|distorcido|exagerado|"
-                r"insustent[áa]vel|boato|farsa|fake)\s*[\])]?\s*[:\-–—|]\s*(.+)$", re.I), 1, 2),
+                r"insustent[áa]vel|boato|farsa|fake|hoax)\s*[\])]?\s*[:\-–—|]\s*(.+)$", re.I), 1, 2),
+
 ]
+# Selo como sufixo (Boatos.org até ~2019): "Água gelada faz mal; causa câncer #boato".
+# O título inteiro é a alegação: aqui o ";" NÃO separa explicação (não passa por _limpar).
+_RE_SELO_SUFIXO = re.compile(r"^\s*(.+?)\s*(#\s*(?:boato|fake|hoax))\s*$", re.I)
 # Pergunta ("É verdade que X?") não é selo: E-farsas titula assim e responde no corpo.
 _RE_PERGUNTA = re.compile(r"\?\s*$")
 _RE_RESUMO_MULTIPLO = re.compile(r"#\s*fato\b.*#\s*fake\b|#\s*fake\b.*#\s*fato\b", re.I)
@@ -433,6 +442,9 @@ def veredito_do_titulo(titulo: str, agencia: Optional[str] = None) -> Tuple[Opti
     if not t or _RE_RESUMO_MULTIPLO.search(t) or re.match(r"^\s*veja o que [ée]", t, re.I):
         return None, _limpar_afirmacao(t)
     if not _RE_PERGUNTA.search(t):
+        m = _RE_SELO_SUFIXO.match(t)
+        if m and selos.normalizar(m.group(2), agencia):
+            return m.group(2), m.group(1).strip(" \t–—-:;,.")
         for rx, selo, g_af in _PADROES_TITULO:
             m = rx.match(t)
             if not m:
@@ -459,8 +471,8 @@ _RE_SELO_CORPO = [
     re.compile(r"\b(?:conte[úu]do|post|publica[çc][ãa]o|v[íi]deo|informa[çc][ãa]o|alega[çc][ãa]o|imagem|foto|"
                r"[áa]udio|mensagem)\s+(?:[ée]|s[ãa]o)\s+(falso|falsa|enganoso|enganosa|verdadeiro|verdadeira|"
                r"exagerado|insustent[áa]vel)\b", re.I),
-    # Boatos.org: corpo começa com "Boato –"
-    re.compile(r"^\s*(boato)\s*[–—-]", re.I),
+    # Boatos.org: corpo começa com "Boato –" (nos primeiros anos, "Hoax –")
+    re.compile(r"^\s*(boato|hoax)\s*[–—-]", re.I),
 ]
 
 
@@ -533,7 +545,8 @@ def montar_registro(item: Dict[str, Any], agencia: str, html_pagina: Optional[st
                 reg["selo_original"], reg["origem"] = selo_c, "rss-titulo"
                 reg["detalhe_origem"] = "rss-categoria"
             else:
-                selo_b = veredito_do_corpo(corpo, agencia)
+                # o resumo do WordPress também abre com "Boato –" quando o corpo não abre
+                selo_b = veredito_do_corpo(corpo, agencia) or veredito_do_corpo(item.get("subtitulo") or "", agencia)
                 if selo_b:
                     reg["selo_original"], reg["origem"] = selo_b, "articlebody"
         reg["veredito"] = selos.normalizar(reg["selo_original"], agencia)
@@ -630,7 +643,7 @@ def _fontes_com_catalogo() -> List[Dict[str, Any]]:
 
 
 def coletar_itens(b: Baixador, fonte: Dict[str, Any], max_por_feed: int, paginas_feed: int,
-                  status: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                  status: List[Dict[str, Any]], paginas_historico: Optional[int] = None) -> List[Dict[str, Any]]:
     itens: List[Dict[str, Any]] = []
     feeds = list(fonte.get("feeds") or [])
     if not feeds and fonte.get("homepage"):
@@ -652,9 +665,10 @@ def coletar_itens(b: Baixador, fonte: Dict[str, Any], max_por_feed: int, paginas
                 break
     if fonte.get("wpjson"):
         # 50/página com _fields: 100 posts com conteúdo passam do teto de 5 MB
-        for pg in range(1, max(1, paginas_feed) + 1):
+        # Histórico: páginas da API (50 posts cada) independentes da paginação do RSS.
+        for pg in range(1, max(1, paginas_historico or paginas_feed) + 1):
             url = (f"{fonte['wpjson']}?per_page=50&page={pg}"
-                   "&_fields=link,title,date_gmt,date,excerpt,content")
+                   "&_fields=link,title,date_gmt,date,excerpt,content" + fonte.get("wpjson_params", ""))
             cod, corpo, _ = b.baixar(url)
             lidos = (parse_wpjson(corpo) if cod == 200 else [])[:max_por_feed]
             status.append({"agencia": fonte["agencia"], "feed": url, "tipo": "wp-json", "http": cod,
@@ -681,8 +695,8 @@ def coletar_itens(b: Baixador, fonte: Dict[str, Any], max_por_feed: int, paginas
 
 def processar_fonte(b: Baixador, fonte: Dict[str, Any], max_por_feed: int, paginas_feed: int,
                     sem_paginas: bool, excluidas: set, status: List[Dict[str, Any]],
-                    log=print) -> List[Dict[str, Any]]:
-    itens = coletar_itens(b, fonte, max_por_feed, paginas_feed, status)
+                    log=print, paginas_historico: Optional[int] = None) -> List[Dict[str, Any]]:
+    itens = coletar_itens(b, fonte, max_por_feed, paginas_feed, status, paginas_historico)
     regs = []
     for it in itens:
         if chave_url(it["link"]) in excluidas:
@@ -736,10 +750,13 @@ def imprimir_estatisticas(registros: List[Dict[str, Any]], status: List[Dict[str
 
 
 def ingerir(max_por_feed: int = 100, sem_paginas: bool = False, paginas_feed: int = 3,
-            saida: Optional[Path] = None, log=print) -> Dict[str, Any]:
+            saida: Optional[Path] = None, log=print, paginas_historico: Optional[int] = None,
+            agencias: Optional[List[str]] = None) -> Dict[str, Any]:
     saida = saida or ARQ_CHECAGENS
     excluidas = carregar_excluidas()
     fontes = _fontes_com_catalogo()
+    if agencias:
+        fontes = [f for f in fontes if f["agencia"] in agencias]
     status: List[Dict[str, Any]] = []
     b = Baixador()
     novos: List[Dict[str, Any]] = []
@@ -747,7 +764,7 @@ def ingerir(max_por_feed: int = 100, sem_paginas: bool = False, paginas_feed: in
         # uma thread por agência; o limitador garante 1 req/s por host
         with ThreadPoolExecutor(max_workers=max(1, len(fontes))) as ex:
             futuros = [ex.submit(processar_fonte, b, f, max_por_feed, paginas_feed, sem_paginas,
-                                 excluidas, status, log) for f in fontes]
+                                 excluidas, status, log, paginas_historico) for f in fontes]
             for fu in futuros:
                 try:
                     novos.extend(fu.result())
@@ -763,18 +780,59 @@ def ingerir(max_por_feed: int = 100, sem_paginas: bool = False, paginas_feed: in
     return {"novos": len(novos), "total": len(todos), "status": status, "estatisticas": estatisticas(todos)}
 
 
+def reprocessar(caminho: Optional[Path] = None, log=print) -> Dict[str, int]:
+    """Reaplica as regras de selo/afirmação ao que JÁ está no arquivo (título + trecho),
+    sem rede. Não toca em ClaimReview nem em 'manual'; só ganha selo quem não tinha e
+    corrige a afirmação de títulos com selo no fim ("… #boato")."""
+    caminho = caminho or ARQ_CHECAGENS
+    regs = carregar_jsonl(caminho)
+    n_selo = n_afirm = 0
+    for r in regs:
+        if r.get("origem") in ("claimreview", "manual"):
+            continue
+        agencia, titulo = r.get("agencia"), r.get("titulo") or ""
+        literal, afirm = veredito_do_titulo(titulo, agencia)
+        if _RE_SELO_SUFIXO.match(titulo) and afirm and afirm != r.get("afirmacao_checada"):
+            r["afirmacao_checada"] = afirm
+            n_afirm += 1
+        if r.get("veredito"):
+            continue
+        origem = "rss-titulo"
+        if not literal:
+            literal, origem = veredito_do_corpo(r.get("trecho") or "", agencia), "articlebody"
+        if literal and selos.normalizar(literal, agencia):
+            r["selo_original"], r["origem"] = literal, origem
+            r["veredito"] = selos.normalizar(literal, agencia)
+            if origem == "rss-titulo":
+                r["afirmacao_checada"] = afirm
+            n_selo += 1
+    gravar_jsonl(caminho, regs)
+    log(f"reprocessadas {len(regs)} checagens: +{n_selo} com selo, {n_afirm} afirmação(ões) corrigida(s)")
+    return {"total": len(regs), "selo": n_selo, "afirmacao": n_afirm}
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Ingere checagens (RSS + JSON-LD ClaimReview) em data/checagens.jsonl")
     ap.add_argument("--max-por-feed", type=int, default=100, help="teto de itens por feed/página de feed")
     ap.add_argument("--sem-paginas", action="store_true", help="não baixa a página do artigo (sem ClaimReview)")
     ap.add_argument("--paginas-feed", type=int, default=3, help="páginas (?paged=N) nos feeds WordPress")
     ap.add_argument("--saida", type=Path, default=None, help="padrão: data/checagens.jsonl")
+    ap.add_argument("--historico", type=int, default=None,
+                    help="páginas da API WordPress (50 posts cada) para buscar o histórico; padrão = --paginas-feed")
+    ap.add_argument("--agencias", default="", help="só estas agências (ids separados por vírgula)")
+    ap.add_argument("--reprocessar", action="store_true",
+                    help="sem rede: reaplica as regras de selo/afirmação ao arquivo existente")
     args = ap.parse_args(argv)
+    if args.reprocessar:
+        reprocessar(args.saida)
+        return 0
     from . import telemetria
 
     with telemetria.run({"entrada": "ingestor", "tipo": "ingestao", "max_por_feed": args.max_por_feed,
                          "sem_paginas": args.sem_paginas, "paginas_feed": args.paginas_feed}):
-        ingerir(args.max_por_feed, args.sem_paginas, args.paginas_feed, args.saida)
+        ingerir(args.max_por_feed, args.sem_paginas, args.paginas_feed, args.saida,
+                paginas_historico=args.historico,
+                agencias=[a.strip() for a in args.agencias.split(",") if a.strip()] or None)
     return 0
 
 

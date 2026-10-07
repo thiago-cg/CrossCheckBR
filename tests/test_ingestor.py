@@ -1,6 +1,7 @@
 """Ingestor: veredito (ClaimReview > título > categoria > corpo), merge idempotente, exclusões. Offline."""
 import gzip
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -141,3 +142,88 @@ def test_mesclar_nao_rebaixa_claimreview():
     velho = [{"url": "https://a.test/1", "veredito": "ENGANOSO", "origem": "claimreview"}]
     novo = [{"url": "https://a.test/1", "veredito": "FALSO", "origem": "rss-titulo"}]
     assert ing.mesclar(velho, novo)[0]["origem"] == "claimreview"
+
+
+def _wp(posts):
+    return json.dumps([{"link": f"https://ag.test/p{i}/", "date": "2020-01-01T00:00:00",
+                        "title": {"rendered": t}, "excerpt": {"rendered": ""},
+                        "content": {"rendered": c}} for i, (t, c) in posts]).encode()
+
+
+def test_historico_wpjson_independe_do_rss_e_aplica_filtros(monkeypatch):
+    """--historico pagina a API do WordPress (com categorias excluídas na URL) sem
+    mexer na paginação do RSS; ignorar_titulo vale para os itens da API."""
+    pedidos = []
+    pagina = [(i, (f"É falso que boato {i} aconteceu", "Boato – texto")) for i in range(50)]
+
+    def falso_baixar(self, url):
+        pedidos.append(url)
+        if "wp-json" in url:
+            pg = int(re.search(r"[?&]page=(\d+)", url).group(1))
+            if pg <= 2:
+                return 200, _wp(pagina if pg == 1 else
+                                [(i + 50, (f"É falso que outro {i}", "Boato – x")) for i in range(49)]
+                                + [(99, ("Resultado das eleições 2026 em X", ""))]), url
+            return 200, b"[]", url
+        return 404, b"", url
+
+    monkeypatch.setattr(ing.Baixador, "baixar", falso_baixar)
+    monkeypatch.setattr(ing, "INTERVALO_HOST", 0.0)
+    fonte = {"agencia": "ag", "feeds": [], "wpjson": "https://ag.test/wp-json/wp/v2/posts",
+             "wpjson_params": "&categories_exclude=1,2", "ignorar_titulo": r"^resultado das eleicoes"}
+    itens = ing.coletar_itens(ing.Baixador(), fonte, 100, 1, [], paginas_historico=5)
+    wp = [u for u in pedidos if "wp-json" in u]
+    assert len(wp) == 3 and all(u.endswith("&categories_exclude=1,2") for u in wp)  # parou na página vazia
+    assert len(itens) == 99 and not any("eleições" in i["titulo"] for i in itens)
+    pedidos.clear()
+    ing.coletar_itens(ing.Baixador(), fonte, 100, 1, [])  # sem --historico: só paginas_feed (1)
+    assert len([u for u in pedidos if "wp-json" in u]) == 1
+
+
+def test_ingerir_so_agencias_pedidas(tmp_path, monkeypatch):
+    vistos = []
+    monkeypatch.setattr(ing, "processar_fonte", lambda b, f, *a, **k: vistos.append(f["agencia"]) or [])
+    monkeypatch.setattr(ing, "FONTES", [{"agencia": "a", "feeds": []}, {"agencia": "b", "feeds": []}])
+    monkeypatch.setattr(ing, "ARQ_CATALOGO", tmp_path / "nao-existe.json")
+    ing.ingerir(saida=tmp_path / "c.jsonl", log=lambda *a: None, agencias=["b"])
+    assert vistos == ["b"]
+
+
+@pytest.mark.parametrize("titulo,selo,afirm", [
+    ("Água gelada faz mal para você; causa câncer e infarto #boato", "#boato",
+     "Água gelada faz mal para você; causa câncer e infarto"),       # sufixo: título inteiro
+    ("Tecnologia 5G causou morte de pássaros #boato", "#boato", "Tecnologia 5G causou morte de pássaros"),
+    ("Hoax – Snowden fala sobre cataclismo em tempestade solar", "Hoax",
+     "Snowden fala sobre cataclismo em tempestade solar"),          # Boatos.org 2013-2015
+])
+def test_selo_boatos_antigo(titulo, selo, afirm):
+    literal, af = ing.veredito_do_titulo(titulo, "boatos")
+    assert literal == selo and af == afirm
+    assert ing.selos.normalizar(literal, "boatos") == "FALSO"
+
+
+def test_selo_do_resumo_quando_corpo_nao_abre_com_boato():
+    reg = ing.montar_registro({"titulo": "Boato sobre greve geral se espalha", "link": "https://b.test/x",
+                               "corpo_html": "<p>O clima de manifestações...</p>",
+                               "subtitulo": "Boato – Haverá greve geral amanhã"}, "boatos", None)
+    assert reg["veredito"] == "FALSO" and reg["origem"] == "articlebody"
+
+
+def test_reprocessar_offline_da_selo_sem_rede(tmp_path):
+    arq = tmp_path / "c.jsonl"
+    regs = [
+        {"url": "https://b.test/1", "agencia": "boatos", "titulo": "Água gelada faz mal; causa câncer #boato",
+         "afirmacao_checada": "Água gelada faz mal", "veredito": None, "origem": "rss-titulo", "trecho": ""},
+        {"url": "https://b.test/2", "agencia": "boatos", "titulo": "Boato sobre greve se espalha",
+         "veredito": None, "origem": "rss-titulo", "trecho": "Hoax – Haverá greve geral amanhã"},
+        {"url": "https://b.test/3", "agencia": "boatos", "titulo": "X #boato", "veredito": "ENGANOSO",
+         "selo_original": "enganoso", "origem": "claimreview"},  # ClaimReview não é tocado
+    ]
+    ing.gravar_jsonl(arq, regs)
+    res = ing.reprocessar(arq, log=lambda *a: None)
+    por = {r["url"]: r for r in ing.carregar_jsonl(arq)}
+    assert res["selo"] == 2
+    assert por["https://b.test/1"]["veredito"] == "FALSO"
+    assert por["https://b.test/1"]["afirmacao_checada"] == "Água gelada faz mal; causa câncer"
+    assert por["https://b.test/2"]["veredito"] == "FALSO" and por["https://b.test/2"]["origem"] == "articlebody"
+    assert por["https://b.test/3"]["veredito"] == "ENGANOSO"
