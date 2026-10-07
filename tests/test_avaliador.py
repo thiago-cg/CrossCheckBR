@@ -1,5 +1,5 @@
 """Avaliador 1:1 manchete+corpo: exige corpo lido; sem corpo, fallback sem LLM."""
-from factcheck_mvp import juiz_llm, llm
+from factcheck_mvp import avaliador, juiz_llm, llm
 from factcheck_mvp.juiz_llm import ItemJuiz, RespostaJuiz
 from factcheck_mvp.llm import ResultadoLLM
 
@@ -62,3 +62,27 @@ def test_avaliador_exige_corpo_e_retorna_posicao(monkeypatch):
     assert saida_sem["motor"] == "fallback-sem-corpo"
     assert chamadas == []
     assert juiz_llm.postura_para_relevante(saida_sem["posicao"]) is None
+
+
+def test_avaliador_encaminha_veredito_pagina_ao_juiz(monkeypatch):
+    """Peça selada (veredito/selo_original/afirmacao_checada, sem veredito_pagina)
+    tem o item do juiz com veredito_pagina {selo, alegacao_checada} (contrato Task 2)."""
+    capturados = []
+
+    def fake_julgar_lote(afirmacao, itens):
+        capturados.append((afirmacao, itens))
+        return [{"classe": "REFUTA", "citacao": "", "citacao_score": None,
+                 "citacao_verificada": None, "pagina_diz": "", "motor": "fake", "erro": None}]
+
+    monkeypatch.setattr(juiz_llm, "julgar_lote", fake_julgar_lote)
+
+    peca = _peca_com_corpo()
+    peca.pop("veredito_pagina", None)
+    peca.update(veredito="FALSO", selo_original="FALSO",
+                afirmacao_checada="Café cura câncer")
+    saida = avaliador.avaliar(NUCLEO, peca)
+    assert saida["posicao"] == "REFUTA"
+    assert len(capturados) == 1
+    item = capturados[0][1][0]
+    assert item["veredito_pagina"] == {"selo": "FALSO",
+                                      "alegacao_checada": "Café cura câncer"}

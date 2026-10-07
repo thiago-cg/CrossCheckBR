@@ -57,6 +57,11 @@ def avaliar(afirmacao_nucleo: str, peca: Dict[str, Any]) -> Dict[str, Any]:
     }
     if peca.get("veredito_pagina"):
         item["veredito_pagina"] = peca["veredito_pagina"]
+    elif peca.get("veredito") or peca.get("selo_original"):
+        item["veredito_pagina"] = {
+            "selo": peca.get("selo_original") or peca.get("veredito"),
+            "alegacao_checada": peca.get("afirmacao_checada") or "",
+        }
     r = juiz_llm.julgar_lote(nucleo, [item])[0]
     return {"posicao": r.get("classe"), "citacao": r.get("citacao") or "",
             "citacao_score": r.get("citacao_score"),
