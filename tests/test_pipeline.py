@@ -194,6 +194,7 @@ def test_mesma_url_no_indice_e_na_web_conta_uma_vez(amb, monkeypatch):
                                                          "Água gelada causa gripe"])])
     web = [{"link": url + "?utm_source=twitter", "title": "É falso que café cura câncer",
             "snippet": "É falso que café cura câncer, segundo especialistas."}]
+    amb[url] = "É falso que café cura câncer, segundo especialistas. " * 50
     assert idx.buscar_checagens("Café cura câncer")  # o atalho acha a checagem
     rel = _rodar("Café cura câncer", web, indice=idx)
     assert len([f for f in rel.fontes if "aosfatos" in f.url]) == 1
@@ -340,6 +341,40 @@ def test_crawl_antes_do_filtro_lexical(amb, monkeypatch):
     assert all(f.corpo_lido for f in rel.fontes), [(f.url, f.corpo_lido) for f in rel.fontes]
     baixa = next(f for f in rel.fontes if "boletim" in f.url)
     assert baixa.postura == "REFUTA", baixa
+
+
+def test_julga_cada_peca_com_corpo(amb, monkeypatch):
+    """Pipeline chama o avaliador 1× por peça com corpo lido (manchete+corpo).
+
+    4 peças com corpo lido: `avaliador.avaliar` deve ser chamado 4×, uma vez
+    por par (peça, afirmação), e cada chamada recebe `titulo` e corpo
+    (`corpo`/`trecho_juiz`/`texto_completo`) não-vazios."""
+    from factcheck_mvp import avaliador as _aval
+    pags = [
+        _pag(f"https://www.{dom}/saude/2024/01/cafe-cancer-checagem/",
+             "Café cura câncer? Checagem",
+             "É falso que café cura câncer, segundo o INCA.")
+        for dom in ("g1.globo.com", "estadao.com.br", "bbc.com", "folha.uol.com.br")
+    ]
+    resultados = _prep(amb, pags)
+    chamadas = []
+
+    def fake_avaliar(nucleo, peca):
+        chamadas.append((nucleo, dict(peca)))
+        return {"posicao": "REFUTA", "citacao": "É falso que café cura câncer",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página diz que é falso que café cura câncer.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = _rodar("Café cura câncer", resultados)
+    assert len(chamadas) == 4, chamadas
+    for nucleo, peca in chamadas:
+        assert (nucleo or "").strip()
+        assert (peca.get("titulo") or "").strip()
+        corpo = peca.get("corpo") or peca.get("trecho_juiz") or peca.get("texto_completo") or ""
+        assert corpo.strip()
+    assert rel.propensao == "alta", rel.justificativa
 
 
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):

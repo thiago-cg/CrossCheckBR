@@ -24,8 +24,8 @@ import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import (afirmacoes, aplicabilidade, confiabilidade, config, corroboracao, decisao, juiz_llm, padroes_llm, replay,
-               selos, telemetria)
+from . import (afirmacoes, aplicabilidade, avaliador, confiabilidade, config, corroboracao, decisao, juiz_llm,
+               padroes_llm, replay, selos, telemetria)
 from . import agente as _agente
 from .agregador import perguntas_guia
 from .aprofundar import aprofundar
@@ -641,36 +641,46 @@ class Pipeline:
         return saida
 
     async def _julgar(self, afs, pecas, selecionados, usar_llm) -> Tuple[Dict[Tuple[int, int], Dict], bool]:
+        """Julga 1× por par (peça, afirmação) via `avaliador.avaliar` (manchete+corpo).
+
+        `julg[(pi, ai)] = {"classe": posicao, "citacao", "citacao_score",
+        "citacao_verificada", "pagina_diz", "motor", "erro", "rebaixado", ...}`.
+        `rebaixado` deriva da citação (`citacao_verificada is False`, como no juiz
+        em lote). `_overlap` segue só como ordenação em `_selecionar`, nunca como
+        gate. Ondas extras e fase base reutilizam este caminho."""
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
         for ai in list(por_af):
             por_af[ai] = sorted(por_af[ai], key=lambda pi: (str(pecas[pi].get("url") or ""), pi))
-        itens_por_af: Dict[int, List[Dict[str, Any]]] = {}
-        for ai in sorted(por_af):
-            pis = por_af[ai]
+        # Trecho só p/ telemetria (n_chars_trecho): o julgamento usa manchete+corpo via avaliador.
+        trechos: Dict[Tuple[int, int], str] = {}
+        for ai, pis in por_af.items():
             alvo = afs[ai].alvo()
-            itens = []
             for pi in pis:
                 p = pecas[pi]
                 corpo = p.get("trecho_juiz") or p.get("corpo") or p.get("trecho") or p.get("snippet") or ""
-                vp = None
-                if p.get("veredito") or p.get("selo_original"):
-                    vp = {"selo": p.get("selo_original") or p.get("veredito"),
-                          "alegacao_checada": p.get("afirmacao_checada") or ""}
-                tipo = ("checagem" if (p.get("tipo_portal") == "checagem" or p.get("veredito")) else
-                        "artigo acadêmico" if p.get("scholar") else
-                        "notícia (veículo do catálogo)" if p.get("curada") else "site fora do catálogo")
-                itens.append({"veiculo": p.get("veiculo") or "", "dominio": p.get("dominio") or "",
-                              "tipo_fonte": tipo, "data": p.get("data_pub") or "",
-                              "titulo": p.get("titulo") or "", "veredito_pagina": vp,
-                              "trecho": juiz_llm.montar_trecho(p.get("titulo") or "", corpo, alvo)})
-            itens_por_af[ai] = itens
+                trechos[(pi, ai)] = juiz_llm.montar_trecho(p.get("titulo") or "", corpo, alvo)
 
-        def _rodar() -> Dict[int, List[Dict[str, Any]]]:
-            return {ai: juiz_llm.julgar(afs[ai].alvo(), its) for ai, its in itens_por_af.items()}
+        def _rodar() -> Dict[Tuple[int, int], Dict[str, Any]]:
+            saida: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            for ai in sorted(por_af):
+                alvo = afs[ai].alvo()
+                for pi in por_af[ai]:
+                    a = avaliador.avaliar(alvo, pecas[pi])
+                    saida[(pi, ai)] = {
+                        "classe": a.get("posicao"), "citacao": a.get("citacao") or "",
+                        "citacao_score": a.get("citacao_score"),
+                        "citacao_verificada": a.get("citacao_verificada"),
+                        "pagina_diz": a.get("pagina_diz") or "",
+                        "motor": a.get("motor") or "", "erro": a.get("erro"),
+                        "rebaixado": (a.get("rebaixado") if "rebaixado" in a
+                                      else a.get("citacao_verificada") is False),
+                        "classe_original": a.get("classe_original"),
+                    }
+            return saida
 
-        resultados: Dict[int, List[Dict[str, Any]]] = {}
+        resultados: Dict[Tuple[int, int], Dict[str, Any]] = {}
         if usar_llm:
             try:
                 resultados = await asyncio.wait_for(asyncio.to_thread(_rodar),
@@ -683,11 +693,11 @@ class Pipeline:
         julg: Dict[Tuple[int, int], Dict[str, Any]] = {}
         juiz_ok = False
         for ai, pis in por_af.items():
-            rs = resultados.get(ai) or [juiz_llm._vazio("sem julgamento (LLM desligado/indisponível/teto)")
-                                        for _ in pis]
-            if all(r.get("classe") is None for r in rs) and ai in resultados:
+            rs = [resultados.get((pi, ai))
+                  or juiz_llm._vazio("sem julgamento (LLM desligado/indisponível/teto)") for pi in pis]
+            if resultados and all(r.get("classe") is None for r in rs):
                 telemetria.fallback("juiz", (rs[0].get("erro") or "juiz falhou")[:300], afirmacao=afs[ai].texto)
-            for pi, r, it in zip(pis, rs, itens_por_af[ai]):
+            for pi, r in zip(pis, rs):
                 julg[(pi, ai)] = r
                 if r.get("classe") is not None:
                     juiz_ok = True
@@ -705,7 +715,8 @@ class Pipeline:
                 telemetria.evento("fonte", url=p["url"], estagio="juiz", decisao=dec_f, motivo=mot,
                                   afirmacao=ai, classe=r.get("classe"), cluster=p.get("cluster"),
                                   curada=p.get("curada"), corpo_lido=bool(p.get("corpo")),
-                                  veredito=p.get("veredito"), n_chars_trecho=len(it.get("trecho") or ""))
+                                  veredito=p.get("veredito"),
+                                  n_chars_trecho=len(trechos.get((pi, ai)) or ""))
         return julg, juiz_ok
 
     async def _ondas_extras(self, afs, pecas, julg, selecionados, juiz_ok, estado, usar_llm,
