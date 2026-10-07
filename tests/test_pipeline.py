@@ -262,3 +262,54 @@ def test_sem_busca_e_sem_llm_indeterminada():
                                     usar_llm=False))
     assert rel.propensao == "indeterminada"
     assert any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)
+
+
+def test_base_aplicavel_pula_web(amb, monkeypatch):
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://www.aosfatos.org/noticias/cafe-cura-cancer-falso/"
+    idx = Indice.de_checagens([{"url": url, "titulo": "É falso que café cura câncer",
+        "afirmacao_checada": "Café cura câncer", "selo_original": "Falso",
+        "veredito": "FALSO", "agencia": "aos-fatos",
+        "trecho": "É falso que café cura câncer, segundo especialistas."}]
+        # Distratores p/ o BM25 ter IDF (índice de 1 doc só nunca casa: scores ~0;
+        # mesmo padrão do test_mesma_url_no_indice_e_na_web_conta_uma_vez). Alvo verbatim.
+        + [{"url": f"https://lupa.uol.com.br/x{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(["Vacina altera o DNA humano", "Urnas foram fraudadas em 2022",
+                                  "Limão em jejum cura diabetes", "Governo vai confiscar poupança",
+                                  "Água gelada causa gripe"])])
+    amb[url] = "É falso que café cura câncer, segundo especialistas. " * 50
+    chamadas = {"n": 0}
+    class Contadora(FakeSerp):
+        def buscar(self, q):
+            chamadas["n"] += 1
+            return super().buscar(q)
+    pipe = Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=Contadora([]), detector=MockDetector())
+    import asyncio
+    rel = asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    assert chamadas["n"] == 0
+    assert any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+    assert rel.propensao == "alta"
+
+def test_base_inaplicavel_chama_web(amb, monkeypatch):
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    idx = Indice.de_checagens([{"url": "https://lupa.uol.com.br/x", "titulo": "Reportagem sobre café",
+        "afirmacao_checada": "Café cura câncer", "selo_original": None, "veredito": None,
+        "agencia": "lupa", "trecho": "Reportagem sobre café."}])
+    r, corpo = _pag("https://g1.globo.com/x", "Café cura câncer? Checagem", "É falso que café cura câncer, segundo o INCA.")
+    amb["https://g1.globo.com/x"] = corpo
+    import asyncio
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([r]), detector=MockDetector()).executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+
+def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-antiga"
+    idx = Indice.de_checagens([{"url": url, "titulo": "Bolsonaro alta hospital",
+        "afirmacao_checada": "Bolsonaro recebeu alta do hospital", "selo_original": "Falso",
+        "veredito": "FALSO", "agencia": "boatos-org", "data_pub": "2020-01-01",
+        "trecho": "É falso que Bolsonaro recebeu alta do hospital, segundo apuração."}])
+    amb[url] = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
+    import asyncio
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([]), detector=MockDetector()).executar(EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje")))
+    assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
