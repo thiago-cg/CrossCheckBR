@@ -488,7 +488,8 @@ class Pipeline:
             itens.append(decisao.ItemEvidencia(
                 url=p["url"], afirmacao=ai, cluster=p.get("cluster") or p["url"], classe=r.get("classe"),
                 motor=r.get("motor") or "", citacao_verificada=r.get("citacao_verificada"),
-                curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"),
+                curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
+                veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
                 confiabilidade=p.get("confiabilidade")))
         ev = decisao.Evidencias(
@@ -910,7 +911,7 @@ class Pipeline:
                 veredito=p.get("veredito"), selo_original=p.get("selo_original"),
                 veredito_normalizado=p.get("veredito"),
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
-                trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo")),
+                trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
