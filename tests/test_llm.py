@@ -44,6 +44,36 @@ def test_local_envia_temperatura_zero_e_finalidade(monkeypatch):
     assert payload["messages"][0]["role"] == "system" and "português" in payload["messages"][0]["content"]
 
 
+def test_local_envia_api_key_do_unsloth(monkeypatch):
+    """Unsloth Studio com login responde 401 sem `Authorization: Bearer <api key>`."""
+    llm.resetar_cache()
+    monkeypatch.setattr(llm.config, "UNSLOTH_MODEL_NAME", "")
+    monkeypatch.setattr(llm.config, "OPENROUTER_API_KEY", "")
+    monkeypatch.setattr(llm.config, "UNSLOTH_API_KEY", "sk-unsloth-teste")
+    vistos = []
+
+    def fake_get(url, **k):
+        vistos.append(("get", k.get("headers")))
+        return _R({"data": [{"id": "m-local", "loaded": True}]})
+
+    def fake_post(url, payload, **k):
+        vistos.append(("post", k.get("headers")))
+        return _R({"choices": [{"message": {"content": '{"ok": true}'}}]})
+    monkeypatch.setattr(llm.replay, "http_get", fake_get)
+    monkeypatch.setattr(llm.replay, "llm_post", fake_post)
+    assert llm.chat_json([{"role": "user", "content": "x"}], None, finalidade="teste").ok
+    assert vistos == [("get", {"Authorization": "Bearer sk-unsloth-teste"}),
+                      ("post", {"Authorization": "Bearer sk-unsloth-teste"})]
+    llm.resetar_cache()
+
+
+def test_local_sem_api_key_nao_envia_authorization(monkeypatch):
+    monkeypatch.setattr(llm.config, "UNSLOTH_API_KEY", "not-needed")
+    assert llm._headers_local() == {}
+    monkeypatch.setattr(llm.config, "UNSLOTH_API_KEY", "")
+    assert llm._headers_local() == {}
+
+
 def test_resposta_so_de_raciocinio_e_erro(monkeypatch):
     monkeypatch.setattr(llm.config, "UNSLOTH_MODEL_NAME", "m-local")
     monkeypatch.setattr(llm.config, "OPENROUTER_API_KEY", "")

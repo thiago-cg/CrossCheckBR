@@ -124,8 +124,9 @@ class Decisao:
         return len({(v.afirmacao, v.cluster) for v in self.votos if v.valor * sinal > 0})
 
     def justificativa(self) -> str:
+        from .agregador import titulo_propensao
         c = self.contagem
-        partes = [f"Propensão {self.nivel} a se tratar de desinformação."]
+        partes = [titulo_propensao(self.nivel) + "."]
         if self.nivel == "indeterminada":
             partes.append(self.motivo[:1].upper() + self.motivo[1:] + ".")
         else:
@@ -160,8 +161,8 @@ class Decisao:
                 f"{c.get('fora_do_tema', 0)} fora do tema.")
 
     def header(self) -> str:
-        from .agregador import EMOJI_PROPENSAO
-        return f"{EMOJI_PROPENSAO.get(self.nivel, '⚪')} Propensão {self.nivel.upper()} a se tratar de desinformação"
+        from .agregador import EMOJI_PROPENSAO, titulo_propensao
+        return f"{EMOJI_PROPENSAO.get(self.nivel, '⚪')} {titulo_propensao(self.nivel)}"
 
     def resumo_trace(self) -> Dict[str, Any]:
         """Versão compacta para o evento `decisao` (lida no `cli trace`)."""

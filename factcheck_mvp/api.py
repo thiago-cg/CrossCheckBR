@@ -19,7 +19,7 @@ from .schemas import EntradaConsulta, RelatorioChecagem
 from .serpapi_layer import SerpAPIClient
 
 try:
-    from .telegram_bot import classificar_entrada, formatar
+    from .telegram_bot import LINK_SEM_TEXTO_MSG, _texto_link, classificar_entrada, formatar
 except Exception:  # telegram opcional p/ API/web (bot não quebra API)
     def classificar_entrada(texto: str) -> EntradaConsulta:  # type: ignore
         t = (texto or "").strip()
@@ -31,6 +31,9 @@ except Exception:  # telegram opcional p/ API/web (bot não quebra API)
 
     def formatar(rel) -> str:  # type: ignore
         return f"{rel.header or rel.propensao} {rel.why_1linha or rel.justificativa}"
+
+    _texto_link = None  # type: ignore
+    LINK_SEM_TEXTO_MSG = "Não consegui ler esse link. Cole aqui o título e o texto da notícia."
 
 log = logging.getLogger("factcheck.api")
 app = FastAPI(title="Checagem cruzada de fatos (MVP)", version="0.2.0")
@@ -103,13 +106,31 @@ def _rate_ok(request: Request | None) -> bool:
         return True
 
 
+async def _ler_link(entrada: EntradaConsulta) -> EntradaConsulta | None:
+    """Link -> texto da página (mesma regra do bot: só portais do catálogo, anti-SSRF).
+
+    Retorna a entrada pronta para o pipeline, ou None se o link não pôde ser lido —
+    aí, como no bot, pede-se o texto em vez de checar só o endereço."""
+    if entrada.tipo != "link":
+        return entrada
+    if _texto_link is None:
+        return None
+    texto = await asyncio.to_thread(_texto_link, entrada.conteudo, pipeline().catalogo)
+    if not texto:
+        return None
+    return EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto}"[:20000])
+
+
 @app.post("/checar", response_model=RelatorioChecagem)
 async def checar(entrada: EntradaConsulta, request: Request):
     if not _rate_ok(request):
         raise HTTPException(status_code=429, detail="muitas checagens; tente de novo em instantes")
     try:
         async with asyncio.timeout(180):
-            return await pipeline().executar(entrada)
+            pronta = await _ler_link(entrada)
+            if pronta is None:
+                raise HTTPException(status_code=422, detail=LINK_SEM_TEXTO_MSG)
+            return await pipeline().executar(pronta)
     except (asyncio.TimeoutError, TimeoutError):
         raise HTTPException(status_code=504, detail="checagem excedeu o tempo; tente um texto mais curto")
     except HTTPException:
@@ -120,32 +141,46 @@ async def checar(entrada: EntradaConsulta, request: Request):
 
 
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
+    from .agregador import NOMES_ETAPAS, STATUS_ETAPA, direcoes_por_url, postura_legivel
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
-        f"<textarea name='conteudo' rows='4' cols='70' placeholder='Ouvi dizer que… (sem fonte, sem certeza — pode colar assim mesmo)'>{esc(entrada_txt)}</textarea><br/>" \
-        f"<button type='submit'>Checar rumor</button></form><hr/>"
+        f"<textarea name='conteudo' rows='4' style='width:100%' placeholder='Cole o texto, o título ou o link da notícia (pode ser um “ouvi dizer que…”)'>{esc(entrada_txt)}</textarea><br/>" \
+        f"<button type='submit'>Analisar</button></form><hr/>"
     if rel:
-        fontes = "".join(
-            f"<div style='border:1px solid #ccc;padding:8px;margin:6px'>"
-            f"<b>{esc(f.portal_nome or 'web')}</b>"
-            f"{' [selo: '+esc(f.veredito)+']' if f.veredito else ''} "
-            f"{'📄 corpo lido' if f.corpo_lido else '📰 só título'}<br/>"
-            f"{esc(f.titulo[:200])}<br/>"
-            f"{'<i>“'+esc((f.quote or '')[:200])+'”</i><br/>' if f.quote else ''}"
-            f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>"
-            for f in rel.fontes[:3])
-        etapas = "; ".join(f"{e.nome}:{e.status}" for e in rel.etapas)
+        # Mesma regra do bot: julgadas como fora do tema não aparecem como evidência.
+        direcoes = direcoes_por_url(rel.decisao)
+        uteis = [f for f in rel.fontes if f.relevante is not False][:5]
+        cor = {"contesta o que o texto afirma": "#b42318", "confirma o que o texto afirma": "#067647"}
+
+        def _cartao(f) -> str:
+            post = postura_legivel(f, direcoes)
+            return (f"<div style='border:1px solid #ccc;border-radius:6px;padding:8px;margin:6px 0'>"
+                    f"<b>{esc(f.portal_nome or 'web')}</b> "
+                    f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
+                    f"{' · selo da agência: ' + esc(f.veredito) if f.veredito else ''}"
+                    f" · {'📄 texto lido' if f.corpo_lido else '📰 só manchete'}<br/>"
+                    f"{esc(f.titulo[:200])}<br/>"
+                    f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
+                    f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")
+        fontes = "".join(_cartao(f) for f in uteis)
+        etapas = "".join(f"<li>{STATUS_ETAPA.get(e.status, '')} <b>{esc(NOMES_ETAPAS.get(e.nome, e.nome))}</b>: "
+                         f"{esc(e.detalhe)}</li>" for e in rel.etapas)
         lims = "".join(f"<li>{esc(l)}</li>" for l in rel.limitacoes[:5])
-        corpo += (f"<h2>{esc(rel.header or rel.propensao.upper())}</h2>"
-                  f"<p>{esc(rel.why_1linha or rel.justificativa)}</p>"
+        guia = "".join(f"<li>{esc(p)}</li>" for p in rel.perguntas_guia)
+        corpo += (f"<h2>{esc(rel.header or rel.propensao)}</h2>"
+                  f"<p><b>{esc(rel.why_1linha or '')}</b></p>"
                   f"<p>{esc(rel.justificativa)}</p>"
-                  f"<h3>Fontes lado a lado (2-3)</h3>{fontes or '<p>Sem fontes.</p>'}"
-                  f"<p><b>Passo a passo:</b> {esc(etapas)}</p>"
-                  f"<ul>{lims}</ul>")
-    return ("<html><head><meta charset='utf-8'><title>CrossCheckBR — checar rumor</title></head>"
-            f"<body style='font-family:sans-serif;max-width:800px;margin:20px'>"
-            f"<h1>CrossCheckBR — ouvi dizer, e agora?</h1>"
-            f"<p>Cole o rumor como ouviu (vago, sem fonte, sem certeza). Devolvo propensão + porquê + 2-3 fontes lado a lado.</p>"
+                  f"<h3>O que as fontes dizem</h3>"
+                  f"{fontes or '<p>Não encontramos fontes que tratem do assunto. Na dúvida, não compartilhe.</p>'}"
+                  f"<h3>Para avaliar você mesmo</h3><ul>{guia}</ul>"
+                  f"<details><summary>Como chegamos aqui</summary><ul>{etapas}</ul></details>"
+                  f"<details><summary>Limitações desta análise</summary><ul>{lims}</ul></details>")
+    return ("<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<title>CrossCheckBR</title></head>"
+            f"<body style='font-family:sans-serif;max-width:800px;margin:20px auto;padding:0 16px'>"
+            f"<h1>CrossCheckBR — isso pode ser fake news?</h1>"
+            f"<p>Cole o que você recebeu. Estimamos a propensão de ser fake news e mostramos o que "
+            f"os veículos e agências de checagem dizem. Não damos veredito: você decide.</p>"
             f"{corpo}</body></html>")
 
 
@@ -166,7 +201,11 @@ async def checar_web(request: Request, conteudo: str = Form(...)):
         return HTMLResponse(_render_html(conteudo), status_code=400)
     try:
         async with asyncio.timeout(180):
-            rel = await pipeline().executar(entrada)
+            pronta = await _ler_link(entrada)
+            if pronta is None:
+                return HTMLResponse(_render_html(conteudo) + "<p style='color:#a00'><b>"
+                                    + html.escape(LINK_SEM_TEXTO_MSG) + "</b></p>", status_code=422)
+            rel = await pipeline().executar(pronta)
         return HTMLResponse(_render_html(conteudo, rel))
     except Exception:
         log.exception("falha no pipeline web")

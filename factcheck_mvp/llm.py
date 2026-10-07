@@ -65,6 +65,14 @@ def resetar_cache() -> None:
         _modelo_local = None
 
 
+def _headers_local() -> Dict[str, str]:
+    """Unsloth Studio com login exige `Authorization: Bearer sk-unsloth-…` (API key criada
+    no Studio); sem a chave, /models e /chat/completions respondem 401. Servidores sem
+    autenticação ignoram o header. A replay não grava `authorization` nos cassetes."""
+    chave = (config.UNSLOTH_API_KEY or "").strip()
+    return {"Authorization": f"Bearer {chave}"} if chave and chave != "not-needed" else {}
+
+
 def modelo_local() -> str:
     """Nome do modelo local: `UNSLOTH_MODEL_NAME` ou o `loaded: true` de /models."""
     global _modelo_local
@@ -73,7 +81,8 @@ def modelo_local() -> str:
     with _trava:
         if _modelo_local:
             return _modelo_local
-    r = replay.http_get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", timeout=15)
+    r = replay.http_get(config.UNSLOTH_BASE_URL.rstrip("/") + "/models", headers=_headers_local(),
+                        timeout=15)
     r.raise_for_status()
     itens = (r.json() or {}).get("data", []) or []
     carregados = [m for m in itens if isinstance(m, dict) and m.get("loaded") is True]
@@ -99,7 +108,8 @@ def _local(messages: List[dict], max_tokens: int, timeout_s: float, finalidade: 
         messages = list(messages) + [{"role": "assistant", "content": PREFILL_SEM_RACIOCINIO}]
     payload = {"model": modelo, "messages": messages, "temperature": 0.0, "max_tokens": max_tokens}
     r = replay.llm_post(config.UNSLOTH_BASE_URL.rstrip("/") + "/chat/completions", payload,
-                        timeout=timeout_s, motor="llm-local", finalidade=finalidade)
+                        headers=_headers_local(), timeout=timeout_s, motor="llm-local",
+                        finalidade=finalidade)
     if r.status_code >= 400:
         raise ErroLLM(f"HTTP {r.status_code}: {r.text[:200]}")
     d = r.json() or {}

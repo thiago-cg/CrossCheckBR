@@ -42,7 +42,7 @@ Regra-mestra: **implicação domina selo** — selo VERDADEIRO numa peça que re
 
 ## Como ele responde (exemplo)
 
-> **Propensão: MÉDIA** — Aumentam: selo do portal (Lupa): FALSO + fonte refuta. Reduzem: 2 manchetes sustentam (só título). *Isso não é um veredito…*
+> **🟡 Propensão média de ser fake news** — 1 fonte(s) independente(s) contestam o que o texto afirma e 1 o confirmam. *Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.*
 > Modelo de detecção: 0.81 (PLACEHOLDER). Fontes consultadas (com links)… Passo a passo: recebimento:ok; base-checagem:ok; … Limitações: … Para avaliar você mesmo: ① compare datas ② quem assina? ③ aparece em +1 veículo independente?
 
 ## Como rodar
@@ -56,7 +56,7 @@ uvicorn factcheck_mvp.api:app --port 8000 &
 python -m factcheck_mvp.telegram_bot  # @fn_tic_bot
 ```
 
-API: `GET /saude`, `GET /portais`, `POST /checar {"tipo":"texto|titulo|link","conteudo":"..."}`.
+API: `GET /saude`, `GET /portais`, `POST /checar {"tipo":"texto|titulo|link","conteudo":"..."}`. Com `tipo=link`, a API lê a página (só portais do catálogo, como o bot); se não conseguir, responde `422` pedindo o texto.
 Modelo de detecção real (BERTimbau v6, opcional) e avaliação do sistema inteiro: ver [MELHORIAS_ARQUITETURA.md](MELHORIAS_ARQUITETURA.md).
 Crawler: `pip install -r requirements.txt && crawl4ai-setup && python br_news_crawler.py --offline` (só contrato) ou `--classifier laya --max-artigos 2` (coleta real; LLM local em `http://127.0.0.1:8888/v1`).
 
