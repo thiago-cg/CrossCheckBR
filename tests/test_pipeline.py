@@ -377,6 +377,78 @@ def test_julga_cada_peca_com_corpo(amb, monkeypatch):
     assert rel.propensao == "alta", rel.justificativa
 
 
+def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
+    """Wiring avaliador→juiz (Task 4): `ItemEvidencia.corpo_lido` vem da flag da
+    peça (`p.get("corpo_lido", p.get("corpo"))`), não de `bool(p.get("corpo"))`.
+
+    Uma peça com corpo presente mas flag `corpo_lido=False` chega ao juiz como
+    não-lida (desconto `F_SO_TITULO`); outra sem corpo chega como não-lida
+    também. Espiona `decidir` para pinar o `ItemEvidencia` que o pipeline monta.
+    """
+    from factcheck_mvp import avaliador as _aval
+    from factcheck_mvp import decisao as _dec
+
+    r1, c1 = _pag("https://g1.globo.com/saude/2024/01/cafe-cancer-wiring-a/",
+                  "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    r2, c2 = _pag("https://www.estadao.com.br/estadao-verifica/2024/02/cafe-cancer-wiring-b/",
+                  "Café e câncer: o que diz a ciência",
+                  "Não há evidência de que café cura câncer, dizem oncologistas.")
+    r3, _c3 = _pag("https://www.bbc.com/portuguese/articles/cafe-wiring-c",
+                   "O que a ciência diz sobre café",
+                   "Pesquisadores desmente que café cura câncer em revisão ampla.")
+    resultados = _prep(amb, [(r1, c1), (r2, c2)]) + [r3]
+    # r3 fora de `amb`: o crawl falha (sem corpo, flag False).
+    url_lida, url_so_titulo, url_sem_corpo = r1["link"], r2["link"], r3["link"]
+
+    tinha_corpo, vistos = {}, {}
+    orig_decidir = _dec.decidir
+
+    def _espiar(ev):
+        vistos["itens"] = list(ev.itens)
+        return orig_decidir(ev)
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+
+    def fake_avaliar(nucleo, peca):
+        url = peca.get("url") or ""
+        tinha_corpo[url] = bool(peca.get("corpo"))
+        if url == url_so_titulo:
+            # Divergência coberta: corpo presente, mas a peça não foi lida.
+            peca["corpo_lido"] = False
+        return {"posicao": "REFUTA", "citacao": "É falso que café cura câncer",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página diz que é falso que café cura câncer.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = _rodar("Café cura câncer", resultados)
+
+    # Guarda anti-vácuo: a divergência existe de fato no wiring.
+    assert tinha_corpo[url_so_titulo] is True
+    assert tinha_corpo[url_sem_corpo] is False
+
+    por_url = {it.url: it for it in vistos["itens"]}
+    assert set(por_url) == {url_lida, url_so_titulo, url_sem_corpo}
+    assert por_url[url_lida].corpo_lido is True
+    assert por_url[url_so_titulo].corpo_lido is False
+    assert por_url[url_sem_corpo].corpo_lido is False
+    assert all(it.classe == "REFUTA" and it.citacao_verificada is True for it in vistos["itens"])
+
+    fontes = {f.url: f for f in rel.fontes}
+    assert fontes[url_lida].corpo_lido is True
+    assert fontes[url_so_titulo].corpo_lido is False
+    assert fontes[url_sem_corpo].corpo_lido is False
+
+    # Caminho do desconto: só-título pesa F_SO_TITULO × corpo lido (mesma
+    # confiabilidade nas 3 — todas curadas — então a razão é exata).
+    pesos = {u: v["peso"] for v in rel.decisao["votos"] for u in v["urls"]}
+    assert set(pesos) == {url_lida, url_so_titulo, url_sem_corpo}
+    assert pesos[url_so_titulo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
+    assert pesos[url_sem_corpo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
+    assert rel.propensao == "alta", rel.justificativa
+
+
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")
     url = "https://boatos.org/x-antiga"
