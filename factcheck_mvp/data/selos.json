@@ -79,7 +79,8 @@
       "fake": "FALSO"
     },
     "boatos": {
-      "boato": "FALSO"
+      "boato": "FALSO",
+      "hoax": "FALSO"
     }
   },
   "nota_frases": "frases_de_titulo: convenções de MANCHETE (não são selos oficiais). Usadas só quando a agência não publica selo; o ingestor grava a frase em selo_original e origem 'rss-titulo'. Consultadas por normalizar() depois de 'geral'.",

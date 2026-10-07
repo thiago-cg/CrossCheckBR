@@ -102,6 +102,9 @@ SERP_SITES_EXTRAS = _get("SERP_SITES_EXTRAS", "")
 DEEP_CRAWL_MAX_PAGES = _int("DEEP_CRAWL_MAX_PAGES", 3)
 # Teto total de páginas lidas por consulta (todas as afirmações) antes do juiz
 DEEP_CRAWL_TOTAL = _int("DEEP_CRAWL_TOTAL", 10)
+# Confiabilidade (confiabilidade.py): fora do catálogo, "site muito acessado" = entre os
+# N domínios mais acessados da lista Tranco (data/trafego_tranco.csv.gz guarda até 200 mil).
+TRAFEGO_RANK_MAX = _int("TRAFEGO_RANK_MAX", 200_000)
 DEEP_CRAWL_TIMEOUT_S = _int("DEEP_CRAWL_TIMEOUT_S", 15)
 DEEP_CRAWL_MAX_BYTES = _int("DEEP_CRAWL_MAX_BYTES", 5_000_000)
 API_RATE_LIMIT_PER_MIN = _int("API_RATE_LIMIT_PER_MIN", 30)

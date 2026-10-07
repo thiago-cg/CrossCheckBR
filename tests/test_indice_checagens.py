@@ -92,3 +92,32 @@ def test_benchmark_real_nao_regride(monkeypatch):
 
     r = b.avaliar(Indice.de_checagens(), b._casos())
     assert r["recall@3"] >= 0.75 and r["taxa_fp"] <= 0.10, r
+
+
+def test_tokens_alfanumericos_curtos_ficam():
+    # sem isto "5G causa câncer" virava "causa câncer" e casava com qualquer boato sobre câncer
+    toks = indice.tokenizar_pt("5G causa câncer; H1N1 e 4g")
+    assert "5g" in toks and "h1n1" in toks and "4g" in toks
+
+
+def test_numeros_da_alegacao_precisam_bater(monkeypatch):
+    monkeypatch.delenv("INDICE_CHECAGENS", raising=False)
+    regs = [{"url": f"https://c.test/{i}", "titulo": t, "afirmacao_checada": t, "agencia": "lupa",
+             "veredito": "FALSO"} for i, t in enumerate([
+                 "Lula e Janja gastaram R$ 62 bilhões em viagens com dinheiro público",
+                 "Lula e Janja gastaram R$ 7 bilhões em viagens com dinheiro público"])]
+    # ruído realista: documentos que casam 1 termo (o limiar é relativo à mediana do ruído)
+    regs += [{"url": f"https://o.test/{i}", "titulo": f"Pacote de viagens para o litoral {i}",
+              "afirmacao_checada": f"Agência vende viagens baratas {i}", "agencia": "boatos"} for i in range(30)]
+    idx = Indice.de_checagens(regs)
+    urls = [h["url"] for h in idx.buscar_checagens("Lula e Janja gastaram 7 bilhões em viagens", k=5)]
+    assert urls == ["https://c.test/1"]  # a de R$ 62 bilhões não volta
+    sem = [h["url"] for h in idx.buscar_checagens("Lula e Janja gastaram 7 bilhões em viagens", k=5,
+                                                   limiar={"exigir_numeros": False})]
+    assert set(sem) == {"https://c.test/0", "https://c.test/1"}  # sem a regra, as duas voltam
+
+
+def test_numero_colado_em_nome_nao_conta():
+    # "CR7", "5G", "Covid-19" são nomes: não exigem o número na checagem
+    assert indice._RE_NUMERO.findall("CR7 e 5G e Covid-19 e H1N1") == []
+    assert indice._RE_NUMERO.findall("gastou R$ 7,35 bilhões; reajuste de 15%") == ["7", "35", "15"]

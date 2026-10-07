@@ -23,7 +23,8 @@ import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import afirmacoes, config, corroboracao, decisao, juiz_llm, padroes_llm, replay, selos, telemetria
+from . import (afirmacoes, confiabilidade, config, corroboracao, decisao, juiz_llm, padroes_llm, replay,
+               selos, telemetria)
 from . import agente as _agente
 from .agregador import perguntas_guia
 from .aprofundar import aprofundar
@@ -144,6 +145,8 @@ class Pipeline:
                        "UNSLOTH_MODEL_NAME": config.UNSLOTH_MODEL_NAME or "(loaded=true de /models)",
                        "detector": getattr(self.detector, "nome", type(self.detector).__name__),
                        "INDICE_CHECAGENS": _indice.habilitado(),
+                       "TRAFEGO_LISTA": confiabilidade.metadados().get("lista"),
+                       "TRAFEGO_RANK_MAX": config.TRAFEGO_RANK_MAX,
                        "AGENTE_MAX_BUSCAS": getattr(config, "AGENTE_MAX_BUSCAS", None),
                        "AGENTE_MAX_ONDAS_EXTRAS": getattr(config, "AGENTE_MAX_ONDAS_EXTRAS", None),
                        "JUIZ_MAX_NOTICIAS": config.JUIZ_MAX_NOTICIAS, "JUIZ_LOTE": config.JUIZ_LOTE,
@@ -160,7 +163,7 @@ class Pipeline:
                               decisao="descartada" if f.relevante is False else "mantida",
                               motivo=(f"juiz: {f.postura}" if f.postura else "não julgada"),
                               cluster=f.cluster, curada=f.curada, corpo_lido=f.corpo_lido,
-                              confianca=f.confianca)
+                              confianca=f.confianca, confiabilidade=f.confiabilidade)
         telemetria.finalizar_run(rel.model_dump(mode="json"))
         return rel
 
@@ -178,6 +181,8 @@ class Pipeline:
         if portal and portal.get("nome"):
             p["veiculo"] = portal["nome"]
         p["dominio"] = corroboracao.dominio(p.get("url", ""))
+        # Curada > plataforma (rede social/UGC) > institucional > muito acessada (Tranco) > pouco acessada
+        p["confiabilidade"] = confiabilidade.classificar(p.get("url", ""), p["curada"])
 
     async def _buscar_web(self, afs: List[Afirmacao], avisar, etapa, limitacoes
                           ) -> Tuple[List[Dict[str, Any]], Optional["_agente.EstadoBusca"]]:
@@ -424,7 +429,8 @@ class Pipeline:
                 url=p["url"], afirmacao=ai, cluster=p.get("cluster") or p["url"], classe=r.get("classe"),
                 motor=r.get("motor") or "", citacao_verificada=r.get("citacao_verificada"),
                 curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"),
-                origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or ""))
+                origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
+                confiabilidade=p.get("confiabilidade")))
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade)
                         for a in afs],
@@ -495,7 +501,8 @@ class Pipeline:
     def _selecionar(self, afs: List[Afirmacao], pecas: List[Dict[str, Any]],
                     excluir: Optional[set] = None, afs_alvo: Optional[set] = None) -> List[Tuple[int, int]]:
         """Pares (peça, afirmação) p/ o juiz, até JUIZ_MAX_NOTICIAS, round-robin por afirmação.
-        Ordem por afirmação: overlap (título+snippet × núcleo+consulta), selo, fonte curada.
+        Ordem por afirmação: overlap (título+snippet × núcleo+consulta), selo, fonte curada e
+        confiabilidade (muito acessada/institucional sobe; rede social e site pouco acessado descem).
         `excluir`: pares já julgados; `afs_alvo`: só estas afirmações (onda extra do agente)."""
         teto = max(0, config.JUIZ_MAX_NOTICIAS or 10)
         excluir = excluir or set()
@@ -509,7 +516,8 @@ class Pipeline:
             cands.sort(key=lambda i: (_overlap(ref, f"{pecas[i].get('titulo','')} {pecas[i].get('snippet','')}")
                                       + (0.3 if pecas[i].get("veredito") else 0)
                                       + (0.15 if pecas[i].get("curada") else 0)
-                                      + (0.1 if pecas[i].get("tipo_portal") == "checagem" else 0)),
+                                      + (0.1 if pecas[i].get("tipo_portal") == "checagem" else 0)
+                                      + confiabilidade.BONUS_SELECAO.get(pecas[i].get("confiabilidade") or "", 0.0)),
                        reverse=True)
             filas.append(cands)
         saida: List[Tuple[int, int]] = []
@@ -786,6 +794,7 @@ class Pipeline:
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
                 postura=classe, citacao=r.get("citacao") or None, citacao_verificada=r.get("citacao_verificada"),
                 motor_juiz=r.get("motor"), cluster=p.get("cluster"), curada=bool(p.get("curada")),
+                confiabilidade=p.get("confiabilidade"),
                 afirmacao=afs[ai].texto if ai is not None else None)))
         fontes.sort(key=lambda x: x[:3])
         return [f for *_, f in fontes][: max(10, config.MAX_EVIDENCIAS * 2)]

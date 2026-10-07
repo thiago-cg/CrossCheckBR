@@ -160,7 +160,7 @@ def radicalizacao_ativa() -> bool:
 
 def tokenizar_pt(texto: str, radical: bool = True) -> List[str]:
     """Minúsculas, sem acento, sem stopword/moldura, radical RSLP (sem acento).
-    Números com ≥2 dígitos ficam (anos, valores); palavras com <3 letras saem."""
+    Números e termos com dígito (5g, h1n1) com ≥2 caracteres ficam; palavras com <3 letras saem."""
     stop = _stopwords()
     saida = []
     for w in re.findall(r"[^\W_]+", (texto or "").lower()):
@@ -168,6 +168,10 @@ def tokenizar_pt(texto: str, radical: bool = True) -> List[str]:
         if not base or base in stop:
             continue
         if base.isdigit():
+            if len(base) >= 2:
+                saida.append(base)
+            continue
+        if any(c.isdigit() for c in base):  # "5g", "4g", "h1n1": sem eles "5G causa câncer" vira "causa câncer"
             if len(base) >= 2:
                 saida.append(base)
             continue
@@ -198,13 +202,23 @@ def tokenizar_pt(texto: str, radical: bool = True) -> List[str]:
 #   ESCOLHIDO (0,60, 3 termos) .. recall@1 0,83  recall@3 0,83  FP  2,5%
 # Preferimos precisão: um atalho errado entra como "caminho feliz" (peso alto);
 # um atalho perdido só devolve a consulta para a busca aberta.
+#
+# 07/10/2026 — índice com o histórico da Lupa e do Boatos.org (21.579 checagens): com 65×
+# mais textos "quase iguais", o FP subiu para 13,2% (r@3 0,86, 22 positivos). Critério 4,
+# "números batem": se a consulta tem números, ≥1 deles precisa estar na afirmação/título
+# ("Janja gastou R$ 7 bilhões" não casa com "R$ 62 milhões"; "salário de 3 mil" não casa
+# com "acabar com o salário mínimo"). Resultado: FP 7,9%, r@1 0,77 e r@3 0,86 iguais.
 _LIMIAR = {
     "piso_abs": 4.0,
     "fator_mediana": 2.0,
     "fracao_top1": 0.5,
     "min_termos": 3,
     "cobertura_min": 0.6,
+    "exigir_numeros": True,
 }
+# Só números soltos ("7 bilhões", "15%", "R$ 3 mil"); colados a letras/hífen não contam
+# ("CR7", "5G", "Covid-19", "H1N1" são nomes, não quantidades).
+_RE_NUMERO = re.compile(r"(?<![\w-])\d+(?![^\W\d_])")
 _BOOST_AFIRMACAO = 3  # repetição de tokens = boost de campo "pobre" (sem BM25F)
 _BOOST_TITULO = 2
 _MAX_TOKENS_TRECHO = 80
@@ -353,6 +367,7 @@ class Indice:
         q = list(dict.fromkeys(tokenizar_pt(afirmacao)))
         if not q:
             return []
+        nums_q = set(_RE_NUMERO.findall(afirmacao or "")) if lim.get("exigir_numeros") else set()
         scores = self._bm25_chk.get_scores(q)
         positivos = sorted((s for s in scores if s > 0), reverse=True)
         if not positivos:
@@ -376,6 +391,11 @@ class Indice:
             cobertura = sum(peso_q[t] for t in q if t in self._campos_chk[i]) / soma_q
             if cobertura < lim["cobertura_min"]:
                 continue
+            if nums_q:
+                reg = self.checagens[i]
+                if not nums_q & set(_RE_NUMERO.findall(f"{reg.get('afirmacao_checada') or ''} "
+                                                       f"{reg.get('titulo') or ''}")):
+                    continue
             saida.append({**self.checagens[i], "score": round(s, 4), "score_rel": round(cobertura, 4),
                           "termos_casados": casados})
             if len(saida) >= k:

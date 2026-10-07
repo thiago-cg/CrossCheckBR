@@ -33,7 +33,7 @@ def _rel():
         propensao="alta", justificativa="Alta propensão de ser fake news.",
         header="🔴 Alta propensão de ser fake news",
         consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
-        fontes=[_fonte("https://a.test/1", "REFUTA", corpo_lido=True),
+        fontes=[_fonte("https://a.test/1", "REFUTA", corpo_lido=True, confiabilidade="alto_trafego"),
                 _fonte("https://a.test/fora", "NAO_TRATA")],
         etapas=[EtapaRecibo(nome="juiz", status="ok"), EtapaRecibo(nome="base-checagem", status="parcial")],
         limitacoes=["Uma limitação."],
@@ -43,7 +43,7 @@ def _rel():
 def test_bot_mostra_postura_leitura_e_etapas_legiveis():
     from factcheck_mvp.telegram_bot import formatar
     t = formatar(_rel())
-    assert "Portal contesta o que o texto afirma (📄 texto lido)" in t
+    assert "Portal contesta o que o texto afirma (📄 texto lido · site muito acessado)" in t
     assert "a.test/fora" not in t  # fora do tema não vira evidência
     assert "✅ Análise das fontes" in t and "⚠️ Base de checagens" in t
     assert "juiz:ok" not in t
@@ -53,6 +53,6 @@ def test_bot_mostra_postura_leitura_e_etapas_legiveis():
 def test_web_mostra_postura_e_esconde_fora_do_tema():
     from factcheck_mvp.api import _render_html
     h = _render_html("x", _rel())
-    assert "contesta o que o texto afirma" in h and "📄 texto lido" in h
+    assert "contesta o que o texto afirma" in h and "📄 texto lido" in h and "site muito acessado" in h
     assert "a.test/fora" not in h
     assert "Análise das fontes" in h

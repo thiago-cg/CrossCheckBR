@@ -14,6 +14,9 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
                 w = W_POSTURA * f_fonte * f_corpo
       veredito: d = selos.direcao(veredito) (FALSO +1 … VERDADEIRO -1; SATIRA 0 = não vota)
                 w = W_VEREDITO * f_fonte
+      f_fonte = confiabilidade da fonte (confiabilidade.FATOR_POSTURA / FATOR_VEREDITO):
+                curada 1,0 · institucional / muito acessada (Tranco) 0,6 (selo 0,8) ·
+                rede social / plataforma 0,45 (selo 0,55) · site pouco acessado 0,3 (selo 0,4)
       página com postura e veredito: vale a contribuição de maior |.| se concordam;
       se discordam, 0 (conflito registrado).
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
@@ -26,6 +29,9 @@ Faixas SIMÉTRICAS em torno de 0 (τ = ln 3 ≈ 1,10, ou seja p ≥ 0,75 / p ≤
     L ≥ +τ → alta · L ≤ −τ → baixa · |L| < τ → media
     indeterminada: nenhum cluster com voto ≠ 0 (0 fontes SUSTENTA/REFUTA e nenhum
     veredito aplicável), ou afirmação vaga, ou opinião/sátira sem veredito.
+Trava de confiabilidade: sem ao menos 1 voto de fonte confiável (curada, institucional ou muito
+acessada) no mesmo sentido, |L_a| fica abaixo de τ — redes sociais e sites pouco acessados votam,
+mas sozinhos não cravam alta/baixa.
 Consequências: 1 fonte curada sozinha (w=1,0) → média (não satura); 2 clusters
 concordes → alta/baixa; 1 selo de checagem aplicável (1,5) → alta/baixa; fontes em
 conflito → média. Sinais `fallback-*` (sem juiz) são ignorados. Ausência de
@@ -39,14 +45,15 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-from . import selos
+from . import confiabilidade, selos
 
 # ------------------------------------------------------------------ parâmetros (únicos)
 TAU = math.log(3)            # faixa média: |L| < ln 3  <=>  0,25 < p < 0,75
 W_POSTURA = 1.0              # postura com citação verificada, fonte curada, corpo lido
 W_VEREDITO = 1.5             # selo de checagem tipado, aplicável à afirmação
-F_NAO_CURADA = 0.6           # fonte fora do catálogo curado ainda vota, com peso menor
-F_VEREDITO_NAO_CURADA = 0.8  # ClaimReview de site fora do catálogo
+# Fonte fora do catálogo: o fator vem do nível de confiabilidade (confiabilidade.py).
+F_NAO_CURADA = confiabilidade.FATOR_POSTURA[confiabilidade.ALTO_TRAFEGO]            # 0,6 (como antes)
+F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEGO]  # 0,8 (como antes)
 F_SO_TITULO = 0.7            # postura julgada só com título/snippet (corpo não lido)
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
@@ -67,6 +74,10 @@ class ItemEvidencia:
     veredito: Optional[str] = None    # selos.VEREDITOS
     origem_veredito: Optional[str] = None  # pagina|indice
     veiculo: str = ""
+    confiabilidade: Optional[str] = None   # confiabilidade.NIVEIS; None = calcula pela URL
+
+    def nivel_confiabilidade(self) -> str:
+        return self.confiabilidade or confiabilidade.classificar(self.url, self.curada)
 
 
 @dataclass
@@ -99,6 +110,7 @@ class Voto:
     classes: List[str]
     vereditos: List[str]
     motivo: str
+    confiavel: bool = True     # algum item do cluster é curado, institucional ou muito acessado
 
 
 @dataclass
@@ -114,7 +126,7 @@ class Decisao:
     conflitos: List[Dict[str, Any]] = field(default_factory=list)
     contagem: Dict[str, int] = field(default_factory=dict)
     travas: Dict[str, bool] = field(default_factory=dict)
-    parametros: Dict[str, float] = field(default_factory=dict)
+    parametros: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -141,6 +153,9 @@ class Decisao:
             if self.conflitos:
                 partes.append(f"{len(self.conflitos)} fonte(s) com selo e texto em sentidos opostos "
                               "foram desconsideradas.")
+            if self.travas.get("sem_fonte_confiavel"):
+                partes.append("As fontes que tomam posição são redes sociais ou sites pouco acessados, "
+                              "então o resultado não passa de propensão média.")
         partes.append(f"Lidas {c.get('lidas', 0)} página(s) de {c.get('consultadas', 0)} consultada(s); "
                       f"{c.get('julgadas', 0)} julgada(s): {c.get('sustenta', 0)} confirmam, "
                       f"{c.get('refuta', 0)} contestam, {c.get('relata', 0)} só relatam, "
@@ -201,7 +216,8 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     post = None
     if it.classe in CLASSES_VOTO:
         d = 1.0 if it.classe == "REFUTA" else -1.0
-        w = W_POSTURA * (1.0 if it.curada else F_NAO_CURADA) * (1.0 if it.corpo_lido else F_SO_TITULO)
+        w = (W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]
+             * (1.0 if it.corpo_lido else F_SO_TITULO))
         post = (s * d * w, f"postura {it.classe}")
     ver = None
     if it.veredito:
@@ -214,7 +230,7 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
                 dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
                                                 "motivo": "selo sem direção (ex.: sátira)"})
             else:
-                w = W_VEREDITO * (1.0 if it.curada else F_VEREDITO_NAO_CURADA)
+                w = W_VEREDITO * confiabilidade.FATOR_VEREDITO[it.nivel_confiabilidade()]
                 ver = (s * d * w, f"selo {it.veredito} ({it.origem_veredito or '?'})")
     if post and ver:
         if post[0] * ver[0] < 0:
@@ -236,11 +252,13 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
 def decidir(ev: Evidencias) -> Decisao:
     """Função pura: mesma entrada, mesma Decisao. Não faz I/O nem telemetria."""
     dec = Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="",
-                  travas={"vago": ev.vago, "opiniao": ev.opiniao, "rumor": ev.rumor,
+                  travas={"vago": ev.vago, "opiniao": ev.opiniao, "rumor": ev.rumor, "sem_fonte_confiavel": False,
                           "juiz_disponivel": ev.juiz_disponivel},
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
-                              "f_so_titulo": F_SO_TITULO})
+                              "f_so_titulo": F_SO_TITULO,
+                              "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
+                              "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO)})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),
@@ -273,9 +291,17 @@ def decidir(ev: Evidencias) -> Decisao:
                         urls=sorted({it.url for _, _, it in contribs}),
                         classes=sorted({it.classe for _, _, it in contribs if it.classe}),
                         vereditos=sorted({it.veredito for _, _, it in contribs if it.veredito}),
-                        motivo="; ".join(sorted({d for _, d, _ in contribs})))
+                        motivo="; ".join(sorted({d for _, d, _ in contribs})),
+                        confiavel=any(it.nivel_confiabilidade() in confiabilidade.CONFIAVEIS
+                                      for v, _, it in contribs if v * sinal > 0))
             dec.votos.append(voto)
             L_a += voto.valor
+        # Fontes pouco confiáveis (rede social, site pouco acessado) votam, mas sozinhas não
+        # cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na faixa média.
+        if abs(L_a) >= TAU and not any(v.confiavel and v.afirmacao == a_idx and v.valor * L_a > 0
+                                       for v in dec.votos):
+            L_a = math.copysign(TAU * 0.99, L_a)
+            dec.travas["sem_fonte_confiavel"] = True
         por_af[a_idx] = L_a
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": sum(1 for v in dec.votos if v.afirmacao == a_idx)})
@@ -309,4 +335,7 @@ def decidir(ev: Evidencias) -> Decisao:
         dec.motivo = {"alta": "fontes independentes contestam o que o texto afirma",
                       "baixa": "fontes independentes confirmam o que o texto afirma",
                       "media": "evidência fraca ou dividida"}[dec.nivel]
+        if dec.nivel == "media" and dec.travas.get("sem_fonte_confiavel"):
+            dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados; "
+                          "falta a confirmação de um veículo, órgão público ou site muito acessado")
     return dec

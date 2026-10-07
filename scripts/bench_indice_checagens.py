@@ -31,16 +31,32 @@ from factcheck_mvp.indice import Indice  # noqa: E402
 from factcheck_mvp.ingestor import chave_url  # noqa: E402
 
 FORA_DO_TEMA = [
-    "ibuprofeno piora a dengue", "café cura câncer", "vacina da covid deixa mulheres estéreis",
+    "ibuprofeno piora a dengue", "café cura câncer",
     "receita de bolo de cenoura com cobertura", "o dólar vai chegar a 10 reais em dezembro",
     "Neymar vai voltar pro Santos em 2027", "beber água com limão em jejum emagrece",
-    "a Terra é plana e a NASA esconde", "o Pix vai ser taxado a partir de janeiro",
-    "5G causa câncer e matou pássaros", "prefeitura de Curitiba vai cobrar pedágio urbano",
+    "a Terra é plana e a NASA esconde",
+    "prefeitura de Curitiba vai cobrar pedágio urbano",
     "Lula inaugurou hospital no Piauí ontem", "Bolsonaro recebeu alta do hospital hoje",
     "Flávio Bolsonaro lidera pesquisa em São Paulo", "Moraes mandou prender o Elon Musk",
-    "Galípolo vai baixar os juros para 5%", "o STF liberou o porte de maconha",
+    "Galípolo vai baixar os juros para 5%",
     "Lula vai visitar a China em novembro", "Vorcaro fechou delação premiada com a PF",
     "vacina da gripe causa Alzheimer", "Anitta anunciou que vai se aposentar",
+]
+
+
+# Saíram de FORA_DO_TEMA em 07/10/2026: com o histórico da Lupa e do Boatos.org (21 mil
+# checagens) estas alegações TÊM checagem real no índice — devolvê-las é acerto, não FP.
+# Viram positivos (mesma métrica de recall) com as URLs conferidas à mão.
+NO_INDICE_HISTORICO = [
+    ("vacina da covid deixa mulheres estéreis",
+     ["https://www.agencialupa.org/jornalismo/2020/12/04/verificamos-vacina-covid-19-infertilidade-mulheres/"]),
+    ("o Pix vai ser taxado a partir de janeiro",
+     ["https://www.agencialupa.org/jornalismo/2025/10/21/pix-nao-tera-nova-regra-nem-cobranca-de-imposto-a-partir-de-janeiro-de-2026/",
+      "https://www.boatos.org/politica/73865governo-vai-cobrar-imposto-de-275-em-pix-acima-de-r-5-mil-a-partir-de-janeiro-de-2026.html"]),
+    ("5G causa câncer e matou pássaros",
+     ["https://www.boatos.org/tecnologia/tecnologia-5g-morte-passaros-radiacao.html"]),
+    ("o STF liberou o porte de maconha",
+     ["https://www.agencialupa.org/jornalismo/2024/07/04/liberou-a-maconha-parlamentares-bolsonaristas-desinformam-ao-criticar-stf-nas-redes/"]),
 ]
 
 
@@ -52,6 +68,8 @@ def _casos():
 
 def avaliar(idx: Indice, casos, limiar=None, verbose=False):
     pos = [c for c in casos if "no_indice" in c["tags"]]
+    pos += [{"id": f"historico:{i}", "entrada": {"conteudo": q}, "urls_checagem": urls}
+            for i, (q, urls) in enumerate(NO_INDICE_HISTORICO)]
     neg = [(c["id"], c["entrada"]["conteudo"]) for c in casos if "fora_do_indice" in c["tags"]]
     neg += [(f"tema:{i}", q) for i, q in enumerate(FORA_DO_TEMA)]
     r1 = r3 = 0
