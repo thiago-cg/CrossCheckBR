@@ -4,8 +4,10 @@ from factcheck_mvp.schemas import EntradaConsulta, EtapaRecibo, FonteEvidencia, 
 
 
 def _fonte(url, postura, **kw):
-    return FonteEvidencia(url=url, titulo="Título da notícia", portal_nome="Portal",
-                          postura=postura, relevante=postura != "NAO_TRATA", **kw)
+    kw.setdefault("titulo", "Título da notícia")
+    kw.setdefault("portal_nome", "Portal")
+    return FonteEvidencia(url=url, postura=postura,
+                          relevante=postura != "NAO_TRATA", **kw)
 
 
 def _decisao(*votos):
@@ -56,3 +58,43 @@ def test_web_mostra_postura_e_esconde_fora_do_tema():
     assert "contesta o que o texto afirma" in h and "📄 texto lido" in h and "site muito acessado" in h
     assert "a.test/fora" not in h
     assert "Análise das fontes" in h
+
+
+def _rel_e3():
+    # E3: 1 fonte lida + 1 só título (corpo_lido=False, em Decisao.nao_analisadas).
+    return RelatorioChecagem(
+        propensao="media", justificativa="Evidência fraca ou dividida.",
+        header="🟡 Propensão média de ser fake news",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        fontes=[_fonte("https://a.test/lida", "REFUTA", corpo_lido=True,
+                       confiabilidade="alto_trafego", titulo="Titulo da fonte lida",
+                       portal_nome="PortalLido"),
+                _fonte("https://a.test/so-titulo", "REFUTA", corpo_lido=False,
+                       confiabilidade="alto_trafego", titulo="Titulo da fonte so manchete",
+                       portal_nome="PortalTitulo")],
+        etapas=[], limitacoes=[],
+        decisao={**_decisao(("https://a.test/lida", 1.0)),
+                 "nao_analisadas": [{"url": "https://a.test/so-titulo", "classe": "REFUTA",
+                                      "veredito": None, "afirmacao": 0}]})
+
+
+def test_e3_bot_marca_so_titulo_como_nao_analisada_integralmente():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_e3())
+    assert t.count("não analisada integralmente") == 1
+    itens = [l for l in t.splitlines() if l[:2] in ("1.", "2.")]
+    assert len(itens) == 2
+    assert "não analisada integralmente" not in itens[0]
+    assert "não analisada integralmente" in itens[1]
+    assert verificar_neutralidade(t) == []
+
+
+def test_e3_web_marca_so_titulo_como_nao_analisada_integralmente():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_e3())
+    assert h.count("não analisada integralmente") == 1
+    cartoes = h.split("<div")
+    lido = next(c for c in cartoes if "a.test/lida" in c)
+    titulo = next(c for c in cartoes if "a.test/so-titulo" in c)
+    assert "não analisada integralmente" not in lido
+    assert "não analisada integralmente" in titulo

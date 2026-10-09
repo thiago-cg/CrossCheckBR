@@ -201,6 +201,22 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> str | None:
         return None
 
 
+def _urls_nao_analisadas(rel) -> set:
+    """URLs em `Decisao.nao_analisadas` (E3: lidas só pelo título/snippet, não votam).
+
+    A decisão serializada (`rel.decisao`, dict) carrega a lista; fonte sem
+    decisão (relatórios antigos/testes) devolve vazio e vale só `corpo_lido`.
+    Nunca levanta (renderização não pode quebrar a resposta).
+    """
+    try:
+        dec = getattr(rel, "decisao", None) or {}
+        if not isinstance(dec, dict):
+            dec = dec.to_dict() if hasattr(dec, "to_dict") else {}
+        return {n.get("url") for n in dec.get("nao_analisadas", []) or [] if n.get("url")}
+    except Exception:
+        return set()
+
+
 def formatar(rel: RelatorioChecagem) -> str:
     emoji = {"baixa": "🟢", "media": "🟡", "alta": "🔴", "indeterminada": "⚪"}.get(rel.propensao, "⚪")
     header = getattr(rel, "header", "") or f"{emoji} Propensão {rel.propensao.upper()}"
@@ -230,10 +246,15 @@ def formatar(rel: RelatorioChecagem) -> str:
         from .agregador import direcoes_por_url, postura_legivel
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
+        nao_lidas = _urls_nao_analisadas(rel)
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
             selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
-            corpo = "📄 texto lido" if getattr(f, "corpo_lido", False) else "📰 só manchete"
+            if getattr(f, "corpo_lido", False) and f.url not in nao_lidas:
+                corpo = "📄 texto lido"
+            else:
+                # E3: só título/snippet não foi analisada integralmente (não vota).
+                corpo = "📰 só manchete — não analisada integralmente"
             nivel = ROTULO.get(getattr(f, "confiabilidade", None) or "")
             linhas.append(f"{i}. {f.portal_nome or 'web'} {postura_legivel(f, direcoes)}{selo} "
                           f"({corpo}{' · ' + nivel if nivel else ''}): {f.titulo[:90]}")

@@ -19,7 +19,8 @@ from .schemas import EntradaConsulta, RelatorioChecagem
 from .serpapi_layer import SerpAPIClient
 
 try:
-    from .telegram_bot import LINK_SEM_TEXTO_MSG, _texto_link, classificar_entrada, formatar
+    from .telegram_bot import (LINK_SEM_TEXTO_MSG, _texto_link, _urls_nao_analisadas,
+                               classificar_entrada, formatar)
 except Exception:  # telegram opcional p/ API/web (bot não quebra API)
     def classificar_entrada(texto: str) -> EntradaConsulta:  # type: ignore
         t = (texto or "").strip()
@@ -31,6 +32,13 @@ except Exception:  # telegram opcional p/ API/web (bot não quebra API)
 
     def formatar(rel) -> str:  # type: ignore
         return f"{rel.header or rel.propensao} {rel.why_1linha or rel.justificativa}"
+
+    def _urls_nao_analisadas(rel) -> set:  # type: ignore
+        try:
+            dec = getattr(rel, "decisao", None) or {}
+            return {n.get("url") for n in dec.get("nao_analisadas", []) or [] if n.get("url")}
+        except Exception:
+            return set()
 
     _texto_link = None  # type: ignore
     LINK_SEM_TEXTO_MSG = "Não consegui ler esse link. Cole aqui o título e o texto da notícia."
@@ -150,16 +158,22 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
     if rel:
         # Mesma regra do bot: julgadas como fora do tema não aparecem como evidência.
         direcoes = direcoes_por_url(rel.decisao)
+        nao_lidas = _urls_nao_analisadas(rel)
         uteis = [f for f in rel.fontes if f.relevante is not False][:5]
         cor = {"contesta o que o texto afirma": "#b42318", "confirma o que o texto afirma": "#067647"}
 
         def _cartao(f) -> str:
             post = postura_legivel(f, direcoes)
+            if bool(getattr(f, "corpo_lido", False)) and f.url not in nao_lidas:
+                leitura = "📄 texto lido"
+            else:
+                # E3: só título/snippet não foi analisada integralmente (não vota).
+                leitura = "📰 só manchete — não analisada integralmente"
             return (f"<div style='border:1px solid #ccc;border-radius:6px;padding:8px;margin:6px 0'>"
                     f"<b>{esc(f.portal_nome or 'web')}</b> "
                     f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
                     f"{' · selo da agência: ' + esc(f.veredito) if f.veredito else ''}"
-                    f" · {'📄 texto lido' if f.corpo_lido else '📰 só manchete'}"
+                    f" · {leitura}"
                     f"{' · ' + esc(ROTULO[f.confiabilidade]) if f.confiabilidade in ROTULO else ''}<br/>"
                     f"{esc(f.titulo[:200])}<br/>"
                     f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
