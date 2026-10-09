@@ -425,3 +425,45 @@ def test_intervalo_entre_meses_ancora_no_inicio():
 @pytest.mark.parametrize("texto", ["O ato foi em 1º de março", "O ato foi no dia 1º de março"])
 def test_ordinal_primeiro_conta_como_dia(texto):
     assert aplicabilidade.marco_do_evento(texto, "2026-03-10") == ("2026-03-01", 2)
+
+
+# --- E4 revisão (I-2, M-4): fração ("8/10 dos casos") não é data; dd/mm e ISO sem contexto contam ---
+@pytest.mark.parametrize("texto,ref", [
+    ("Em 8/10 dos casos o remédio falhou", "2026-10-09"),     # sem o filtro ancoraria 2026-10-08
+    ("Em 9/10 dos casos o remédio falhou", "2026-10-09"),
+    ("No 1/2 tempo o time ganhou", "2026-02-05"),             # sem o filtro ancoraria 2026-02-01
+    ("Em 1/2 hora o paciente melhorou", "2026-01-03"),        # sem o filtro ancoraria 2026-01-01
+])
+def test_fracao_com_contexto_nao_ancora_data(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+def test_fracao_nao_desliga_o_hoje_da_afirmacao():
+    t = "Hoje, em 8/10 dos casos o remédio falhou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+    assert aplicabilidade.marco_da_afirmacao(t, t, 1, "2026-10-09") is None
+
+
+@pytest.mark.parametrize("texto", ["Hoje, 2/3 do jogo foi ruim", "Hoje, 3/4 dos eleitores votaram"])
+def test_fracao_sem_contexto_nao_desliga_o_hoje(texto):
+    assert aplicabilidade.janela_da_afirmacao(texto, texto, 1, "2026-10-09") == 2
+
+
+def test_dd_mm_sem_contexto_e_data_explicita_no_hoje():
+    """M-4: "Hoje, 08/10, ..." — 08/10 é outro dia que não a referência: o "hoje" é do ato de dizer.
+    Igual à referência ("09/10") não desliga."""
+    t = "Hoje, 08/10, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") is None
+    t2 = "Hoje, 09/10, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t2, t2, 1, "2026-10-09") == 2
+
+
+def test_iso_sem_contexto_e_data_explicita_no_hoje():
+    t = "Hoje, 2026-03-05, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") is None
+    t2 = "Hoje, 2026-10-09, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t2, t2, 1, "2026-10-09") == 2
+
+
+def test_iso_completa_ancora_o_marco_como_data_com_ano():
+    assert aplicabilidade.marco_do_evento("O ato foi em 2026-10-08", "2026-10-09") == ("2026-10-08", 2)

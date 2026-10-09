@@ -507,6 +507,16 @@ _MARCO_DD_MM_CTX_RE = re.compile(
     r"\b(?:dia|em|no|na|desde|ate)\s+(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?![/.:]\d)(?!\w)")
 # "08/10/2026" sem contexto: com ano, a barra já é data.
 _MARCO_DD_MM_ANO_RE = re.compile(r"(?<![\w/.:])(\d{1,2})/(\d{1,2})/(\d{4})(?![/.:]\d)(?!\w)")
+# dd/mm sem contexto e sem ano ("Hoje, 08/10, o ministro caiu"): só conta como data explícita do
+# "hoje" (M-4); não ancora o marco (sem contexto, "2/3" e placares são frações).
+_MARCO_DD_MM_NU_RE = re.compile(r"(?<![\w/.:,])(\d{1,2})/(\d{1,2})(?![/.:]\d)(?!\w)")
+# ISO ("2026-10-08", "2026-10-08 10:00", "2026-10-08t10:00"): data completa, com ano.
+_MARCO_ISO_RE = re.compile(r"(?<![\w/.:-])((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})"
+                           r"(?:[t ]\d{1,2}:\d{2}(?::\d{2})?)?(?![\w/-]|[.:]\d)")
+# O que vem DEPOIS de dd/mm sem ano e o torna fração: palavra de quantidade ("8/10 dos casos",
+# "1/2 hora", "1/2 tempo"). "de" conta só quando não abre um ano ("08/10 de 2026" é data).
+_FRACAO_DEPOIS_RE = re.compile(r"\s+(?:dos?|das|da|cada|horas?|h|min|minutos|tempo|parte|tanque)\b"
+                               r"|\s+de\b(?!\s+(?:19|20)\d{2}\b)")
 # "8 de outubro" ou "8 de outubro de 2023".
 _MARCO_DIA_MES_RE = re.compile(r"\b(\d{1,2})o?\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?\b")
 # "dia 8" ou "dia 8 de outubro (de 2023)"; "dia 8h" é hora, não data; "dia 8 de 2026" (sem mês) não é data.
@@ -580,9 +590,40 @@ def _sem_intervalos(texto_n: str) -> str:
     return _MARCO_INTERVALO_RE.sub(lambda m: f"{m.group(1)} de {m.group(2) or m.group(4)}", texto_n)
 
 
-def _datas_citadas(texto_n: str, ref: date) -> list[tuple[date, bool]]:
+def _fracao_depois(texto_n: str, pos: int) -> bool:
+    """True se logo após `pos` vem palavra de fração/quantidade (ver `_FRACAO_DEPOIS_RE`)."""
+    return _FRACAO_DEPOIS_RE.match(texto_n, pos) is not None
+
+
+def _ocorrencias(texto_n: str, bare: bool) -> list[tuple[int | None, int, str | None, bool]]:
+    """Ocorrências de data (mes|None, dia, ano|None, dia_solto) do texto normalizado, antes de inferir
+    mês/ano. Descarta a FRAÇÃO (dd/mm sem ano seguido de palavra de quantidade, I-2). `bare` inclui
+    dd/mm sem contexto nem ano, que é data explícita do "hoje" (M-4) mas não ancora o marco.
+    `dia_solto` = "dia 8" sem mês (ano inferido por `_marco_dia_bare`)."""
+    achadas: list[tuple[int | None, int, str | None, bool]] = []
+    for m in _MARCO_DD_MM_CTX_RE.finditer(texto_n):
+        if m.group(3) is None and _fracao_depois(texto_n, m.end()):
+            continue
+        achadas.append((int(m.group(2)), int(m.group(1)), m.group(3), False))
+    for m in _MARCO_DD_MM_ANO_RE.finditer(texto_n):
+        achadas.append((int(m.group(2)), int(m.group(1)), m.group(3), False))
+    if bare:
+        for m in _MARCO_DD_MM_NU_RE.finditer(texto_n):
+            if not _fracao_depois(texto_n, m.end()):
+                achadas.append((int(m.group(2)), int(m.group(1)), None, False))
+    for m in _MARCO_ISO_RE.finditer(texto_n):
+        achadas.append((int(m.group(2)), int(m.group(3)), m.group(1), False))
+    for m in _MARCO_DIA_MES_RE.finditer(texto_n):
+        achadas.append((_MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False))
+    for m in _MARCO_DIA_RE.finditer(texto_n):
+        mes_nome = m.group(2)
+        achadas.append((_MESES_DATA.get(mes_nome) if mes_nome else None, int(m.group(1)), m.group(3), True))
+    return achadas
+
+
+def _datas_citadas(texto_n: str, ref: date, bare: bool = False) -> list[tuple[date, bool]]:
     """Datas de dia/mês citadas no texto normalizado, como (data, ano_inferido). Sem filtro de
-    contexto, futuro ou distância: quem chama decide. Ano sem mês não é data."""
+    contexto, futuro ou distância: quem chama decide. Ano sem mês não é data. `bare`: ver `_ocorrencias`."""
     achadas: list[tuple[date, bool]] = []
 
     def _add(mes: int | None, dia: int, ano: str | None, bare: bool) -> None:
@@ -603,22 +644,15 @@ def _datas_citadas(texto_n: str, ref: date) -> list[tuple[date, bool]]:
         if d is not None:
             achadas.append((d, True))
 
-    for m in _MARCO_DD_MM_CTX_RE.finditer(texto_n):
-        _add(int(m.group(2)), int(m.group(1)), m.group(3), False)
-    for m in _MARCO_DD_MM_ANO_RE.finditer(texto_n):
-        _add(int(m.group(2)), int(m.group(1)), m.group(3), False)
-    for m in _MARCO_DIA_MES_RE.finditer(texto_n):
-        _add(_MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False)
-    for m in _MARCO_DIA_RE.finditer(texto_n):
-        mes_nome = m.group(2)
-        _add(_MESES_DATA.get(mes_nome) if mes_nome else None, int(m.group(1)), m.group(3), True)
+    for mes, dia, ano, dia_solto in _ocorrencias(texto_n, bare):
+        _add(mes, dia, ano, dia_solto)
     return achadas
 
 
 def _tem_data_explicita(texto_n: str) -> bool:
-    """O texto normalizado cita alguma data (dia/mês, com ou sem ano) ou um ano explícito?"""
-    return bool(_ANO_RE.search(texto_n)) or any(
-        p.search(texto_n) for p in (_MARCO_DD_MM_CTX_RE, _MARCO_DD_MM_ANO_RE, _MARCO_DIA_MES_RE, _MARCO_DIA_RE))
+    """O texto normalizado cita alguma data (dia/mês, com ou sem ano, dd/mm sem contexto, ISO) ou um
+    ano explícito? Frações ("8/10 dos casos") não contam (ver `_ocorrencias`)."""
+    return bool(_ANO_RE.search(texto_n)) or bool(_ocorrencias(texto_n, bare=True))
 
 
 def _data_explicita_fora(texto: str | None, referencia: str | None) -> bool:
@@ -633,7 +667,7 @@ def _data_explicita_fora(texto: str | None, referencia: str | None) -> bool:
         return _tem_data_explicita(texto_n)
     if any(int(a) != ref.year for a in _ANO_RE.findall(texto_n)):
         return True
-    return any(d != ref for d, _ in _datas_citadas(texto_n, ref))
+    return any(d != ref for d, _ in _datas_citadas(texto_n, ref, bare=True))
 
 
 def marco_do_evento(texto: str | None, referencia: str | None = None) -> tuple[str, int] | None:
