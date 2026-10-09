@@ -508,13 +508,13 @@ _MARCO_DD_MM_CTX_RE = re.compile(
 # "08/10/2026" sem contexto: com ano, a barra já é data.
 _MARCO_DD_MM_ANO_RE = re.compile(r"(?<![\w/.:])(\d{1,2})/(\d{1,2})/(\d{4})(?![/.:]\d)(?!\w)")
 # "8 de outubro" ou "8 de outubro de 2023".
-_MARCO_DIA_MES_RE = re.compile(r"\b(\d{1,2})\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?\b")
+_MARCO_DIA_MES_RE = re.compile(r"\b(\d{1,2})o?\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?\b")
 # "dia 8" ou "dia 8 de outubro (de 2023)"; "dia 8h" é hora, não data; "dia 8 de 2026" (sem mês) não é data.
-_MARCO_DIA_RE = re.compile(r"\bdia\s+(\d{1,2})(?!\s*h\b)(?!\s+de\s+\d{4}\b)"
+_MARCO_DIA_RE = re.compile(r"\bdia\s+(\d{1,2})o?(?!\s*h\b)(?!\s+de\s+\d{4}\b)"
                            r"(?:\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?)?\b")
 # "de 2 a 8 de outubro" / "de 30 de setembro a 2 de outubro": o INÍCIO do intervalo é o marco
 # (fonte publicada depois do início não é de outro episódio; ver `_sem_intervalos`).
-_MARCO_INTERVALO_RE = re.compile(r"\bde\s+(\d{1,2})(?:\s+de\s+(" + _MARCO_MESES + r"))?\s+a\s+"
+_MARCO_INTERVALO_RE = re.compile(r"\b(?:de|entre|dias)\s+(\d{1,2})(?:\s+de\s+(" + _MARCO_MESES + r"))?\s+(?:a|ate|e)\s+"
                                  r"(\d{1,2})\s+de\s+(" + _MARCO_MESES + r")\b")
 
 # Data citada (prazo, aniversário, agenda futura...), não data do fato -> não ancora.

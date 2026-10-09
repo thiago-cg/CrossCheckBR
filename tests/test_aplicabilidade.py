@@ -403,3 +403,25 @@ def test_janelas_efetivas_registram_o_limite_do_marco(monkeypatch):
     monkeypatch.setattr(config, "E4_MARCO_MAX_DIAS", 30)
     assert aplicabilidade.janelas_efetivas()["E4_MARCO_MAX_DIAS"] == 30
     assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-04-20") is None  # 43 > 30
+
+
+# --- E4 revisão (I-1, M-5): intervalo ancora no INÍCIO; "1º" (o ordinal vira "o" na normalização) ---
+@pytest.mark.parametrize("texto", [
+    "A operação ocorreu entre 2 e 8 de outubro",
+    "A operação ocorreu entre os dias 2 e 8 de outubro",
+    "A feira ocorreu dias 2 a 8 de outubro",
+    "A feira ocorreu de 2 até 8 de outubro",
+    "A feira ocorreu de 2 a 8 de outubro",
+])
+def test_intervalo_de_dias_ancora_no_inicio(texto):
+    assert aplicabilidade.marco_do_evento(texto, "2026-10-09") == ("2026-10-02", 2)
+
+
+def test_intervalo_entre_meses_ancora_no_inicio():
+    assert aplicabilidade.marco_do_evento("A feira ocorreu entre 30 de setembro e 2 de outubro",
+                                          "2026-10-09") == ("2026-09-30", 2)
+
+
+@pytest.mark.parametrize("texto", ["O ato foi em 1º de março", "O ato foi no dia 1º de março"])
+def test_ordinal_primeiro_conta_como_dia(texto):
+    assert aplicabilidade.marco_do_evento(texto, "2026-03-10") == ("2026-03-01", 2)
