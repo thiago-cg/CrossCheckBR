@@ -45,9 +45,6 @@ _SELO_ATRIBUIDO_RE = re.compile(
     re.IGNORECASE,
 )
 
-_AGENCIAS_CHECAGEM: Optional[frozenset] = None
-
-
 def formatar_selo(agencia: str, selo: str, artigo: str = "da") -> str:
     """Selo sempre atribuído à agência: "Selo da Lupa: FALSO"."""
     if artigo not in ("da", "do"):
@@ -56,22 +53,19 @@ def formatar_selo(agencia: str, selo: str, artigo: str = "da") -> str:
 
 
 def _agencias_checagem() -> frozenset:
-    """Nomes normalizados das agências de checagem do catálogo (lazy, com cache)."""
-    global _AGENCIAS_CHECAGEM
-    if _AGENCIAS_CHECAGEM is None:
-        nomes = set()
-        try:
-            from .catalogo import Catalogo, normalizar_nome
-            for p in Catalogo.carregar().checagem():
-                for n in [p.get("nome"), p.get("id")] + list(p.get("aliases_nome") or []):
-                    k = normalizar_nome(n)
-                    if k:
-                        nomes.add(k)
-        except Exception as e:
-            from . import telemetria
-            telemetria.fallback("agregador", f"catalogo indisponivel p/ selo atribuido: {e}")
-        _AGENCIAS_CHECAGEM = frozenset(nomes)
-    return _AGENCIAS_CHECAGEM
+    """Nomes normalizados das agências de checagem do catálogo (leitura fresca)."""
+    nomes = set()
+    try:
+        from .catalogo import Catalogo, normalizar_nome
+        for p in Catalogo.carregar().checagem():
+            for n in [p.get("nome"), p.get("id")] + list(p.get("aliases_nome") or []):
+                k = normalizar_nome(n)
+                if k:
+                    nomes.add(k)
+    except Exception as e:
+        from . import telemetria
+        telemetria.fallback("agregador", f"catalogo indisponivel p/ selo atribuido: {e}")
+    return frozenset(nomes)
 
 
 def verificar_neutralidade(texto: str) -> List[str]:

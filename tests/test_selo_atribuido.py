@@ -21,3 +21,9 @@ def test_reprova_selo_com_agencia_nao_cadastrada():
     texto = formatar_selo("Blog X", "FALSO", artigo="do")
     assert texto == "Selo do Blog X: FALSO"
     assert verificar_neutralidade(texto) != []
+
+
+def test_recorte_atribuido_ignora_frase_proibida_dentro_do_selo():
+    atribuido = formatar_selo("Lupa", "Notícia falsa")
+    assert verificar_neutralidade(atribuido) == []
+    assert verificar_neutralidade("Nossa conclusão: notícia falsa.") != []
