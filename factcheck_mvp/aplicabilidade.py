@@ -498,8 +498,9 @@ def marcador_temporal(texto_usuario: str) -> str | None:
 _MARCO_FOLGA_VAR = "E4_JANELA_HOJE"
 
 _MARCO_MESES = "|".join(sorted(_MESES_DATA, key=len, reverse=True))
-# Ano explícito de 4 dígitos (1900-2099) no texto normalizado.
-_ANO_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# Ano que fixa outro tempo: só com preposição antes ("em 2019", "desde 2019", "até 2030") ou em data
+# completa (checada à parte, em `_ocorrencias`). "Hoje, 2020 pessoas morreram" não é data (M-3).
+_ANO_PREP_RE = re.compile(r"\b(?:em|de|desde|ate|no ano de|do ano de|a partir de)\s+((?:19|20)\d{2})\b")
 # Dia/mês com contexto de data ("dia 08/10", "em 08/10", "no 08/10", "desde", "até"), com ou sem
 # ano. Sem contexto, "2/3", "3/1" e "3/4" são frações e placares: não ancoram nada. Bordas
 # excluem versão/hora/URL ("v1.08/10", "08/10:00"); ponto final de frase ("em 08/10.") é permitido.
@@ -673,7 +674,7 @@ def _datas_citadas(texto_n: str, ref: date, bare: bool = False) -> list[tuple[da
 def _tem_data_explicita(texto_n: str) -> bool:
     """O texto normalizado cita alguma data (dia/mês, com ou sem ano, dd/mm sem contexto, ISO) ou um
     ano explícito? Frações ("8/10 dos casos") não contam (ver `_ocorrencias`)."""
-    return bool(_ANO_RE.search(texto_n)) or bool(_ocorrencias(texto_n, bare=True))
+    return bool(_ANO_PREP_RE.search(texto_n)) or bool(_ocorrencias(texto_n, bare=True))
 
 
 def _data_explicita_fora(texto: str | None, referencia: str | None) -> bool:
@@ -686,7 +687,7 @@ def _data_explicita_fora(texto: str | None, referencia: str | None) -> bool:
     ref = _ref_date(referencia)
     if ref is None:
         return _tem_data_explicita(texto_n)
-    if any(int(a) != ref.year for a in _ANO_RE.findall(texto_n)):
+    if any(int(a) != ref.year for a in _ANO_PREP_RE.findall(texto_n)):
         return True
     return any(d != ref for d, _ in _datas_citadas(texto_n, ref, bare=True))
 
@@ -745,7 +746,7 @@ def marco_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
     marco = marco_do_evento(af_texto, referencia)
     if marco is not None or n_afirmacoes != 1:
         return marco
-    if _tem_data_explicita(_sem_intervalos(_normalizar(af_texto))) or _ANO_RE.search(_normalizar(texto_usuario)):
+    if _tem_data_explicita(_sem_intervalos(_normalizar(af_texto))) or _ANO_PREP_RE.search(_normalizar(texto_usuario)):
         return None
     return marco_do_evento(texto_usuario, referencia)
 

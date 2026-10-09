@@ -501,3 +501,14 @@ def test_recorrente_nao_desliga_o_hoje():
     t = "O benefício é pago todo dia 10 e hoje o banco falhou"
     assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
     assert aplicabilidade.marco_da_afirmacao(t, t, 1, "2026-10-09") is None
+
+
+# --- E4 revisão (M-3): ano só desliga o "hoje" com preposição antes (em/de/desde/até) ou em data completa ---
+def test_ano_solto_nao_desliga_o_hoje():
+    t = "Hoje, 2020 pessoas morreram"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+
+
+@pytest.mark.parametrize("texto", ["Hoje, em 2020 pessoas morreram", "Hoje, desde 2020, pessoas morreram"])
+def test_ano_com_preposicao_diferente_da_referencia_desliga(texto):
+    assert aplicabilidade.janela_da_afirmacao(texto, texto, 1, "2026-10-09") is None
