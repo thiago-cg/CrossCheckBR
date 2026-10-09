@@ -512,3 +512,30 @@ def test_ano_solto_nao_desliga_o_hoje():
 @pytest.mark.parametrize("texto", ["Hoje, em 2020 pessoas morreram", "Hoje, desde 2020, pessoas morreram"])
 def test_ano_com_preposicao_diferente_da_referencia_desliga(texto):
     assert aplicabilidade.janela_da_afirmacao(texto, texto, 1, "2026-10-09") is None
+
+
+# --- E4 revisão (I-5): travessão/meia-risca colados não colam palavras ("ontem—o" são duas) ---
+@pytest.mark.parametrize("texto,janela", [
+    ("Ontem—o ministro caiu", 3),
+    ("Ontem–o ministro caiu", 3),
+    ("O ministro caiu hoje—segundo fontes", 2),
+    ("Hoje…o time ganhou", 2),
+])
+def test_travessao_colado_separa_palavras(texto, janela):
+    assert aplicabilidade.janela_temporal(texto) == janela
+
+
+def test_marcador_com_travessao_colado_devolve_so_a_palavra():
+    assert aplicabilidade.marcador_temporal("Ontem—o ministro caiu") == "ontem"
+
+
+# --- E4 revisão (M-2): "segunda dose", "há pouco mais que", "de hoje em diante" não são momento ---
+@pytest.mark.parametrize("texto", [
+    "Nesta segunda dose da vacina foi aplicada",
+    "Esta quarta dose da vacina chegou",
+    "Nessa segunda chance o time virou",
+    "Há pouco mais que dez anos o país mudou",
+    "De hoje em diante o Pix será taxado",
+])
+def test_falsos_marcadores_m2_nao_contam(texto):
+    assert aplicabilidade.janela_temporal(texto) is None

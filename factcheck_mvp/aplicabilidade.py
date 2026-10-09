@@ -21,7 +21,8 @@ TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
 _SEMANA_DIA = (r"(?:domingo|segunda(?:-feira| feira)?|terca(?:-feira| feira)?|"
                r"quarta(?:-feira| feira)?|quinta(?:-feira| feira)?|"
                r"sexta(?:-feira| feira)?|sabado)"
-               r"(?!\s+(?:vez|parte|etapa|fase|tentativa|edicao|rodada|turno|onda)\b)")
+               r"(?!\s+(?:vez|parte|etapa|fase|tentativa|edicao|rodada|turno|onda|dose|chance|metade|"
+               r"temporada|versao|geracao)\b)")
 _DETERMINANTE_SEMANA = r"(?:neste|nesta|nesse|nessa|este|esta|esse|essa)"
 
 # Marcadores relativos do TEXTO (E4): (padrão sobre o texto normalizado — minúsculo, sem acento —,
@@ -59,7 +60,8 @@ _EXCLUSOES = tuple(re.compile(padrao) for padrao in (
     r"\bate\s+agora\b",
     r"\ba\s+partir\s+de\s+agora\b",
     r"\bde\s+agora\s+em\s+diante\b",
-    r"\bha\s+pouco\s+(?:mais|menos)\s+de\b",
+    r"\bde\s+hoje\s+em\s+diante\b",
+    r"\bha\s+pouco\s+(?:mais|menos)\s+(?:de|que)\b",
 ))
 
 _MESES_PT = (r"(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|"
@@ -69,8 +71,15 @@ _AGORA_EM_MES = re.compile(r"\bagora,?\s+em\s+" + _MESES_PT + r"\b")
 
 
 def _normalizar(texto: str | None) -> str:
-    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
-    return re.sub(r"\s+", " ", sem_acento.lower()).strip()
+    """Minúsculo, sem acento e só ASCII. Caractere que não decompõe em ASCII (travessão, meia-risca,
+    aspas) vira espaço: "ontem—o" são duas palavras e não pode virar "ontemo" (I-5). Marca combinante
+    sai; o resto decomposto (º→o, ç→c, … → ...) segue como antes."""
+    partes = []
+    for ch in unicodedata.normalize("NFKD", texto or ""):
+        if unicodedata.combining(ch):
+            continue
+        partes.append(ch if ord(ch) < 128 else " ")
+    return re.sub(r"\s+", " ", "".join(partes).lower()).strip()
 
 
 def _cfg_janela(variavel: str, default: int) -> int:
