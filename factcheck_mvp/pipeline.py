@@ -1125,7 +1125,8 @@ class Pipeline:
                               and getattr(dec, "descontos_temporais", None))
         if priorizar_data:
             n_dt = len(dec.descontos_temporais or [])
-            lims.append(f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
+            # No início: o bot mostra só as 3 primeiras limitações (telegram_bot.formatar).
+            lims.insert(0, f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
                                  fontes=fontes, etapas=etapas, limitacoes=lims,
                                  perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,

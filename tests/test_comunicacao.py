@@ -167,6 +167,21 @@ def test_bot_nao_corta_a_ultima_linha_quando_o_texto_cabe():
     assert verificar_neutralidade(t) == []
 
 
+def test_limitacao_de_datas_nao_some_do_bot_com_tres_limitacoes():
+    """O bot mostra limitacoes[:3]; o aviso de datas era anexado no fim e sumia."""
+    from factcheck_mvp.decisao import Decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.telegram_bot import formatar
+    dec = Decisao(nivel="media", log_odds=0.5, prob=0.6, motivo="x",
+                  descontos_temporais=[{"url": "https://g1.globo.com/a", "afirmacao": 0}],
+                  travas={"data_incompativel": True}, nivel_sem_desconto="alta")
+    rel = Pipeline._relatorio(EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+                              dec, [], [], [], ["L1", "L2", "L3"], "web")
+    assert rel.limitacoes[0].startswith("Datas:")
+    assert "• Datas:" in formatar(rel)
+    assert verificar_neutralidade(formatar(rel)) == []
+
+
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     from factcheck_mvp.telegram_bot import formatar
     rac = "A página afirma que o café cura o câncer, citando um estudo de dois anos. " * 4  # > cap
