@@ -211,6 +211,7 @@ def test_bot_placeholder_de_ano_mostra_so_o_ano():
                                             data_pub_bruta="2021-01-01")))
     assert "📅 publicada em 2021 · anterior ao período do texto" in t
     assert "01/01/2021" not in t
+    assert verificar_neutralidade(t) == []
 
 
 def test_bot_data_relativa_mostra_a_data_normalizada():
@@ -289,8 +290,10 @@ def test_web_lista_descontos_por_data_em_como_chegamos_aqui_sem_bits_no_bot():
     bloco = h[inicio:h.index("</details>", inicio)]
     assert "https://a.test/&lt;x&gt;" in bloco and "<script>" not in h
     assert "1905 dias além da janela de 2" in bloco and "r=0.05" in bloco and "0.88 bit" in bloco
+    assert verificar_neutralidade(_visivel(h)) == []
     t = formatar(rel)
     assert "bit" not in t.lower()
+    assert verificar_neutralidade(t) == []
 
 
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():

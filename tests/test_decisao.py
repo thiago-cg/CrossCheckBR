@@ -425,13 +425,15 @@ def test_e4_plural_concorda_e_conta_url_unica_na_justificativa():
     duas = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)])
     j2 = duas.justificativa()
     assert "2 fontes foram publicadas antes do período" in j2 and "o peso delas foi reduzido" in j2
+    assert verificar_neutralidade(j) == [] and verificar_neutralidade(j2) == []
 
 
 def test_e4_limitacao_de_datas_concorda_e_conta_url_unica():
     assert _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://g1.globo.com/a", 1)]).limitacao_datas() \
         == "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
-    assert _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)]).limitacao_datas() \
-        == "Datas: 2 fontes anteriores ao período do texto tiveram o peso reduzido."
+    lim = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)]).limitacao_datas()
+    assert lim == "Datas: 2 fontes anteriores ao período do texto tiveram o peso reduzido."
+    assert verificar_neutralidade(lim) == []
 
 
 def test_e4_bot_mostra_data_quando_descontada_e_neutro():
