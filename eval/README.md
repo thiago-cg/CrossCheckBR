@@ -163,7 +163,12 @@ python3 -m eval.decisao --gerar-snapshot --resultado eval/resultados/<ts>-nome \
 `decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem evento `decisao`.)
 Trace antigo, sem `evidencias`: a linha é **reconstruída** do evento `decisao` (sem
 `texto_usuario`/`data_referencia`, então E4 não vale nela). A origem do selo vem do próprio trace
-(`selo X (pagina|indice)` no voto); sem registro, cai em `pagina` (default documentado). O comando
-informa os reconstruídos à parte.
+(`selo X (pagina|indice)` no voto); selo que entrou em conflito ou foi aplicado sem aparecer no voto
+sai como `indice` (`conflitos`/`vereditos_aplicados`); sem registro, cai em `pagina` (default
+documentado). O comando informa os reconstruídos à parte.
+**Atenção:** a reconstrução de traces antigos pode DIVERGIR da decisão original. O trace não guarda a
+origem de todo selo (um selo de origem desconhecida vota igual a `indice`, mas o default `pagina` não
+vota) e não guarda `texto_usuario` nem `data_referencia` (o E4 não vale nela). Para medir decisão com
+fidelidade, use os snapshots de runs com evento `evidencias`.
 
 Testes do harness: `tests/test_eval_harness.py` (Pipeline falso, sem rede).
