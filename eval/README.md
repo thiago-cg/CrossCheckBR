@@ -148,6 +148,10 @@ python3 -m eval.decisao --gerar-snapshot --resultado eval/resultados/<ts>-nome \
 ```
 
 (lê `casos.jsonl` do resultado → `run_id` → evento `evidencias` do trace via
-`decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem o evento.)
+`decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem evento `decisao`.)
+Trace antigo, sem `evidencias`: a linha é **reconstruída** do evento `decisao` (sem
+`texto_usuario`/`data_referencia`, então E4 não vale nela). A origem do selo vem do próprio trace
+(`selo X (pagina|indice)` no voto); sem registro, cai em `pagina` (default documentado). O comando
+informa os reconstruídos à parte.
 
 Testes do harness: `tests/test_eval_harness.py` (Pipeline falso, sem rede).
