@@ -43,6 +43,10 @@ Conjunção (D2): só afirmações COM voto (n_votos > 0) entram no produto. Afi
 fica fora (ausência de evidência não é evidência); votos que se anulam (L_a = 0) entram com
 p = 0,5. Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal) usa o mesmo
 critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
+T7 (E4 × D2): com 2+ afirmações com voto, sai do produto a afirmação cujos votos vêm SÓ de
+fontes fora da janela (descontadas) e cujo |L_a| < τ ("só evidência de outro período" em
+`por_afirmacao[i]`): evidência de outro episódio que não chega a um nível não informa o fato
+atual. Acima de τ ela continua. O contrafactual (sem desconto) não muda.
 
 Faixas SIMÉTRICAS em torno de 0 (τ = ln 3 ≈ 1,10, ou seja p ≥ 0,75 / p ≤ 0,25):
     L ≥ +τ → alta · L ≤ −τ → baixa · |L| < τ → media
@@ -420,7 +424,8 @@ def _combinar_afirmacoes(valores: List[float]) -> float:
     """Conjunção entre afirmações (D2): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto).
 
     `valores` são os L_a só das afirmações COM voto (quem chama filtra: ausência de evidência
-    não entra no produto). Lista vazia → 0. Uma parte só → o próprio L_a, porque σ e logit se
+    não entra no produto; no caminho com desconto, sai também a só-descontada com |L_a| < τ,
+    T7, ver `decidir`). Lista vazia → 0. Uma parte só → o próprio L_a, porque σ e logit se
     cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
     cancelamento) e p é limitado em [1e-12, 1 − 1e-12] antes do logit.
     Propriedade: L ≥ max(L_a); duas partes com p≈0,7 cada dão p_texto≈0,91.
@@ -471,7 +476,8 @@ def decidir(ev: Evidencias) -> Decisao:
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
                               "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
                               "postura": "W_POSTURA·f_fonte·(1−prob_fake_pagina)",
-                              "combinacao": "conjuncao: 1−Π(1−σ(L_a)) sobre afirmações com voto"})
+                              "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre afirmações com voto; "
+                                             "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto")})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),
@@ -487,10 +493,12 @@ def decidir(ev: Evidencias) -> Decisao:
     por_af_brutos: Dict[int, float] = {}
     n_votos: Dict[int, int] = {}
     n_brutos: Dict[int, int] = {}
+    so_descontada: Dict[int, bool] = {}  # T7/E4: todo voto da afirmação vem de fonte fora da janela
     for a_idx, af in enumerate(ev.afirmacoes):
         s = -1.0 if af.polaridade == "nega" else 1.0
         clusters: Dict[str, List[tuple]] = {}
         clusters_brutos: Dict[str, List[tuple]] = {}
+        contribuiu_atual = contribuiu_descontado = False  # T7: itens com voto dentro / fora da janela
         for it in ev.itens:
             if it.afirmacao != a_idx:
                 continue
@@ -512,6 +520,11 @@ def decidir(ev: Evidencias) -> Decisao:
                     "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),
                     "bits_descartados": round(bits, 3)})
                 contribs = descontados
+            if brutos:
+                if medida and medida[1] > 0:
+                    contribuiu_descontado = True
+                else:
+                    contribuiu_atual = True
             for valor, desc in contribs:
                 clusters.setdefault(it.cluster or it.url, []).append((valor, desc, it))
             for valor, desc in brutos:
@@ -522,12 +535,23 @@ def decidir(ev: Evidencias) -> Decisao:
         por_af_brutos[a_idx] = L_a_bruto
         n_votos[a_idx] = sum(1 for v in dec.votos if v.afirmacao == a_idx)
         n_brutos[a_idx] = _clusters_com_voto(clusters_brutos)
+        so_descontada[a_idx] = contribuiu_descontado and not contribuiu_atual
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": n_votos[a_idx]})
     # combinação entre afirmações (D2, conjunção): o texto é desinformação se QUALQUER parte for.
     # "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o mesmo critério sobre
     # os votos brutos, isto é, o caso sem o desconto temporal.
-    L = _combinar_afirmacoes([por_af[a] for a in por_af if n_votos[a] > 0])
+    # T7 (E4 × D2): também fica fora a afirmação só com fontes fora da janela (descontadas) cujo
+    # |L_a| (já com a trava de confiabilidade) ficou abaixo de τ: evidência de outro episódio que,
+    # sozinha, não chega a um nível não informa o fato atual. Só vale com 2+ afirmações com voto;
+    # com uma só não há conjunção e o L é o dela, como antes. Acima de τ, a parte continua.
+    com_voto = [a for a in por_af if n_votos[a] > 0]
+    fora = set()
+    if len(com_voto) > 1:  # com uma só não há conjunção: o L é o dela
+        fora = {a for a in com_voto if so_descontada[a] and abs(por_af[a]) < TAU}
+    for a in fora:
+        dec.por_afirmacao[a]["fora_da_conjuncao"] = "só evidência de outro período"
+    L = _combinar_afirmacoes([por_af[a] for a in com_voto if a not in fora])
     L_sem = _combinar_afirmacoes([por_af_brutos[a] for a in por_af_brutos if n_brutos[a] > 0])
     dec.log_odds = round(L, 4)
     dec.log_odds_sem_desconto = round(L_sem, 4)

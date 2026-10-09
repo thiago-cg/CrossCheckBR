@@ -615,3 +615,97 @@ def test_t7_citacao_com_expressao_proibida_vira_numero_e_o_texto_segue_neutro():
     j = d.justificativa()
     assert "a afirmação 1" in j and "é falso" not in j.lower()
     assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+# ------------------------------------------------------------------ T7 + E4: só evidência descontada fora da conjunção
+def _it_datada(url, classe, data_pub, af=0, cluster=None):
+    """Item curado com corpo lido e data de publicação: pode ser descontado pelo E4."""
+    return ItemEvidencia(url=url, afirmacao=af, cluster=cluster or url, classe=classe, motor=JUIZ,
+                         citacao_verificada=True, curada=True, corpo_lido=True, data_pub=data_pub)
+
+
+def _ev_afs_janela(itens, textos=("A obra custou 2 bilhões", "A ponte caiu hoje"), janelas=(None, 2)):
+    """Duas afirmações, cada uma com a própria janela (E4). Com janela None (e 2 afirmações) a
+    afirmação não é descontada; com janela 2 ("hoje") só as fontes fora da janela descontam."""
+    texto = ". ".join(textos) + "."
+    afs = [AfirmacaoDecisao(texto=t, nucleo=t, janela=j) for t, j in zip(textos, janelas)]
+    return Evidencias(afirmacoes=afs, itens=itens, texto_usuario=texto, data_referencia="2026-10-09",
+                      n_lidas=len(itens), n_consultadas=len(itens))
+
+
+def test_t7_so_evidencia_descontada_sai_da_conjuncao(monkeypatch):
+    """Achado do T7 (09/10): A confirmada (L=-3, fontes atuais) + B só com fonte de 2021, descontada
+    (r≈0,001, L_b≈+0,002). Antes B entrava com p≈0,5 e o texto ficava media; agora B fica fora do produto."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.por_afirmacao[0]["L"] == pytest.approx(-3.0)
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert "fora_da_conjuncao" not in d.por_afirmacao[0]
+    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
+    assert "E4" in d.parametros["combinacao"]
+    # o contrafactual (sem desconto) não muda: lá B conta com o voto bruto (REFUTA, +1)
+    assert d.log_odds_sem_desconto == pytest.approx(_conj_ref([-3.0, 1.0]), abs=1e-3)
+    assert {x["afirmacao"] for x in d.descontos_temporais} == {1}
+
+
+def test_t7_votos_atuais_que_se_anulam_continuam_no_produto():
+    """Disputa real dentro da janela: B tem uma REFUTA e uma SUSTENTA atuais (L_b=0, n_votos=2).
+    Entra no produto com p=0,5: o texto fica media, não baixa."""
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://uol.com.br/b", "REFUTA", "2026-10-08", af=1, cluster="uol"),
+         _it_datada("https://folha.uol.com.br/b", "SUSTENTA", "2026-10-08", af=1, cluster="folha")]
+    d = decidir(_ev_afs_janela(a + b))
+    assert not d.descontos_temporais
+    assert d.por_afirmacao[1]["L"] == 0 and d.por_afirmacao[1]["n_votos"] == 2
+    assert "fora_da_conjuncao" not in d.por_afirmacao[1]
+    assert d.nivel == "media"
+    assert d.log_odds == pytest.approx(_conj_ref([-3.0, 0.0]), abs=1e-4)
+
+
+def test_t7_so_descontada_mas_forte_continua_no_produto(monkeypatch):
+    """Se a evidência só-descontada passa de τ, ela continua no produto (comportamento por afirmação):
+    B tem 3 fontes de 2021 com r=0,9 (stub), L_b≈+2,8 ≥ τ."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.9)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada(f"https://{dom}/b", "REFUTA", "2021-07-18", af=1)
+         for dom in ("uol.com.br", "folha.uol.com.br", "lupa.uol.com.br")]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.por_afirmacao[1]["L"] >= decisao.TAU
+    assert "fora_da_conjuncao" not in d.por_afirmacao[1]
+    assert d.log_odds == pytest.approx(_conj_ref([-3.0, d.por_afirmacao[1]["L"]]), abs=1e-3)
+
+
+def test_t7_uma_afirmacao_so_descontada_nao_muda(monkeypatch):
+    """Uma afirmação só (texto com 'hoje'): a regra não age; o L é o dela, mesmo só descontado e < τ."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    it = _it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18", cluster="g1")
+    d = decidir(_ev_hoje([it]))
+    assert d.descontos_temporais and 0 < abs(d.log_odds) < decisao.TAU
+    assert d.log_odds == d.por_afirmacao[0]["L"]
+    assert "fora_da_conjuncao" not in d.por_afirmacao[0]
+
+
+def test_t7_sem_conjuncao_com_uma_afirmacao_com_voto_nada_muda(monkeypatch):
+    """Com uma só afirmação com voto não há conjunção: a que só tem evidência descontada mantém o L
+    (sem marcador). A outra, sem voto, não muda o resultado (D2)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it("https://bbc.com/a", "NAO_TRATA", af=0)]
+    b = [_it_datada("https://g1.globo.com/b", "REFUTA", "2021-07-18", af=1, cluster="g1")]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.por_afirmacao[0]["n_votos"] == 0 and d.por_afirmacao[1]["n_votos"] == 1
+    assert "fora_da_conjuncao" not in d.por_afirmacao[1]
+    assert d.log_odds == d.por_afirmacao[1]["L"] and d.log_odds != 0
+
+
+def test_t7_duas_so_descontadas_fracas_nao_informam(monkeypatch):
+    """Duas partes com evidência só de outro período e |L|<τ: nenhuma informa o fato atual. O produto
+    fica vazio (L=0, media) e as duas ficam marcadas."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18", af=0, cluster="g1")]
+    b = [_it_datada("https://bbc.com/b", "SUSTENTA", "2021-07-18", af=1, cluster="bbc")]
+    d = decidir(_ev_afs_janela(a + b, textos=("A ponte caiu hoje", "A obra custou 2 bilhões hoje"), janelas=(2, 2)))
+    assert {x["afirmacao"] for x in d.descontos_temporais} == {0, 1}
+    assert all(p["fora_da_conjuncao"] == "só evidência de outro período" for p in d.por_afirmacao)
+    assert d.log_odds == 0 and d.nivel == "media"
