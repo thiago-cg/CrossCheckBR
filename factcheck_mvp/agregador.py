@@ -52,6 +52,28 @@ def formatar_selo(agencia: str, selo: str, artigo: str = "da") -> str:
     return f"Selo {artigo} {(agencia or '').strip()}: {(selo or '').strip()}"
 
 
+# B1a (render): raciocínio do avaliador por fonte. É texto livre do LLM, então sai SEMPRE
+# atribuído ao avaliador automático, numa linha só. A varredura ignora só essa linha (como o
+# selo atribuído da T3): o rótulo precisa abrir a linha. Fora dela, a regra vale por inteiro.
+ROTULO_RACIOCINIO = "Avaliação automática:"
+_RACIOCINIO_ATRIBUIDO_RE = re.compile(
+    r"^[ \t]*(?:🧠[ \t]*)?" + re.escape(ROTULO_RACIOCINIO) + r"[^\n]*", re.MULTILINE
+)
+
+
+def linha_raciocinio(raciocinio: Optional[str], limite: Optional[int] = None) -> str:
+    """Linha atribuída: "🧠 Avaliação automática: <raciocinio>" ("" se vazio).
+
+    Quebras de linha viram espaço, para a linha continuar sendo uma só. `limite` corta
+    só a EXIBIÇÃO, com "…"; o dado em `Fonte` nunca muda."""
+    texto = " ".join((raciocinio or "").split())
+    if not texto:
+        return ""
+    if limite and len(texto) > limite:
+        texto = texto[: limite - 1].rstrip() + "…"
+    return f"🧠 {ROTULO_RACIOCINIO} {texto}"
+
+
 def _agencias_checagem() -> frozenset:
     """Nomes normalizados das agências de checagem do catálogo (leitura fresca)."""
     nomes = set()
@@ -74,8 +96,10 @@ def verificar_neutralidade(texto: str) -> List[str]:
     E5: o selo atribuído ("Selo da Lupa: FALSO", com agência do catálogo) é
     citação, não veredito nosso — é ignorado. Selo em outro formato (agência
     não cadastrada) é sinalizado com o trecho correspondente.
+    B1a: a linha do raciocínio atribuído ao avaliador automático (`linha_raciocinio`)
+    também é citação e é ignorada; só ela, e só quando o rótulo abre a linha.
     """
-    base = texto or ""
+    base = _RACIOCINIO_ATRIBUIDO_RE.sub(" ", texto or "")
     registradas = _agencias_checagem()
 
     def _corta(m: re.Match) -> str:
