@@ -63,7 +63,8 @@ def test_credito_de_foto_variacoes_nao_assinam():
     base = "Texto próprio da redação sobre o tema do dia. " * 10
     for credito in ["Foto Folhapress", "FOTO: FOLHAPRESS",
                     "Crédito da foto: Folhapress",
-                    "Imagem: Folhapress",
+                    "Imagem: Folhapress", "Imagens: Folhapress",
+                    "Imagens: Agência Brasil",
                     "Foto:\nFolhapress",
                     "Foto: Estadão Conteúdo"]:
         assert co.agencia_assinada(base + "\n" + credito) is None, credito

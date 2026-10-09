@@ -126,7 +126,7 @@ _SEMPRE_CREDITO = ("estadao-conteudo", "folhapress")
 # assinatura de agência: indica só a origem da imagem, não republicação do texto.
 # Vale p/ todas as agências (regra geral, não só Folhapress).
 _FOTO_MARCA_RE = re.compile(
-    r"\b(fotos?|imagem(ns)?|ilustra[çc][ãa]o|cr[ée]ditos?|divulga[çc][ãa]o|reprodu[çc][ãa]o|arquivo)\b", re.I)
+    r"\b(fotos?|image(m|ns)|ilustra[çc][ãa]o|cr[ée]ditos?|divulga[çc][ãa]o|reprodu[çc][ãa]o|arquivo)\b", re.I)
 
 
 def _e_credito_foto(t: str, ini: int) -> bool:
