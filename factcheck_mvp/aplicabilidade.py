@@ -700,6 +700,15 @@ def marco_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
     return marco_do_evento(texto_usuario, referencia)
 
 
+def marcas_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
+                        referencia: str | None = None) -> tuple[int | None, tuple[str, int] | None]:
+    """(janela, marco) de UMA afirmação: a ÚNICA montagem usada pelo pipeline (decisão e gate E1).
+    Assim o gate e a decisão medem a fonte com as mesmas entradas (I-4: nunca divergem). None em
+    `janela` ou `marco` é resultado calculado ("a afirmação não tem marcador de fato"), não ausência."""
+    return (janela_da_afirmacao(af_texto, texto_usuario, n_afirmacoes, referencia),
+            marco_da_afirmacao(af_texto, texto_usuario, n_afirmacoes, referencia))
+
+
 def dias_excedentes_do_marco(marco: tuple[str, int] | None,
                              data_pub: str | None) -> tuple[int, int] | None:
     """(folga, dias além do evento) para um marco (D, folga): `max(0, (D − folga) − data_pub)`.

@@ -50,6 +50,9 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         janela=a.get("janela"),
         # Task 4b: marco (data explícita do fato) é opcional; snapshots antigos não têm
         marco=tuple(a["marco"]) if a.get("marco") else None,
+        # I-4: snapshot que traz `janela` (mesmo null) já foi calculado: null = sem marcador de fato,
+        # não "recalcular pelo texto". Ausente = snapshot antigo (caminho legado).
+        calculada=bool(a.get("calculada", "janela" in a)),
     ) for a in (d.get("afirmacoes") or [])]
     itens = [decisao.ItemEvidencia(
         url=i.get("url", ""),

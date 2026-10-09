@@ -596,12 +596,13 @@ class Pipeline:
                 confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub"),
                 prob_fake_pagina=prob_fake,
                 data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao")))
+        # E4 (I-4): janela e marco de cada afirmação saem da MESMA função do gate (`_fase_base`).
+        marcas_af = [aplicabilidade.marcas_da_afirmacao(a.texto, texto_base, len(afs), ref) for a in afs]
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(
                 texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
-                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs), referencia=ref),
-                marco=aplicabilidade.marco_da_afirmacao(a.texto, texto_base, len(afs), referencia=ref))
-                        for a in afs],
+                janela=janela, marco=marco, calculada=True)
+                        for a, (janela, marco) in zip(afs, marcas_af)],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
             n_lidas=_contar_lidas(pecas), n_consultadas=len(pecas), texto_usuario=texto_base,
             data_referencia=ref)
@@ -644,14 +645,11 @@ class Pipeline:
         if not selecionados:
             return {}, False
         julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm, cache=cache)
-        janelas = [aplicabilidade.janela_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
-                   for a in afs]
-        marcos = [aplicabilidade.marco_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
-                  for a in afs]
+        marcas = [aplicabilidade.marcas_da_afirmacao(a.texto, texto_usuario, len(afs), referencia) for a in afs]
         houve = False
         for (pi, ai), r in julg.items():
             p = pecas_base[pi]
-            janela, marco = janelas[ai], marcos[ai]
+            janela, marco = marcas[ai]
             aplicavel, motivo = aplicabilidade.e_aplicavel(
                 r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
                 p.get("veredito"), texto_usuario, p.get("data_pub"),
