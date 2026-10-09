@@ -876,10 +876,6 @@ def _entrada_bolsonaro_hoje() -> EntradaConsulta:
                            data_referencia="2026-10-09")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG (achado E4 Task 8): a fase base já lê o corpo da peça, mas o n_lidas da passada seguinte "
-    "(_ler, em _executar) só conta as lidas agora; a justificativa sai com 'Lidas 0 página(s)' e "
-    "contagem.lidas fica 0 embora corpo_lido seja True."))
 def test_lidas_conta_pagina_lida_pela_fase_base(amb, monkeypatch):
     from factcheck_mvp import avaliador as _aval
 

@@ -145,6 +145,12 @@ def _tier_data(fonte: Optional[str], precisao: Optional[str], relativa: bool = F
     return {"jsonld": 6, "serpapi": 5, "trafilatura": 4}.get(fonte, 4)
 
 
+def _contar_lidas(pecas: List[Dict[str, Any]]) -> int:
+    """Páginas lidas na lista FINAL de peças (fase base + passadas da web). A lista tem uma peça por
+    URL canônica (fundir_por_url), então a página lida na base não se soma de novo na web."""
+    return sum(1 for p in pecas if p.get("corpo_lido"))
+
+
 class Pipeline:
     def __init__(self, catalogo: Catalogo, indice_vereditos: Indice, indice_noticias: Indice,
                  serpapi: Optional[SerpAPIClient] = None, detector: Optional[DetectorFake] = None):
@@ -410,7 +416,7 @@ class Pipeline:
             pecas = pecas_base
             julg: Dict[Tuple[int, int], Dict[str, Any]] = julg_base
             selecionados = list(julg.keys())
-            n_lidas = sum(1 for p in pecas if p.get("corpo"))
+            n_lidas = _contar_lidas(pecas)
             juiz_ok = any(r.get("classe") is not None for r in julg.values())
             etapa("descoberta", "pulada", "web pulada: checagem aplicável na base",
                   [p["url"] for p in pecas[:5]])
@@ -544,8 +550,8 @@ class Pipeline:
 
         # 8b. Agente: crítico PÓS-JUIZ decide, por afirmação, se gasta uma onda extra
         if estado_agente is not None:
-            n_lidas += await self._ondas_extras(afs, pecas, julg, selecionados, juiz_ok, estado_agente,
-                                                usar_llm, avisar, etapa, limitacoes)
+            await self._ondas_extras(afs, pecas, julg, selecionados, juiz_ok, estado_agente,
+                                     usar_llm, avisar, etapa, limitacoes)
             juiz_ok = juiz_ok or any(r.get("classe") is not None for r in julg.values())
             if pecas and "SerpAPI sem resultados para as afirmações." in limitacoes:
                 limitacoes.remove("SerpAPI sem resultados para as afirmações.")  # a onda extra achou
@@ -582,7 +588,7 @@ class Pipeline:
                 marco=aplicabilidade.marco_da_afirmacao(a.texto, texto_base, len(afs), referencia=ref))
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
-            n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
+            n_lidas=_contar_lidas(pecas), n_consultadas=len(pecas), texto_usuario=texto_base,
             data_referencia=ref)
         telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
@@ -911,11 +917,11 @@ class Pipeline:
         return julg, juiz_ok
 
     async def _ondas_extras(self, afs, pecas, julg, selecionados, juiz_ok, estado, usar_llm,
-                            avisar, etapa, limitacoes) -> int:
+                            avisar, etapa, limitacoes) -> None:
         """Laço pós-juiz do agente. Muta `pecas` (só acrescenta: índices estáveis) e `julg`.
-        -> páginas lidas a mais. Nunca levanta."""
+        As páginas lidas são contadas depois, pela lista final de `pecas` (`_contar_lidas`).
+        Nunca levanta."""
         alvos = _agente.alvos_de(afs)
-        n_lidas = 0
         # Juiz "disponível" p/ o crítico: rodou e classificou algo, ou não havia o que julgar.
         juiz_disp = bool(usar_llm) and (juiz_ok or not selecionados)
         try:
@@ -968,8 +974,7 @@ class Pipeline:
                     idx[k] = len(pecas) - 1
                     n_novas += 1
                 alvo_afs = {ai for ai, _, _ in pedidos_q}
-                lidas, _ = await self._ler(afs, pecas, avisar)
-                n_lidas += lidas
+                await self._ler(afs, pecas, avisar)
                 sel = self._selecionar(afs, pecas, excluir=set(julg), afs_alvo=alvo_afs)
                 if sel:
                     corroboracao.agrupar(pecas)  # clusters com as peças novas (1 voto por cluster)
@@ -993,7 +998,6 @@ class Pipeline:
             etapa("agente-critico", "ok",
                   " | ".join(f"af{c['afirmacao']}: {c['decisao']} ({c['motivo']})" for c in estado.criticas)
                   + f". Total: {estado.resumo()}.")
-        return n_lidas
 
     async def _propor_catalogo(self, pecas, julg, etapa) -> None:
         teto = getattr(config, "DISCOVERY_MAX_SITES", 2) or 0
