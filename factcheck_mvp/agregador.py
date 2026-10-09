@@ -130,13 +130,10 @@ def verificar_neutralidade(texto: str) -> List[str]:
     return achadas
 
 
-def perguntas_guia(priorizar_data: bool = False) -> List[str]:
-    if not priorizar_data:
-        return list(_PERGUNTAS_GUIA)
-    # E4 Task 6: com desconto temporal, a pergunta de data vai para o topo.
-    data_q = next((q for q in _PERGUNTAS_GUIA if q.startswith("Compare a data")), None)
-    resto = [q for q in _PERGUNTAS_GUIA if q != data_q]
-    return ([data_q] if data_q else []) + resto
+def perguntas_guia() -> List[str]:
+    """Perguntas para o usuário avaliar sozinho. A de data ("Compare a data…") é sempre a
+    primeira: com desconto temporal ela já está no topo, então não há parâmetro para isso."""
+    return list(_PERGUNTAS_GUIA)
 
 
 def titulo_propensao(propensao: str) -> str:

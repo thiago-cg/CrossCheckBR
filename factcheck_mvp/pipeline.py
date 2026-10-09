@@ -1129,6 +1129,6 @@ class Pipeline:
             lims.insert(0, dec.limitacao_datas())
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
                                  fontes=fontes, etapas=etapas, limitacoes=lims,
-                                 perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,
+                                 perguntas_guia=perguntas_guia(), consulta=entrada,
                                  header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
                                  onde_encontrado=onde_encontrado)

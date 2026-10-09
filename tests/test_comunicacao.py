@@ -250,6 +250,14 @@ def test_fontes_leva_a_precisao_da_data_da_peca():
     assert (f.data_pub, f.data_pub_precisao, f.data_pub_bruta) == ("2021-12-31", "ano", "2021-01-01")
 
 
+def test_perguntas_guia_traz_a_de_data_primeiro_sem_parametro_inutil():
+    """A pergunta de data já é a primeira da lista; o antigo `priorizar_data` não mudava nada."""
+    import inspect
+    from factcheck_mvp.agregador import perguntas_guia
+    assert perguntas_guia()[0].startswith("Compare a data")
+    assert list(inspect.signature(perguntas_guia).parameters) == []
+
+
 def test_web_lista_descontos_por_data_em_como_chegamos_aqui_sem_bits_no_bot():
     """Task 6: a web mostra cada desconto (url escapada, dias além da janela, r e bits) no
     <details> 'Como chegamos aqui'; os bits ficam FORA do bot (técnico demais)."""
