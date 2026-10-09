@@ -722,13 +722,19 @@ def _hoje_brt_iso() -> str:
 
 
 def _data_do_cassete(k: str) -> tuple[Optional[str], bool]:
-    """(YYYY-MM-DD gravado ou None, cassete existe). Chave ausente ou data ilegível -> None."""
+    """(YYYY-MM-DD gravado ou None, cassete existe). Sem arquivo -> (None, False). Arquivo que não é
+    um cassete de relógio legível (JSON quebrado, raiz ou `resp` que não é objeto, texto/base64
+    inválido, data ilegível) -> (None, True): o arquivo existe, mas não tem data. Nunca levanta."""
+    arq = _caminho(k)
+    if not arq.is_file():
+        return None, False
     try:
+        doc = _json.loads(arq.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("resp"), dict):
+            return None, True
         corpo = _ler(k, RELOGIO_URL).json()
-    except ReplayMiss:
-        return None, False  # sem arquivo (ou arquivo que o replay não consegue ler)
-    except ValueError:
-        return None, True   # arquivo existe mas o corpo não é JSON
+    except (OSError, ReplayMiss, ValueError, AttributeError, TypeError, KeyError):
+        return None, True
     dado = corpo.get("data") if isinstance(corpo, dict) else None
     if isinstance(dado, str) and _DATA_ISO_RE.fullmatch(dado):
         try:
@@ -746,7 +752,8 @@ def hoje(contexto: str) -> Optional[str]:
     ao vivo e grava chave("GET", "relogio://hoje", contexto) = {"data": ...} (um cassete
     ruim é refeito: record grava o que falta). replay → lê o cassete; ausente →
     None + fallback("relogio", "data de referência não gravada"); presente sem data
-    válida → None + fallback("relogio", "cassete sem data"). Nunca levanta ReplayMiss
+    válida (ou com estrutura inválida: JSON quebrado, `null`, `resp` que não é objeto)
+    → None + fallback("relogio", "cassete sem data"). Nunca levanta ReplayMiss
     (o caso roda, só sem E4) e nunca devolve a string "None".
     """
     m = modo_atual()

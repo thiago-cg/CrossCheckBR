@@ -196,7 +196,9 @@ def data_publicacao_pagina(html: str, url: str = "") -> Optional[str]:
             return data
     except Exception as e:
         telemetria.fallback("extracao.jsonld", f"data da página: {type(e).__name__}: {e}"[:200], url=url)
-    doc, _erro = _trafilatura(html, url)
+    doc, erro = _trafilatura(html, url)
+    if erro:  # M4: sem JSON-LD e com o trafilatura falhando, a data some: que fique registrado
+        telemetria.fallback("data_pub", erro, url=url)
     return (doc or {}).get("date") or None
 
 

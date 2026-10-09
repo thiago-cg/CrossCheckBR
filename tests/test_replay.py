@@ -346,3 +346,36 @@ def test_relogio_live_devolve_a_data_de_hoje_brt(monkeypatch):
     monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
     with replay.modo("live"):
         assert replay.hoje("qualquer texto") == "2026-10-09"
+
+
+# --- Revisão I2/M7: cassete do relógio com estrutura inválida = "cassete sem data", nunca exceção ---
+def _cassete_bruto(contexto, bruto):
+    k = replay.chave("GET", replay.RELOGIO_URL, contexto)
+    replay._caminho(k).parent.mkdir(parents=True, exist_ok=True)
+    replay._caminho(k).write_bytes(bruto)
+
+
+_CASSETES_INVALIDOS = [b"null", b"[]", b'{"resp": "x"}', b'{"resp": 5}', b'{"resp": {"texto": 7}}', b"{nao json"]
+
+
+@pytest.mark.parametrize("bruto", _CASSETES_INVALIDOS)
+def test_relogio_cassete_invalido_em_replay_vira_none_com_fallback(tmp_path, monkeypatch, bruto):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_bruto("texto Z", bruto)
+    with replay.modo("replay"):
+        assert replay.hoje("texto Z") is None
+    assert fb == [("relogio", "cassete sem data")]  # M7: o arquivo existe, então não é "não gravada"
+
+
+@pytest.mark.parametrize("bruto", _CASSETES_INVALIDOS)
+def test_relogio_cassete_invalido_em_record_e_refeito(tmp_path, monkeypatch, bruto):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_bruto("texto Z", bruto)
+    with replay.modo("record"):
+        assert replay.hoje("texto Z") == "2026-10-09"  # refaz o cassete
+    with replay.modo("replay"):
+        assert replay.hoje("texto Z") == "2026-10-09"
+    assert fb == []  # em record o cassete é refeito na hora: sem fallback

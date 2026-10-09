@@ -349,3 +349,13 @@ def test_corpo_lido_carrega_a_fonte_da_data():
           "articleBody": CORPO_LONGO}
     corpo = _asyncio.run(ap.corpo_de_html(url, url, _pagina("<p>curto</p>", ld)))
     assert corpo.corpo_lido and corpo.data_pub_fonte == "jsonld" and corpo.data_pub.startswith("2025-08-12")
+
+
+def test_data_publicacao_pagina_registra_o_erro_do_trafilatura(monkeypatch):
+    """M4: sem JSON-LD e com o trafilatura falhando, a data some; o erro vira fallback data_pub (não silêncio)."""
+    capturados = []
+    monkeypatch.setattr(telemetria, "fallback", lambda onde, motivo="", /, **kw: capturados.append((onde, motivo)))
+    monkeypatch.setattr(ex, "_trafilatura", lambda html, url: (None, "trafilatura: erro simulado"))
+    html = "<html><head><title>T</title></head><body><p>texto</p></body></html>"
+    assert ex.data_publicacao_pagina(html, "https://x.com.br/a") is None
+    assert capturados == [("data_pub", "trafilatura: erro simulado")]
