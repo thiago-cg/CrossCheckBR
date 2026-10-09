@@ -20,6 +20,8 @@ import unicodedata
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+from . import aplicabilidade
+
 # ----------------------------------------------------------------------------- texto
 def _norm(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode().lower()
@@ -167,11 +169,44 @@ def agencia_assinada(corpo: str) -> Optional[str]:
     return None
 
 
+# ----------------------------------------------------------------------------- datas
+# Prioridade de uma data de publicação (maior vence; E4 Task 2 + revisão I-3): JSON-LD (dia) 6 >
+# SerpAPI absoluta/ISO (dia) 5 > trafilatura (dia) 4 > SerpAPI relativa ancorada 3 > só ano 2 >
+# ReaderLM 1. `fonte` é a fonte REAL da data; o método que extraiu o texto não entra. Fonte não
+# declarada (None) fica no nível da trafilatura: não sobrepõe a data absoluta da SerpAPI.
+def tier_data(fonte: Optional[str], precisao: Optional[str], relativa: bool = False) -> int:
+    if relativa:
+        return 3
+    if fonte == "readerlm":
+        return 1
+    if precisao == "ano":
+        return 2
+    return {"jsonld": 6, "serpapi": 5, "trafilatura": 4}.get(fonte, 4)
+
+
+# A data da peça viaja inteira (valor, precisão, bruta e tier): nunca um campo de uma data e outro de outra.
+CAMPOS_DATA = ("data_pub", "data_pub_precisao", "data_pub_bruta", "data_pub_tier")
+
+
+def tier_da_peca(p: Dict[str, Any]) -> int:
+    """Tier da data que a peça carrega (-1 = sem data). `data_pub_tier` vale quando foi gravado ao
+    atribuir a data (a página lida, com a fonte real); senão a data veio da SerpAPI/índice e o tier
+    sai dos campos (relativa ancorada, só ano ou absoluta)."""
+    if not p.get("data_pub"):
+        return -1
+    if p.get("data_pub_tier") is not None:
+        return int(p["data_pub_tier"])
+    return tier_data("serpapi", p.get("data_pub_precisao"),
+                     relativa=aplicabilidade.e_relativa(p.get("data_pub_bruta")))
+
+
 # ----------------------------------------------------------------------------- peças
 def fundir_por_url(pecas: Iterable[Dict[str, Any]]) -> tuple:
     """Funde peças com a mesma URL canônica (índice + web, ou duas afirmações).
     Retorna (unicas, fusoes[(url_mantida, url_fundida)]). Campos fundidos: `afs`
-    (união), `origens` (união); veredito/corpo/trecho/data: o primeiro não vazio."""
+    (união), `origens` (união); veredito/corpo/trecho: o primeiro não vazio. A data
+    (`CAMPOS_DATA`) é o conjunto de maior tier entre as peças (I1): a duplicata só troca a
+    data da peça mantida se a dela tem tier maior; empate mantém a da peça mantida."""
     por: Dict[str, Dict[str, Any]] = {}
     ordem: List[str] = []
     fusoes: List[tuple] = []
@@ -190,9 +225,12 @@ def fundir_por_url(pecas: Iterable[Dict[str, Any]]) -> tuple:
         a["afs"] = set(a.get("afs") or set()) | set(p.get("afs") or set())
         a["origens"] = set(a.get("origens") or set()) | set(p.get("origens") or set())
         for campo in ("veredito", "selo_original", "agencia", "afirmacao_checada", "corpo", "trecho",
-                      "data_pub", "snippet", "titulo", "veiculo"):
+                      "snippet", "titulo", "veiculo"):
             if not a.get(campo) and p.get(campo):
                 a[campo] = p[campo]
+        if tier_da_peca(p) > tier_da_peca(a):
+            for campo in CAMPOS_DATA:
+                a[campo] = p.get(campo)
         fusoes.append((a.get("url"), p.get("url")))
     return [por[k] for k in ordem], fusoes
 
