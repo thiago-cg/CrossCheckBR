@@ -20,6 +20,7 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
     contrib   = s_a * d * w
       postura : d = +1 REFUTA, -1 SUSTENTA (RELATA/NAO_TRATA não votam)
                 w = W_POSTURA * f_fonte * (1 − prob_fake_pagina)  (T6; sem modelo real, fator 1,0)
+                w < 5% de W_POSTURA·f_fonte (prob_fake > 0,95): não vota (D-c, FRACAO_MIN_VOTO)
       veredito: d = selos.direcao(veredito) (FALSO +1 … VERDADEIRO -1; SATIRA 0 = não vota)
                 w = W_VEREDITO * f_fonte; só selo do ÍNDICE (origem "pagina" não vota: T6)
       f_fonte = confiabilidade da fonte (confiabilidade.FATOR_POSTURA / FATOR_VEREDITO):
@@ -31,23 +32,31 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
       E4: texto com "hoje/ontem/nesta semana" e fonte publicada `e` dias além da janela →
           r = relevancia_temporal(e, janela) e contrib' = sinal·ln(r·e^|contrib| + 1 − r)
           (mistura: com prob. 1−r a fonte fala de outro episódio e não informa nada).
-          Simétrico: nunca eleva nem baixa a propensão por si; os bits descartados
-          ficam em `descontos_temporais`.
+          Simétrico: o desconto não empurra a propensão para nenhum lado por si (a fonte antiga perde
+          peso nos dois sentidos). Quando ela sai e a que resta é do período, o nível pode subir na
+          direção dessa fonte atual (guarda do sinal, abaixo). Bits descartados em `descontos_temporais`.
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
     L_a       = Σ_clusters voto  (um cluster = um voto: republicação não soma)
-    p_texto   = 1 − Π_a (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se QUALQUER parte for)
-    L         = logit(p_texto)          (0 se nenhuma afirmação tem voto)
+    p_texto   = 1 − Π_{a: L_a ≥ 0} (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se alguma
+                parte contestada for; só partes contestadas ou divididas somam, decisão de 09/10)
+    L         = logit(p_texto)  (max(L_a) se nenhuma parte tem L_a ≥ 0; 0 se nenhuma tem voto)
     p         = σ(L)  (probabilidade de desinformação, só informativa)
 
-Conjunção (D2): só afirmações COM voto (n_votos > 0) entram no produto. Afirmação sem voto
-fica fora (ausência de evidência não é evidência); votos que se anulam (L_a = 0) entram com
-p = 0,5. Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal) usa o mesmo
-critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
+Conjunção (D2, decisão da usuária 09/10: só partes contestadas somam). Entram no produto só as
+afirmações COM voto (n_votos > 0) com L_a ≥ 0 (contestadas, ou divididas com L_a = 0). Uma
+afirmação confirmada (L_a < 0) não soma: confirmações nunca dão alta. Se nenhuma parte tem
+L_a ≥ 0, L = max(L_a), a confirmação mais fraca. Afirmação sem voto fica fora (ausência de
+evidência não é evidência). Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal)
+usa o mesmo critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
 T7 (E4 × D2): com 2+ afirmações com voto, sai do produto a afirmação cujos votos vêm SÓ de
 fontes fora da janela (descontadas) e cujo |L_a| < τ ("só evidência de outro período" em
 `por_afirmacao[i]`): evidência de outro episódio que não chega a um nível não informa o fato
-atual. Também sai a afirmação que a trava so_fontes (abaixo) cortou. O contrafactual (sem
-desconto) não muda.
+atual. Se a afirmação tem voto de fonte atual (dentro da janela), ela continua no produto, mesmo que
+a trava so_fontes (abaixo) tenha cortado o L dela. O contrafactual (sem desconto) não muda.
+D-b (decisão da usuária, 09/10): se alguma afirmação saiu por "só evidência de outro período" e o
+nível sairia baixa, o texto fica em média (L = −0,99τ), `travas["parte_sem_checagem_atual"] = True`,
+e a justificativa diz, de forma neutra, que a afirmação não tem fonte do período descrito. Se o nível
+é alta pelas partes contestadas atuais, ele se mantém.
 E4, guarda do sinal (decisão da usuária, 09/10): E4 só remove informação de fonte de outro episódio.
 O nível pode ficar mais extremo apenas na direção de fontes do período, nunca sustentado só por
 fonte descontada. Trava `so_fontes_de_outro_periodo` (só no caminho COM desconto): por afirmação, se
@@ -61,15 +70,15 @@ Faixas SIMÉTRICAS em torno de 0 (τ = ln 3 ≈ 1,10, ou seja p ≥ 0,75 / p ≤
     L ≥ +τ → alta · L ≤ −τ → baixa · |L| < τ → media
     indeterminada: nenhum cluster com voto ≠ 0 (0 fontes SUSTENTA/REFUTA e nenhum
     veredito aplicável), ou afirmação vaga, ou opinião/sátira sem veredito.
-Trava de confiabilidade: sem ao menos 1 voto de fonte confiável (curada, institucional ou muito
-acessada) no mesmo sentido, |L_a| fica abaixo de τ — redes sociais e sites pouco acessados votam,
-mas sozinhos não cravam alta/baixa.
+Trava de confiabilidade: sem ao menos 1 voto de fonte confiável ATUAL (curada, institucional ou muito
+acessada, dentro da janela) no mesmo sentido, |L_a| fica abaixo de τ — redes sociais e sites pouco
+acessados votam, mas sozinhos não cravam alta/baixa. Fonte confiável de outro período não destrava a trava.
 Consequências: 1 fonte curada sozinha (w=1,0) → média (não satura); 2 clusters
 concordes → alta/baixa; 1 selo do índice aplicável (1,5) → alta/baixa; fontes em
 conflito → média. Sinais `fallback-*` (sem juiz) são ignorados. Ausência de
 evidência não é evidência: nada empurra o nível sem uma fonte com postura.
-Conjunção: uma parte com L ≥ τ e outra com L ≤ −τ dão alta, e a justificativa cita as duas
-partes; a parte verdadeira não apaga a falsa (L ≥ max L_a).
+Conjunção: uma parte com L ≥ τ (contestada) e outra com L ≤ −τ (confirmada) dão alta, e a
+justificativa cita as duas partes; a confirmação não apaga a contestação (L ≥ max L_a).
 
 A justificativa, o header e o why são gerados DO MESMO objeto `Decisao`.
 """
@@ -85,15 +94,15 @@ from . import aplicabilidade, confiabilidade, selos
 TAU = math.log(3)            # faixa média: |L| < ln 3  <=>  0,25 < p < 0,75
 W_POSTURA = 1.0              # postura com citação verificada, fonte curada, corpo lido
 W_VEREDITO = 1.5             # selo de checagem tipado, aplicável à afirmação
+# D-c (09/10): postura cujo peso ficou abaixo desta fração do peso sem o BERT (1 − prob_fake < 5%) não vota,
+# como se não existisse. Sem isso, um voto de valor ≈0 entrava na conjunção com σ(0) = 0,5.
+FRACAO_MIN_VOTO = 0.05
 # Fonte fora do catálogo: o fator vem do nível de confiabilidade (confiabilidade.py).
 F_NAO_CURADA = confiabilidade.FATOR_POSTURA[confiabilidade.ALTO_TRAFEGO]            # 0,6 (como antes)
 F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEGO]  # 0,8 (como antes)
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
 CLASSES_TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
-# Trecho do `motivo` de `decidir` quando o desconto temporal zera a evidência (indeterminada):
-# a justificativa e o why já trazem o aviso de data por esse motivo (ver `_motivo_avisa_data`).
-_MARCA_OUTRO_EPISODIO = "outro episódio"
 
 
 @dataclass
@@ -154,7 +163,7 @@ class Voto:
     classes: List[str]
     vereditos: List[str]
     motivo: str
-    confiavel: bool = True     # algum item do cluster é curado, institucional ou muito acessado
+    confiavel: bool = True     # algum item ATUAL (não descontado por data) do cluster é curado, institucional ou muito acessado
 
 
 @dataclass
@@ -170,11 +179,13 @@ class Decisao:
     conflitos: List[Dict[str, Any]] = field(default_factory=list)
     nao_analisadas: List[Dict[str, Any]] = field(default_factory=list)       # E3: só título, não vota
     descontos_temporais: List[Dict[str, Any]] = field(default_factory=list)  # E4: evidência de outro episódio
+    posturas_fracas: List[Dict[str, Any]] = field(default_factory=list)      # D-c: postura abaixo de 5% do peso
     contagem: Dict[str, int] = field(default_factory=dict)
     travas: Dict[str, bool] = field(default_factory=dict)
     parametros: Dict[str, Any] = field(default_factory=dict)
     log_odds_sem_desconto: float = 0.0  # E4: contrafactual sem desconto temporal
     nivel_sem_desconto: str = "indeterminada"  # E4: faixa do contrafactual
+    motivo_avisa_data: bool = False  # m6: a indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -191,17 +202,37 @@ class Decisao:
                     if v.valor * sinal > 0 and not self._afirmacao_fora(v.afirmacao)})
 
     def n_fontes_descontadas(self) -> int:
-        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
-        return len({x.get("url") for x in self.descontos_temporais if x.get("url")})
+        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte. Como em
+        `n_clusters`, as fontes de afirmação excluída da conjunção (só de outro período) não contam (m1)."""
+        return len({x.get("url") for x in self.descontos_temporais
+                    if x.get("url") and not self._afirmacao_fora(x.get("afirmacao"))})
 
-    def _motivo_avisa_data(self) -> bool:
-        """Indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência): o bloco E4
-        da justificativa e o sufixo do why não repetem o aviso."""
-        return self.nivel == "indeterminada" and _MARCA_OUTRO_EPISODIO in self.motivo
+    def _elegivel(self) -> bool:
+        """m2: a elegibilidade não bloqueou o nível (não é vago, não é opinião sem selo, e há voto). Só então
+        um desconto de data pode mudar o nível, e só então o texto avisa de notícia antiga recirculando."""
+        if self.travas.get("vago"):
+            return False
+        if self.travas.get("opiniao") and not self.vereditos_aplicados:
+            return False
+        return any(v.valor != 0 for v in self.votos)
+
+    def _sem_fonte_confiavel_no_texto(self) -> bool:
+        """A trava sem_fonte_confiavel vista pelo texto: nenhum voto de fonte confiável ATUAL no resultado.
+        A trava pode ter cortado uma afirmação enquanto outra tem fonte confiável atual; então o texto não
+        diz que todas as fontes são redes sociais ou sites pouco acessados."""
+        return bool(self.travas.get("sem_fonte_confiavel")) and not any(v.confiavel for v in self.votos)
+
+    def _confiavel_de_outro_periodo(self) -> bool:
+        """Alguma fonte confiável (curada, institucional ou muito acessada) teve o peso reduzido por data e
+        pesa no texto: a frase sobre fontes sem confirmação atual então diz "ou de outro período"."""
+        return any(x.get("confiabilidade") in confiabilidade.CONFIAVEIS
+                   for x in self.descontos_temporais if not self._afirmacao_fora(x.get("afirmacao")))
 
     def limitacao_datas(self) -> str:
         """Limitação neutra sobre datas (o bot mostra as 3 primeiras; o pipeline a põe no início)."""
         n = self.n_fontes_descontadas()
+        if n == 0:
+            return ""
         if n == 1:
             return "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
         return f"Datas: {n} fontes anteriores ao período do texto tiveram o peso reduzido."
@@ -231,8 +262,8 @@ class Decisao:
             partes.append(f"{up} fonte(s) independente(s) contestam o que o texto afirma e "
                           f"{down} o confirmam")
             selos = [v for v in self.vereditos_aplicados if not self._afirmacao_fora(v.get("afirmacao"))]
-            if selos:
-                selos_txt = ", ".join(f"{v['veredito']} ({v['veiculo'] or v['url']})" for v in selos[:3])
+            if selos:  # I5: selo sempre atribuído à agência, no formato da T3 ("Selo da Lupa: FALSO")
+                selos_txt = "; ".join(_selo_atribuido(v) for v in selos[:3])
                 partes[-1] += f"; selos de checagem considerados: {selos_txt}"
             partes[-1] += "."
             conflito = self._partes_em_conflito()
@@ -241,9 +272,16 @@ class Decisao:
             if self.conflitos:
                 partes.append(f"{len(self.conflitos)} fonte(s) com selo e texto em sentidos opostos "
                               "foram desconsideradas.")
-            if self.travas.get("sem_fonte_confiavel"):
-                partes.append("As fontes que tomam posição são redes sociais ou sites pouco acessados, "
-                              "então o resultado não passa de propensão média.")
+            if self.nivel == "media" and self._sem_fonte_confiavel_no_texto():  # I2: o "média" só vale em média
+                if self._confiavel_de_outro_periodo():
+                    partes.append("As fontes que tomam posição são redes sociais, sites pouco acessados "
+                                  "ou de outro período, então o resultado não passa de propensão média.")
+                else:
+                    partes.append("As fontes que tomam posição são redes sociais ou sites pouco acessados, "
+                                  "então o resultado não passa de propensão média.")
+            if self.travas.get("parte_sem_checagem_atual"):  # D-b
+                partes += [_frase_sem_fonte_atual(e, i) for i, e in enumerate(self.por_afirmacao)
+                           if "fora_da_conjuncao" in e]
         partes.append(f"Lidas {c.get('lidas', 0)} página(s) de {c.get('consultadas', 0)} consultada(s); "
                       f"{c.get('julgadas', 0)} julgada(s): {c.get('sustenta', 0)} confirmam, "
                       f"{c.get('refuta', 0)} contestam, {c.get('relata', 0)} só relatam, "
@@ -252,7 +290,8 @@ class Decisao:
                          if c.get("citacao_invalida") else "")
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
         # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
-        if self.travas.get("data_incompativel") and self.descontos_temporais and not self._motivo_avisa_data():
+        # m1: só as fontes que pesam; m6: não repete o aviso quando o motivo já é o de data.
+        if self.travas.get("data_incompativel") and self.n_fontes_descontadas() > 0 and not self.motivo_avisa_data:
             n_dt = self.n_fontes_descontadas()
             if n_dt == 1:
                 partes.append("1 fonte foi publicada antes do período que o texto descreve "
@@ -262,7 +301,9 @@ class Decisao:
                 partes.append(f"{n_dt} fontes foram publicadas antes do período que o texto descreve "
                               "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
                               "de outro episódio.")
-            if self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"):
+            # m2: o aviso só sai quando a elegibilidade não bloqueou (não vago, não opinião, há voto)
+            if self._elegivel() and (self.nivel != self.nivel_sem_desconto
+                                     or self.travas.get("so_fontes_de_outro_periodo")):
                 partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
         return " ".join(partes)
@@ -280,9 +321,9 @@ class Decisao:
             if conflito:
                 base += " " + conflito
         # E4 Task 6: sufixo curto só quando o desconto mudou o nível, ou a trava so_fontes cortou (neutro).
-        if (self.travas.get("data_incompativel")
+        if (self.travas.get("data_incompativel") and self.n_fontes_descontadas() > 0
                 and (self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"))
-                and not self._motivo_avisa_data()):
+                and self._elegivel() and not self.motivo_avisa_data):
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
         return base
 
@@ -304,6 +345,8 @@ class Decisao:
             "vereditos": [f"{v['veredito']}@{v['url'][:60]}" for v in self.vereditos_aplicados],
             "vereditos_ignorados": [f"{v.get('veredito')}@{v['url'][:60]}: {v['motivo']}"
                                     for v in self.vereditos_ignorados][:6],
+            "posturas_fracas": [f"af{x['afirmacao']} {x['classe']}@{x['url'][:60]} pf={x['prob_fake_pagina']}"
+                                for x in self.posturas_fracas][:6],
             "conflitos": [c["url"][:70] for c in self.conflitos],
             "contagem": self.contagem, **self.travas,
         }
@@ -327,6 +370,33 @@ def _citar_afirmacao(entrada: Dict[str, Any], idx: int) -> str:
     if len(texto) > _LIMITE_CITACAO:
         texto = texto[:_LIMITE_CITACAO - 1].rstrip() + "…"
     return f'"{texto}"'
+
+
+def _frase_sem_fonte_atual(entrada: Dict[str, Any], idx: int) -> str:
+    """D-b (09/10): a afirmação que saiu por "só evidência de outro período", dita de forma neutra."""
+    cit = _citar_afirmacao(entrada, idx)  # '"texto"', ou 'a afirmação N' quando o texto não pode ser citado
+    sujeito = f"A afirmação {cit}" if cit.startswith('"') else cit[:1].upper() + cit[1:]
+    return f"{sujeito} não tem fonte do período descrito."
+
+
+def _artigo_da_agencia(nome: str) -> str:
+    """Artigo do selo atribuído: "da" se o primeiro nome termina em "a" (Lupa, Agência Tatu), senão "do"
+    (Aos Fatos, Boatos.org). O catálogo não guarda o gênero da agência, então é uma heurística de redação; a
+    neutralidade não depende do artigo (`_SELO_ATRIBUIDO_RE` aceita os dois)."""
+    palavras = (nome or "").split()
+    return "da" if palavras and palavras[0].lower().endswith("a") else "do"
+
+
+def _selo_atribuido(v: Dict[str, Any]) -> str:
+    """I5: o selo de um veredito aparece na justificativa no formato atribuído da T3 ("Selo da Lupa: FALSO"),
+    pelo `formatar_selo` do agregador. Sem nome de agência (veiculo vazio), usa o host da URL."""
+    from urllib.parse import urlsplit
+    from .agregador import formatar_selo
+    agencia = (v.get("veiculo") or "").strip()
+    if not agencia:
+        host = urlsplit(v.get("url") or "").hostname or ""
+        agencia = host[4:] if host.startswith("www.") else host
+    return formatar_selo(agencia, v.get("veredito") or "", artigo=_artigo_da_agencia(agencia))
 
 
 def nivel_de(L: float) -> str:
@@ -368,7 +438,8 @@ def _fator_credibilidade(it: ItemEvidencia) -> float:
 
 
 def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
-    """(valor, descrição) de um item; registra vereditos aplicados/ignorados e conflitos."""
+    """(valor, descrição) de um item; registra vereditos aplicados/ignorados, conflitos, não analisadas
+    (E3) e posturas fracas (D-c: postura com menos de 5% do peso, não vota)."""
     if (it.motor or "").startswith("fallback") or it.classe is None:
         if it.veredito:
             dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
@@ -386,9 +457,16 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     post = None
     if it.classe in CLASSES_VOTO:
         d = 1.0 if it.classe == "REFUTA" else -1.0
-        w = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()] * _fator_credibilidade(it)
-        if w > 0:  # prob_fake 1,0: a página não vota na postura
+        base = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]  # peso sem o BERT
+        w = base * _fator_credibilidade(it)
+        if base > 0 and w >= FRACAO_MIN_VOTO * base:
             post = (s * d * w, f"postura {it.classe}")
+        else:
+            # D-c (09/10): com o BERT quase certo de que a página é fake (menos de 5% do peso), a postura
+            # não vota, como se não existisse. O trace guarda o caso em `posturas_fracas`.
+            dec.posturas_fracas.append({"url": it.url, "afirmacao": it.afirmacao, "classe": it.classe,
+                                        "prob_fake_pagina": it.prob_fake_pagina,
+                                        "fracao": round(_fator_credibilidade(it), 4)})
     ver = None
     if it.veredito:
         if it.classe not in CLASSES_TRATA:
@@ -425,14 +503,17 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
 
 
 def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registrar: bool,
-             atuais: Optional[Dict[str, List[float]]] = None) -> tuple[float, bool]:
+             atuais: Optional[Dict[str, List[float]]] = None,
+             descontados: frozenset = frozenset()) -> float:
     """Agrega os votos de UMA afirmação (um voto por cluster + duas travas: confiabilidade e E4).
 
     Mesma regra para o caminho com desconto e para o contrafactual sem desconto;
     só o caminho com desconto registra votos/travas em `dec` (o `decidir` segue puro).
     `atuais` (só no caminho com desconto): por cluster, as contribuições de itens NÃO descontados
     (dentro da janela). Sem ele a trava so_fontes_de_outro_periodo não age (contrafactual).
-    Devolve (L_a, cortou_so_fontes).
+    `descontados` (ids dos itens descontados por data): só fonte atual conta como confiável para a
+    trava sem_fonte_confiavel (I1). Uma curada de outro período, com peso ≈ 0, não a destrava.
+    Devolve L_a.
     """
     L_a = 0.0
     novos: List[Voto] = []
@@ -449,13 +530,14 @@ def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registr
                     vereditos=sorted({it.veredito for _, _, it in contribs if it.veredito}),
                     motivo="; ".join(sorted({d for _, d, _ in contribs})),
                     confiavel=any(it.nivel_confiabilidade() in confiabilidade.CONFIAVEIS
+                                  and id(it) not in descontados
                                   for v, _, it in contribs if v * sinal > 0))
         novos.append(voto)
         L_a += voto.valor
     # Duas travas leem o MESMO L_a bruto e cortam para o MESMO 0,99τ: idempotentes, então a ordem
     # não muda o nível nem as flags; cada flag é registrada quando a própria condição vale.
     # 1) sem_fonte_confiavel: fontes pouco confiáveis (rede social, site pouco acessado) votam, mas
-    #    sozinhas não cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na média.
+    #    sozinhas não cravam alta/baixa: sem ao menos 1 voto de fonte confiável ATUAL no mesmo sentido, fica na média.
     # 2) so_fontes_de_outro_periodo (E4, só com `atuais`): nenhum voto na direção de L_a tem
     #    contribuição de item NÃO descontado; o extremo é só de fonte de outro período.
     corta_sem = corta_so = False
@@ -473,7 +555,7 @@ def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registr
                 dec.travas["so_fontes_de_outro_periodo"] = True
     if registrar:
         dec.votos.extend(novos)
-    return L_a, corta_so
+    return L_a
 
 
 def _clusters_com_voto(clusters: Dict[str, List[tuple]]) -> int:
@@ -482,21 +564,33 @@ def _clusters_com_voto(clusters: Dict[str, List[tuple]]) -> int:
 
 
 def _combinar_afirmacoes(valores: List[float]) -> float:
-    """Conjunção entre afirmações (D2): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto).
+    """Conjunção entre afirmações (D2, com a decisão da usuária de 09/10: só partes contestadas somam).
 
-    `valores` são os L_a só das afirmações COM voto (quem chama filtra: ausência de evidência
-    não entra no produto; no caminho com desconto, sai também a só-descontada com |L_a| < τ,
-    T7, ver `decidir`). Lista vazia → 0. Uma parte só → o próprio L_a, porque σ e logit se
-    cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
+    `valores` são os L_a das afirmações COM voto (quem chama tira as que não contam: sem voto e a
+    só-descontada de T7, ver `decidir`). Só entram no produto as partes com L_a ≥ 0 (contestadas e
+    divididas, com L_a = 0): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto). Uma confirmação
+    (L_a < 0) não soma, então confirmações nunca dão alta. Se nenhuma parte tem L_a ≥ 0,
+    L = max(L_a): a confirmação mais fraca. Lista vazia → 0; uma parte só → o próprio L_a, porque σ
+    e logit se cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
     cancelamento) e p é limitado em [1e-12, 1 − 1e-12] antes do logit.
-    Propriedade: L ≥ max(L_a); duas partes com p≈0,7 cada dão p_texto≈0,91.
+    Propriedades: L ≥ max(valores) (a parte falsa não some por causa de parte verdadeira); com só
+    confirmações, L ≤ max < 0. Caso (b) do T7: p≈0,70 (falsa) + p≈0,10 (verdadeira) dão L = logit(0,70)
+    ≈ 0,85, isto é, média. Duas partes contestadas com p≈0,70 cada dão p_texto≈0,91.
+    Comportamento conhecido: duas partes divididas (L_a = 0) dão p_texto = 0,75, então L = τ e o
+    nível é alta. Pela decisão de 09/10, L = 0 conta como contestada; o teste documenta isso e não
+    muda o critério.
     """
     if not valores:
         return 0.0
     if len(valores) == 1:
         return valores[0]
-    descrenca = 1.0  # Π(1 − σ(L_a))
-    for L_a in valores:
+    contestadas = [v for v in valores if v >= 0]
+    if not contestadas:
+        return max(valores)
+    if len(contestadas) == 1:
+        return contestadas[0]  # σ e logit se cancelam: o L da única parte contestada
+    descrenca = 1.0  # Π(1 − σ(L_a)) sobre as contestadas
+    for L_a in contestadas:
         descrenca *= _sig(-L_a)
     p = min(max(1.0 - descrenca, 1e-12), 1.0 - 1e-12)
     return math.log(p / (1.0 - p))
@@ -528,14 +622,17 @@ def decidir(ev: Evidencias) -> Decisao:
     """Função pura: mesma entrada, mesma Decisao. Não faz I/O nem telemetria."""
     dec = Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="",
                   travas={"vago": ev.vago, "opiniao": ev.opiniao, "rumor": ev.rumor, "sem_fonte_confiavel": False,
-                          "so_fontes_de_outro_periodo": False, "juiz_disponivel": ev.juiz_disponivel},
+                          "so_fontes_de_outro_periodo": False, "parte_sem_checagem_atual": False,
+                          "juiz_disponivel": ev.juiz_disponivel},
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
                               "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
                               "postura": "W_POSTURA·f_fonte·(1−prob_fake_pagina)",
-                              "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre afirmações com voto; "
-                                             "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto")})
+                              "fracao_min_voto": FRACAO_MIN_VOTO,
+                              "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre as partes com L_a≥0 (com voto); "
+                                             "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto; "
+                                             "se nenhuma parte é ≥0, max(L_a)")})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),
@@ -557,6 +654,7 @@ def decidir(ev: Evidencias) -> Decisao:
         clusters: Dict[str, List[tuple]] = {}
         clusters_brutos: Dict[str, List[tuple]] = {}
         atuais: Dict[str, List[float]] = {}  # E4 (trava so_fontes): contribuições NÃO descontadas, por cluster
+        ids_descontados: set = set()  # ids dos itens descontados por data (I1: só a fonte atual conta como confiável)
         contribuiu_atual = contribuiu_descontado = False  # T7: itens com voto dentro / fora da janela
         for it in ev.itens:
             if it.afirmacao != a_idx:
@@ -577,10 +675,11 @@ def decidir(ev: Evidencias) -> Decisao:
                     "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub,
                     "data_pub_bruta": it.data_pub_bruta, "data_pub_precisao": it.data_pub_precisao,
                     "janela": medida[0], "dias_alem_da_janela": medida[1], "r": round(r, 3),
-                    "direcao": direcao,
+                    "direcao": direcao, "confiabilidade": it.nivel_confiabilidade(),
                     "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),
                     "bits_descartados": round(bits, 3)})
                 contribs = descontados
+                ids_descontados.add(id(it))
             if brutos:
                 if descontado:
                     contribuiu_descontado = True
@@ -591,20 +690,21 @@ def decidir(ev: Evidencias) -> Decisao:
                 clusters.setdefault(it.cluster or it.url, []).append((valor, desc, it))
             for valor, desc in brutos:
                 clusters_brutos.setdefault(it.cluster or it.url, []).append((valor, desc, it))
-        L_a, cortou_so = _agregar(clusters, a_idx, dec, registrar=True, atuais=atuais)
-        L_a_bruto, _ = _agregar(clusters_brutos, a_idx, dec, registrar=False)
+        L_a = _agregar(clusters, a_idx, dec, registrar=True, atuais=atuais,
+                       descontados=frozenset(ids_descontados))
+        L_a_bruto = _agregar(clusters_brutos, a_idx, dec, registrar=False)
         por_af[a_idx] = L_a
         por_af_brutos[a_idx] = L_a_bruto
         n_votos[a_idx] = sum(1 for v in dec.votos if v.afirmacao == a_idx)
         n_brutos[a_idx] = _clusters_com_voto(clusters_brutos)
-        # T7/E4: só-descontada = todo voto vem de fora da janela; a trava so_fontes também conta
-        # (o L cortado sustentava-se só em fonte descontada na direção dele).
-        so_descontada[a_idx] = (contribuiu_descontado and not contribuiu_atual) or cortou_so
+        # T7/E4 (C1): só-descontada = todo voto vem de fora da janela. Uma afirmação com voto de fonte atual
+        # continua no produto, mesmo que a trava so_fontes tenha cortado o L dela.
+        so_descontada[a_idx] = contribuiu_descontado and not contribuiu_atual
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": n_votos[a_idx]})
-    # combinação entre afirmações (D2, conjunção): o texto é desinformação se QUALQUER parte for.
-    # "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o mesmo critério sobre
-    # os votos brutos, isto é, o caso sem o desconto temporal.
+    # combinação entre afirmações (D2, conjunção; decisão 09/10: só partes contestadas somam, ver
+    # `_combinar_afirmacoes`). "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o
+    # mesmo critério sobre os votos brutos, isto é, o caso sem o desconto temporal.
     # T7 (E4 × D2): também fica fora a afirmação só com fontes fora da janela (descontadas) cujo
     # |L_a| (já com a trava de confiabilidade) ficou abaixo de τ: evidência de outro episódio que,
     # sozinha, não chega a um nível não informa o fato atual. Só vale com 2+ afirmações com voto;
@@ -616,6 +716,11 @@ def decidir(ev: Evidencias) -> Decisao:
     for a in fora:
         dec.por_afirmacao[a]["fora_da_conjuncao"] = "só evidência de outro período"
     L = _combinar_afirmacoes([por_af[a] for a in com_voto if a not in fora])
+    # D-b (09/10): a parte só com fonte de outro período não deixa o texto cravar baixa. Se alguma
+    # afirmação saiu por isso e o nível sairia baixa, o texto fica em média.
+    if fora and L <= -TAU:
+        L = math.copysign(TAU * 0.99, L)
+        dec.travas["parte_sem_checagem_atual"] = True
     L_sem = _combinar_afirmacoes([por_af_brutos[a] for a in por_af_brutos if n_brutos[a] > 0])
     dec.log_odds = round(L, 4)
     dec.log_odds_sem_desconto = round(L_sem, 4)
@@ -646,6 +751,7 @@ def decidir(ev: Evidencias) -> Decisao:
             dec.motivo = ("as fontes com posição são de antes do período que o texto descreve "
                           "(\"hoje\", \"ontem\"…) e podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")
+            dec.motivo_avisa_data = True  # m6: o motivo é o aviso de data (flag, não busca por texto)
         else:
             dec.motivo = "as fontes com postura se anulam dentro do mesmo grupo ou conflitam com o selo"
         dec.nivel = "indeterminada"
@@ -656,13 +762,15 @@ def decidir(ev: Evidencias) -> Decisao:
         dec.motivo = {"alta": "fontes independentes contestam o que o texto afirma",
                       "baixa": "fontes independentes confirmam o que o texto afirma",
                       "media": "evidência fraca ou dividida"}[dec.nivel]
-        if dec.nivel == "media" and dec.travas.get("sem_fonte_confiavel"):
-            dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados; "
-                          "falta a confirmação de um veículo, órgão público ou site muito acessado")
+        if dec.nivel == "media" and dec._sem_fonte_confiavel_no_texto():
+            dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados"
+                          + (", ou de outro período" if dec._confiavel_de_outro_periodo() else "")
+                          + "; falta a confirmação de um veículo, órgão público ou site muito acessado")
         elif dec.nivel == "media" and (dec.nivel != dec.nivel_sem_desconto
                                        or dec.travas.get("so_fontes_de_outro_periodo")):
             dec.motivo = ("as fontes encontradas são anteriores ao período que o texto descreve "
                           "(\"hoje\", \"ontem\"…): podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")
-    dec.travas["data_incompativel"] = bool(dec.descontos_temporais)
+    # m1: a trava diz que alguma data pesa no texto (fontes de afirmação excluída não contam).
+    dec.travas["data_incompativel"] = dec.n_fontes_descontadas() > 0
     return dec
