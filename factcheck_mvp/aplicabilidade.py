@@ -334,6 +334,20 @@ def _mes(nome: str) -> int | None:
     return _MESES_DATA.get(chave) or _MESES_EN.get(chave)
 
 
+# M-12: "há N meses/anos" é o mês/ano-calendário N unidades antes, e a data é o FIM dele. Não se subtraem
+# N×30 ou N×365 dias: isso fica mais antigo que o texto garante (2 anos = 730 dias vs. 2024-12-31, ainda
+# dentro de "há 2 anos"). Fim do intervalo = a data mais recente compatível com o texto (precisão conservadora).
+_UNIDADES_MES = frozenset({"mes", "meses", "month", "months"})
+_UNIDADES_ANO = frozenset({"ano", "anos", "year", "years"})
+
+
+def _fim_do_mes_antes(base: date, n: int) -> date:
+    """Último dia do mês-calendário `n` meses antes de `base` (M-12)."""
+    ano, mes = divmod(base.year * 12 + (base.month - 1) - n, 12)
+    mes += 1
+    return date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+
 def _valor_quantidade(token: str) -> int | None:
     """Valor de um token de quantidade: algarismos, numeral por extenso ou "dezena e unidade"."""
     if token.isdigit():
@@ -460,6 +474,10 @@ def _normalizar_data(valor: str | None, ancora: str | None) -> tuple[str, str] |
         base = _data_de_ancora(ancora)
         if base is None or qtd > _MAX_RELATIVA_N:
             return None
+        if unidade in _UNIDADES_MES:
+            return _fechar(_fim_do_mes_antes(base, qtd), "ano")
+        if unidade in _UNIDADES_ANO:
+            return _fechar(date(base.year - qtd, 12, 31), "ano")
         mult, precisao = _UNIDADES_RELATIVAS[unidade]
         return _fechar(base - timedelta(days=qtd * mult), precisao)
 

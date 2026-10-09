@@ -571,3 +571,15 @@ def test_meia_noite_local_e_data_literal(valor, esperado):
 ])
 def test_normalizar_data_formatos_de_m7(valor, ancora, esperado):
     assert aplicabilidade.normalizar_data(valor, ancora) == esperado
+
+
+# --- E4 revisão (M-12): "há N anos/meses" usa o FIM do intervalo calendário: nunca mais antigo que o texto ---
+@pytest.mark.parametrize("valor,esperado", [
+    ("há 2 anos", ("2024-12-31", "ano")),      # antes: 2024-10-09 (730 dias), mais antigo que o texto garante
+    ("há um ano", ("2025-12-31", "ano")),
+    ("há 1 mês", ("2026-09-30", "ano")),
+    ("há 3 meses", ("2026-07-31", "ano")),
+    ("há 3 dias", ("2026-10-06", "dia")),      # dias continuam exatos
+])
+def test_relativa_em_anos_e_meses_usa_o_fim_do_intervalo(valor, esperado):
+    assert aplicabilidade.normalizar_data(valor, "2026-10-09") == esperado
