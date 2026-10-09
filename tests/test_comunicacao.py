@@ -250,6 +250,28 @@ def test_fontes_leva_a_precisao_da_data_da_peca():
     assert (f.data_pub, f.data_pub_precisao, f.data_pub_bruta) == ("2021-12-31", "ano", "2021-01-01")
 
 
+def test_web_lista_descontos_por_data_em_como_chegamos_aqui_sem_bits_no_bot():
+    """Task 6: a web mostra cada desconto (url escapada, dias além da janela, r e bits) no
+    <details> 'Como chegamos aqui'; os bits ficam FORA do bot (técnico demais)."""
+    from factcheck_mvp.api import _render_html
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[_fonte("https://a.test/<x>", "SUSTENTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        etapas=[EtapaRecibo(nome="juiz", status="ok")],
+        decisao={"votos": [], "descontos_temporais": [
+            {"url": "https://a.test/<x>", "dias_alem_da_janela": 1905, "janela": 2, "r": 0.05,
+             "bits_descartados": 0.876}]})
+    h = _render_html("x", rel)
+    inicio = h.index("Como chegamos aqui")
+    bloco = h[inicio:h.index("</details>", inicio)]
+    assert "https://a.test/&lt;x&gt;" in bloco and "<script>" not in h
+    assert "1905 dias além da janela de 2" in bloco and "r=0.05" in bloco and "0.88 bit" in bloco
+    t = formatar(rel)
+    assert "bit" not in t.lower()
+
+
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     from factcheck_mvp.telegram_bot import formatar
     rac = "A página afirma que o café cura o câncer, citando um estudo de dois anos. " * 4  # > cap

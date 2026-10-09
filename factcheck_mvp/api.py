@@ -148,6 +148,24 @@ async def checar(entrada: EntradaConsulta, request: Request):
         raise HTTPException(status_code=502, detail="falha temporária, tente de novo em instantes")
 
 
+def _descontos_html(decisao: dict | None) -> str:
+    """E4 Task 6 (web): cada fonte com desconto por data, com os dias além da janela, r e bits.
+    Os bits ficam só aqui (o bot não os mostra: técnico demais). A URL vem escapada."""
+    itens = []
+    for x in (decisao or {}).get("descontos_temporais") or []:
+        url = str(x.get("url") or "")
+        if not url:
+            continue
+        bits = x.get("bits_descartados")
+        bits_txt = f"{float(bits):.2f}" if isinstance(bits, (int, float)) else "?"
+        itens.append(f"<li>{html.escape(url)} — {x.get('dias_alem_da_janela', '?')} dias além da janela de "
+                     f"{x.get('janela', '?')} · r={x.get('r', '?')} · {bits_txt} bit(s) descartado(s)</li>")
+    if not itens:
+        return ""
+    return ("<p><b>Fontes com desconto por data</b> (publicadas antes do período do texto):</p>"
+            f"<ul>{''.join(itens)}</ul>")
+
+
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
     from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
                             linha_raciocinio, postura_legivel)
@@ -212,7 +230,8 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                   f"<h3>O que as fontes dizem</h3>"
                   f"{fontes or '<p>Não encontramos fontes que tratem do assunto. Na dúvida, não compartilhe.</p>'}"
                   f"<h3>Para avaliar você mesmo</h3><ul>{guia}</ul>"
-                  f"<details><summary>Como chegamos aqui</summary><ul>{etapas}</ul></details>"
+                  f"<details><summary>Como chegamos aqui</summary><ul>{etapas}</ul>"
+                  f"{_descontos_html(rel.decisao)}</details>"
                   f"<details><summary>Limitações desta análise</summary><ul>{lims}</ul></details>")
     return ("<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>CrossCheckBR</title></head>"
