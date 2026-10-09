@@ -10,14 +10,14 @@ import re
 
 import pytest
 
-from factcheck_mvp import config, llm
+from factcheck_mvp import afirmacoes, config, llm
 from factcheck_mvp import pipeline as pl
 from factcheck_mvp.aprofundar import CorpoLido
 from factcheck_mvp.catalogo import Catalogo
 from factcheck_mvp.indice import Indice
 from factcheck_mvp.modelo_fake import MockDetector
 from factcheck_mvp.pipeline import Pipeline
-from factcheck_mvp.schemas import EntradaConsulta
+from factcheck_mvp.schemas import Afirmacao, EntradaConsulta
 from factcheck_mvp import serpapi_layer as camada
 
 
@@ -525,3 +525,105 @@ def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
     assert peca["data_pub"] == "2025-08-11"
     assert peca["data_pub_precisao"] == "dia"
     assert peca["data_pub_bruta"] == "2025-08-11T09:00:00-03:00"
+
+
+# --- Task 5 (E4): gate E1 usa a mesma janela, referência e data da decisão ---
+_DISTRATORES_BM25 = ["Vacina altera o DNA humano", "Urnas foram fraudadas em 2022",
+                     "Limão em jejum cura diabetes", "Governo vai confiscar poupança",
+                     "Água gelada causa gripe"]
+
+
+def _extrator_fixo(afs):
+    """Troca o extrator de afirmações por um que devolve `afs` (ex.: sem o "hoje")."""
+    def _extrair(texto, max_n=0, usar_llm=True):
+        return list(afs), "fake"
+    return _extrair
+
+
+def _eventos_aplicabilidade(monkeypatch):
+    """Captura os eventos `fonte estagio=aplicabilidade` emitidos pelo pipeline."""
+    from factcheck_mvp import telemetria as _tel
+    capturados = []
+    _evento_original = _tel.evento
+
+    def _espiar(tipo, /, **dados):
+        if tipo == "fonte" and dados.get("estagio") == "aplicabilidade":
+            capturados.append(dados)
+        return _evento_original(tipo, **dados)
+
+    monkeypatch.setattr(_tel, "evento", _espiar)
+    return capturados
+
+
+def test_gate_barra_checagem_antiga_quando_o_extrator_perdeu_o_hoje(amb, monkeypatch):
+    """A3/A4: o extrator devolve a afirmação SEM o "hoje"; o texto do usuário tem o "hoje" e a
+    entrada traz a referência. A checagem de 2025 não é aplicável a um fato de 2026-10-09: a web não pula."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-bolsonaro-alta-antiga"
+    idx = Indice.de_checagens([{"url": url, "titulo": "Bolsonaro alta hospital",
+        "afirmacao_checada": "Bolsonaro recebeu alta do hospital", "selo_original": "Falso",
+        "veredito": "FALSO", "agencia": "boatos-org", "data_pub": "2025-04-23",
+        "trecho": "É falso que Bolsonaro recebeu alta do hospital, segundo apuração."}]
+        + [{"url": f"https://lupa.uol.com.br/z{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(_DISTRATORES_BM25)])
+    amb[url] = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
+    monkeypatch.setattr(afirmacoes, "extrair_afirmacoes", _extrator_fixo(
+        [Afirmacao(texto="Bolsonaro recebeu alta do hospital", nucleo="Bolsonaro recebeu alta do hospital",
+                   polaridade="afirma", consulta="bolsonaro alta hospital")]))
+    eventos = _eventos_aplicabilidade(monkeypatch)
+    buscas = {"n": 0}
+
+    class Contadora(FakeSerp):
+        def buscar(self, q):
+            buscas["n"] += 1
+            return super().buscar(q)
+
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=Contadora([]),
+                               detector=MockDetector()).executar(
+        EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                        data_referencia="2026-10-09")))
+    # Guarda anti-vácuo: a base devolveu a checagem e o gate a avaliou com janela, referência e data
+    assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
+    da_checagem = [e for e in eventos if e["url"] == url]
+    assert len(da_checagem) == 1
+    assert da_checagem[0]["decisao"] == "inaplicavel" and da_checagem[0]["motivo"] == "data incompatível"
+    assert (da_checagem[0]["janela"], da_checagem[0]["referencia"], da_checagem[0]["excedente"]) == (
+        2, "2026-10-09", 532)  # 534 dias de 2025-04-23 a 2026-10-09, menos a janela de 2
+    assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe
+                   for e in rel.etapas)
+    assert buscas["n"] > 0 and rel.onde_encontrado == "web"
+    # a decisão desconta a mesma fonte, com a mesma janela e a mesma distância que o gate mediu
+    assert [(x["janela"], x["dias_alem_da_janela"]) for x in rel.decisao["descontos_temporais"]] == [(2, 532)]
+
+
+def test_gate_nao_barra_checagem_de_frase_sem_marcador_com_hoje_em_outra_frase(amb, monkeypatch):
+    """Duas afirmações: o "hoje" está só na outra frase. A checagem antiga da frase sem marcador
+    não herda a janela do texto: o gate a aceita e a decisão não desconta nada."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-ponte-2019"
+    idx = Indice.de_checagens([{"url": url, "titulo": "Ponte caiu em 2019",
+        "afirmacao_checada": "A ponte caiu em 2019", "selo_original": "Falso",
+        "veredito": "FALSO", "agencia": "boatos-org", "data_pub": "2019-06-01",
+        "trecho": "É falso que a ponte caiu em 2019, segundo a prefeitura."}]
+        + [{"url": f"https://lupa.uol.com.br/y{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(_DISTRATORES_BM25)])
+    amb[url] = "É falso que a ponte caiu em 2019, segundo a prefeitura. " * 50
+    monkeypatch.setattr(afirmacoes, "extrair_afirmacoes", _extrator_fixo([
+        Afirmacao(texto="A ponte caiu em 2019", nucleo="A ponte caiu em 2019", polaridade="afirma",
+                  consulta="ponte caiu 2019"),
+        Afirmacao(texto="Bolsonaro recebeu alta do hospital hoje", nucleo="Bolsonaro recebeu alta do hospital",
+                  polaridade="afirma", consulta="bolsonaro alta hospital")]))
+    eventos = _eventos_aplicabilidade(monkeypatch)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([]),
+                               detector=MockDetector()).executar(
+        EntradaConsulta(tipo="titulo", conteudo="A ponte caiu em 2019. Bolsonaro recebeu alta do hospital hoje.",
+                        data_referencia="2026-10-09")))
+    da_frase_sem_marcador = [e for e in eventos if e["url"] == url and e["afirmacao"] == 0]
+    # Guarda anti-vácuo: a checagem da frase sem marcador chegou ao gate
+    assert len(da_frase_sem_marcador) == 1
+    assert da_frase_sem_marcador[0]["decisao"] == "aplicavel"
+    assert da_frase_sem_marcador[0]["janela"] is None and da_frase_sem_marcador[0]["excedente"] is None
+    assert rel.onde_encontrado == "base"
+    assert rel.decisao["descontos_temporais"] == []

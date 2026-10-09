@@ -374,7 +374,8 @@ class Pipeline:
         pecas_base = _uteis_base
 
         # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1)
-        julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar)
+        julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar,
+                                                           texto_usuario=texto_base, referencia=ref)
 
         # Gate (E1): checagem aplicável na base → pula web e ondas extras.
         # Telemetria do gate é evento("etapa"), nunca fallback. Com SERPAPI_KEY ausente
@@ -562,14 +563,17 @@ class Pipeline:
 
     # ------------------------------------------------------------------ seleção / juiz
     async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
-                         usar_llm: bool = True, avisar=None
+                         usar_llm: bool = True, avisar=None,
+                         texto_usuario: str = "", referencia: Optional[str] = None
                          ) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], bool]:
         """Fase base (E1): seleciona/lê/julga SÓ a base e testa aplicabilidade.
 
-        Para cada par (peça, afirmação) chama
-        `aplicabilidade.e_aplicavel(classe, citacao_verificada, corpo_lido, veredito,
-        afs[ai].texto, data_pub)` e emite `telemetria.evento("fonte",
-        estagio="aplicabilidade", decisao=...)` por decisão. O gate (pular a web) é
+        Para cada par (peça, afirmação) chama `aplicabilidade.e_aplicavel` com as mesmas
+        entradas da decisão (E4): janela da afirmação (`janela_da_afirmacao` sobre
+        `texto_usuario` e nº de afirmações), `referencia` já resolvida em `_executar`
+        (a mesma de `Evidencias.data_referencia`) e `data_pub` normalizada. Emite
+        `telemetria.evento("fonte", estagio="aplicabilidade", decisao=..., motivo=...,
+        janela=..., excedente=..., referencia=...)` por decisão. O gate (pular a web) é
         evento("etapa"), nunca fallback — fallback só em erro real.
 
         -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido).
@@ -584,16 +588,22 @@ class Pipeline:
         if not selecionados:
             return {}, False
         julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
+        janelas = [aplicabilidade.janela_da_afirmacao(a.texto, texto_usuario, len(afs)) for a in afs]
         houve = False
         for (pi, ai), r in julg.items():
             p = pecas_base[pi]
+            janela = janelas[ai]
             aplicavel, motivo = aplicabilidade.e_aplicavel(
                 r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
-                p.get("veredito"), afs[ai].texto, p.get("data_pub"))
+                p.get("veredito"), texto_usuario, p.get("data_pub"),
+                referencia=referencia, janela=janela)
+            medida = aplicabilidade.dias_excedentes_da_janela(janela, p.get("data_pub"), referencia)
             telemetria.evento("fonte", url=p.get("url"), estagio="aplicabilidade",
                               decisao="aplicavel" if aplicavel else "inaplicavel",
                               motivo=motivo, afirmacao=ai, classe=r.get("classe"),
-                              corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"))
+                              corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"),
+                              janela=janela, excedente=medida[1] if medida else None,
+                              referencia=referencia)
             if aplicavel:
                 houve = True
         return julg, houve
