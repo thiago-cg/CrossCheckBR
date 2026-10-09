@@ -451,6 +451,35 @@ def test_web_achata_titulo_e_citacao():
     assert "Título em duas linhas" in h and "Citação em duas" in h
 
 
+# ------------------------------------------------------------------ I3: href só com http(s)
+def _rel_url(url):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        fontes=[_fonte(url, "REFUTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        decisao=None)
+
+
+@pytest.mark.parametrize("url", [
+    "javascript:alert(document.cookie)",
+    "JaVaScRiPt:alert(1)",
+    " javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "http://[::1",                       # URL malformada: não pode derrubar a página
+])
+def test_web_nao_faz_link_com_esquema_que_nao_e_http(url):
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_url(url))
+    assert 'href="' not in h and "<script>" not in h  # sem âncora clicável; o texto segue escapado
+
+
+def test_web_mantem_link_http_e_https_escapado():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_url("https://a.test/x?y=1&z=2"))
+    assert '<a href="https://a.test/x?y=1&amp;z=2"' in h
+
+
 def test_pipeline_fontes_acha_titulo_e_citacao_em_uma_linha():
     from factcheck_mvp import decisao
     from factcheck_mvp.pipeline import Pipeline

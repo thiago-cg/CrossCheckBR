@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -168,6 +169,20 @@ def _descontos_html(decisao: dict | None) -> str:
             f"<ul>{''.join(itens)}</ul>")
 
 
+def _link_html(url: str) -> str:
+    """I3: âncora clicável só para http(s). Outro esquema (javascript:, data:, vbscript:…) ou URL
+    malformada vira texto escapado: o navegador não executa nada vindo da fonte."""
+    from .agregador import texto_de_linha
+    u = texto_de_linha(url)
+    try:
+        esquema = urlparse(u).scheme.lower()
+    except ValueError:
+        esquema = ""
+    if esquema in ("http", "https"):
+        return f"<a href=\"{html.escape(u)}\" target='_blank' rel='noopener'>{html.escape(u[:80])}</a>"
+    return html.escape(u[:80])
+
+
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
     from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
                             linha_raciocinio, postura_legivel, texto_de_linha)
@@ -217,7 +232,7 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                     f"{'<i>“' + esc(_cit) + '”</i><br/>' if _cit else ''}"
                     f"{_html_rac}"
                     f"{_linha_data}"
-                    f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")
+                    f"{_link_html(f.url)}</div>")
         fontes = "".join(_cartao(f) for f in uteis)
         etapas = "".join(f"<li>{STATUS_ETAPA.get(e.status, '')} <b>{esc(NOMES_ETAPAS.get(e.nome, e.nome))}</b>: "
                          f"{esc(e.detalhe)}</li>" for e in rel.etapas)
