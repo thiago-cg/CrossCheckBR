@@ -33,7 +33,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
-from factcheck_mvp import config, replay, telemetria  # noqa: E402  (config carrega .env)
+from factcheck_mvp import aplicabilidade, config, replay, telemetria  # noqa: E402  (config carrega .env)
 from factcheck_mvp.schemas import EntradaConsulta  # noqa: E402
 
 DIR_EVAL = Path(__file__).resolve().parent
@@ -230,6 +230,36 @@ def _busca_indisponivel(m: Dict[str, Any]) -> float:
     return float(d.get("pulada", 0) or 0) + float(d.get("falhou", 0) or 0)
 
 
+def _e4_do_trace(eventos: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """E4 por caso a partir do trace: marcador, desconto, nível que mudou, bits, referência."""
+    base: Dict[str, Any] = {"marcador": False, "desconto": False, "nivel_mudou": False,
+                            "bits": 0.0, "referencia_ausente": True}
+    if not eventos:
+        return base
+    evd = next((e.get("dados") or {} for e in eventos if e.get("tipo") == "evidencias"), {}) or {}
+    if evd:
+        afs = evd.get("afirmacoes") or []
+        try:
+            marcado = aplicabilidade.janela_temporal(evd.get("texto_usuario") or "") is not None
+        except Exception:
+            marcado = False
+        base["marcador"] = (any((a or {}).get("janela") is not None for a in afs) or marcado)
+        base["referencia_ausente"] = not evd.get("data_referencia")
+    decev = next((e.get("dados") or {} for e in eventos if e.get("tipo") == "decisao"), {}) or {}
+    if decev:
+        travas = decev.get("travas") or {}
+        descs = (decev.get("decisao") or {}).get("descontos_temporais") or []
+        base["desconto"] = (bool(descs) or bool(travas.get("descontos"))
+                            or bool(travas.get("data_incompativel")))
+        try:
+            base["bits"] = round(sum(float(x.get("bits_descartados") or 0) for x in descs), 3)
+        except (TypeError, ValueError, AttributeError):
+            base["bits"] = 0.0
+        base["nivel_mudou"] = (base["desconto"] and decev.get("nivel")
+                               != travas.get("nivel_sem_desconto", decev.get("nivel")))
+    return base
+
+
 async def avaliar_caso(pipe: Any, caso: Dict[str, Any], timeout: float, modo: str) -> Dict[str, Any]:
     esp, ac = esperado_de(caso)
     ent = caso["entrada"]
@@ -243,7 +273,8 @@ async def avaliar_caso(pipe: Any, caso: Dict[str, Any], timeout: float, modo: st
                                       "origem_run": "eval"})
         nivel, erro = None, None
         try:
-            entrada = EntradaConsulta(tipo=ent["tipo"], conteudo=ent["conteudo"])
+            entrada = EntradaConsulta(tipo=ent["tipo"], conteudo=ent["conteudo"],
+                                      data_referencia=caso.get("data_referencia"))
             rel = await asyncio.wait_for(pipe.executar(entrada), timeout=timeout)
             nivel = rel.propensao
             res["why"] = rel.why_1linha
@@ -281,6 +312,7 @@ async def avaliar_caso(pipe: Any, caso: Dict[str, Any], timeout: float, modo: st
                          and e["dados"].get("cache") == "miss")
     res["llm_miss"] = n_llm_miss if n_llm_miss else n_or_http_miss
     res["nao_reproduzido"] = bool(modo == "replay" and res["llm_miss"] > 0)
+    res["e4"] = _e4_do_trace(eventos)
     return res
 
 
@@ -502,6 +534,14 @@ def calcular_metricas(res: List[Dict[str, Any]]) -> Dict[str, Any]:
         "cobertura": _wilson(len(rodados) - n_ind, len(rodados)),
         "recall_por_rotulo": {k: v["wilson"] for k, v in rec.items()},
         "precisao_por_nivel": {k: v["wilson"] for k, v in m["precisao_por_nivel"].items()},
+    }
+    e4s = [(r.get("e4") or {}) for r in rodados]
+    m["e4"] = {
+        "casos_com_marcador": sum(1 for e in e4s if e.get("marcador")),
+        "casos_com_desconto": sum(1 for e in e4s if e.get("desconto")),
+        "casos_nivel_mudou": sum(1 for e in e4s if e.get("nivel_mudou")),
+        "bits_descartados_total": round(sum(float(e.get("bits") or 0) for e in e4s), 3),
+        "referencia_ausente": sum(1 for e in e4s if e.get("referencia_ausente")),
     }
     return m
 

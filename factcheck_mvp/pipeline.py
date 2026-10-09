@@ -19,9 +19,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 import re
 import unicodedata
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from . import (afirmacoes, aplicabilidade, avaliador, confiabilidade, config, corroboracao, decisao, juiz_llm,
                padroes_llm, replay, selos, telemetria)
@@ -51,6 +52,13 @@ OPINIAO_SATIRA_RE = re.compile(r"\b(opinião|opina|coluna|editorial|charge|humor
 # Claim vago (round C): comparativo sem métrica/período não é falsificável
 # ("só piorou" — qual indicador? quando?). Pede especificação, não busca lixo.
 VAGO_RE = re.compile(r"\b(piorou|piora|pior|melhorou|melhora|melhor|cada vez (pior|melhor))\b", re.I)
+# B5: o comparativo vago só trava quando o SUJEITO é genérico (entidade coletiva
+# sem referente contável: economia, país, governo, vida, situação). Sujeito
+# específico (fármaco, doença, pessoa) é checável mesmo com "piora/melhora"
+# ("Ibuprofeno piora o quadro de dengue" tem referente verificável).
+SUJEITO_GENERICO_RE = re.compile(
+    r"\b(economia|pa[íi]s(es)?|brasil|na[çc][ãa]o(es)?|governos?|gest[ãa]o|administra[çc][ãa]o|"
+    r"vida|situa[çc][ãa]o|cen[áa]rio|momento|tudo|coisas?)\b", re.I)
 INDICADOR_RE = re.compile(
     r"\d|\b(pib|infla\w*|ipca|igp-?m|desemprego|emprego|renda|sal[aá]rio\w*|"
     r"juros|selic|d[oó]lar|c[âa]mbio|bolsa|ibovespa|pobreza|fome|crescimento|"
@@ -210,9 +218,10 @@ class Pipeline:
         async def _q(consulta: str, q: Dict[str, Any]) -> List[Dict[str, Any]]:
             bruto = await asyncio.to_thread(self.serpapi.buscar, q)
             eng = self.serpapi.engine_de(q)
+            ancora = ((bruto or {}).get("search_metadata") or {}).get("created_at")
             saida = []
             for item in (bruto or {}).get(self.serpapi.result_key(q), [])[:6]:
-                d = rotear_fonte(normalizar_item(item, engine=eng), self.catalogo)
+                d = rotear_fonte(normalizar_item(item, engine=eng, ancora=ancora), self.catalogo)
                 d["_afirmacao"] = consulta
                 saida.append(d)
             return saida
@@ -234,10 +243,16 @@ class Pipeline:
 
     @staticmethod
     def _peca_web(d: Dict[str, Any], ais: set) -> Dict[str, Any]:
-        return {"url": d["url"], "titulo": d.get("titulo") or "", "snippet": d.get("_snippet") or "",
+        peca = {"url": d["url"], "titulo": d.get("titulo") or "", "snippet": d.get("_snippet") or "",
                 "veiculo": (d.get("fonte") or {}).get("nome", ""), "afs": set(ais),
-                "origens": {"web"}, "data_pub": d.get("data_publicacao"),
+                "origens": {"web"}, "data_pub": d.get("data_pub"),
+                "data_pub_precisao": d.get("data_pub_precisao"),
+                "data_pub_bruta": d.get("data_pub_bruta"),
                 "scholar": bool(d.get("_scholar"))}
+        bruta = peca.get("data_pub_bruta")
+        if bruta and not peca.get("data_pub"):
+            telemetria.fallback("data_pub", "formato não reconhecido", valor=str(bruta)[:40])
+        return peca
 
     # ------------------------------------------------------------------ principal
     async def _executar(self, entrada: EntradaConsulta, progresso: Progresso = _nada,
@@ -259,9 +274,17 @@ class Pipeline:
 
         # 1. Recebimento + marcas de rumor/opinião/vago
         texto_base = entrada.conteudo.strip()
+        # E4: data de referência explícita (entrada) ou relógio gravado (replay.*).
+        ref = entrada.data_referencia or replay.hoje(contexto=texto_base)
+        origem_ref = "entrada" if entrada.data_referencia else ("relogio" if ref else "ausente")
+        janela_ref = aplicabilidade.janela_temporal(texto_base)
+        marcador_ref = (f"presente (janela {janela_ref}d)" if janela_ref is not None
+                        else "ausente")
         eh_rumor = bool(RUMOR_RE.search(texto_base))
         eh_opiniao = bool(OPINIAO_SATIRA_RE.search(texto_base[:500]))
-        eh_vago = bool(VAGO_RE.search(texto_base[:500])) and not INDICADOR_RE.search(texto_base[:800])
+        eh_vago = (bool(VAGO_RE.search(texto_base[:500]))
+                   and bool(SUJEITO_GENERICO_RE.search(texto_base[:500]))
+                   and not INDICADOR_RE.search(texto_base[:800]))
         if eh_rumor:
             limitacoes.append("Relato de segunda-mão sem fonte verificável: busca feita sobre o núcleo factual.")
         if eh_opiniao:
@@ -269,7 +292,10 @@ class Pipeline:
         if eh_vago:
             limitacoes.append("Afirmação vaga (comparativo sem indicador nem período: ex PIB, inflação, desemprego + datas): "
                               "diga qual métrica e qual período que eu checo de novo.")
-        etapa("recebimento", "ok", f"Entrada do tipo {entrada.tipo} ({len(texto_base)} caracteres).")
+        etapa("recebimento", "ok",
+              f"Entrada do tipo {entrada.tipo} ({len(texto_base)} caracteres). "
+              f"marcador temporal: {marcador_ref}; referência {ref or 'ausente'} "
+              f"(origem: {origem_ref}).")
         await avisar("Recebi. Extraindo as afirmações verificáveis…")
 
         # 2. Afirmações (JSON, polaridade preservada; fallback determinístico marcado)
@@ -291,7 +317,7 @@ class Pipeline:
             dec.motivo = "nenhuma afirmação factual encontrada no texto"
             self._emitir_decisao(dec)
             return self._relatorio(entrada, dec, [], [], etapas,
-                                   limitacoes + ["Nenhuma afirmação factual encontrada."])
+                                    limitacoes + ["Nenhuma afirmação factual encontrada."], "web")
         await avisar(f"Buscando fontes sobre {len(afs)} afirmação(ões)…")
 
         # 3. Atalho opcional: índice de checagens (ClaimReview/RSS) — só a base (E1)
@@ -309,10 +335,18 @@ class Pipeline:
                     if not h.get("url"):
                         continue
                     n_hits += 1
+                    bruta_base = h.get("data_pub")
+                    norm_base = (aplicabilidade.normalizar_data(bruta_base)
+                                 if isinstance(bruta_base, str) and bruta_base.strip() else None)
+                    if bruta_base and not norm_base:
+                        telemetria.fallback("data_pub", "formato não reconhecido",
+                                            valor=str(bruta_base)[:40])
                     pecas_base.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
-                                  "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
-                                  "afs": {ai}, "origens": {"indice"}, "trecho": h.get("trecho") or "",
-                                  "data_pub": h.get("data_pub"), "agencia": h.get("agencia"),
+                                   "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
+                                   "afs": {ai}, "origens": {"indice"}, "trecho": h.get("trecho") or "",
+                                   "data_pub": norm_base[0] if norm_base else None,
+                                   "data_pub_precisao": norm_base[1] if norm_base else None,
+                                   "data_pub_bruta": bruta_base, "agencia": h.get("agencia"),
                                   "selo_original": h.get("selo_original"),
                                   "afirmacao_checada": h.get("afirmacao_checada"),
                                   "veredito": _veredito_tipado(h.get("veredito"), h.get("selo_original"),
@@ -507,12 +541,15 @@ class Pipeline:
                 curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
-                confiabilidade=p.get("confiabilidade")))
+                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub")))
         ev = decisao.Evidencias(
-            afirmacoes=[decisao.AfirmacaoDecisao(texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade)
+            afirmacoes=[decisao.AfirmacaoDecisao(
+                texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
+                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs)))
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
-            n_lidas=n_lidas, n_consultadas=len(pecas))
+            n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
+            data_referencia=ref)
         telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
         self._emitir_decisao(dec)
@@ -520,7 +557,8 @@ class Pipeline:
 
         fontes = self._fontes(afs, pecas, julg, dec)
         sinais = self._sinais(dec) + sinais_estilo
-        return self._relatorio(entrada, dec, sinais, fontes, etapas, limitacoes)
+        return self._relatorio(entrada, dec, sinais, fontes, etapas, limitacoes,
+                               "base" if pulou_web else "web")
 
     # ------------------------------------------------------------------ seleção / juiz
     async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
@@ -623,8 +661,35 @@ class Pipeline:
                     p["corpo_lido"] = False
                 if getattr(c, "titulo", "") and not p.get("titulo"):
                     p["titulo"] = c.titulo
-                if getattr(c, "data_pub", None) and not p.get("data_pub"):
-                    p["data_pub"] = c.data_pub
+                # E4 Task 2: prioridade da data (fim do intervalo normalizado) —
+                # JSON-LD da página (dia) > SerpAPI absoluta/ISO (dia) > trafilatura (dia)
+                # > SerpAPI relativa ancorada > ano > ReaderLM. A troca usa o tier
+                # (fonte+precisão), nunca "primeiro que chegar".
+                bruta_pagina = getattr(c, "data_pub", None)
+                norm_pagina = (aplicabilidade.normalizar_data(bruta_pagina)
+                               if isinstance(bruta_pagina, str) and bruta_pagina.strip() else None)
+                if bruta_pagina and not norm_pagina:
+                    telemetria.fallback("data_pub", "formato não reconhecido",
+                                        valor=str(bruta_pagina)[:40])
+                elif norm_pagina is not None:
+                    nova, prec_nova = norm_pagina
+                    metodo = getattr(c, "metodo", "") or ""
+                    fonte_nova = {"jsonld": "jsonld", "readerlm": "readerlm",
+                                  "falha": "readerlm"}.get(metodo, "trafilatura")
+                    tier_nova = (1 if fonte_nova == "readerlm" else
+                                 2 if prec_nova == "ano" else
+                                 6 if fonte_nova == "jsonld" else 4)
+                    bruta_atual = p.get("data_pub_bruta")
+                    if not p.get("data_pub"):
+                        tier_atual = -1
+                    elif (isinstance(bruta_atual, str) and bruta_atual.strip()
+                          and aplicabilidade.normalizar_data(bruta_atual) is None):
+                        tier_atual = 3  # SerpAPI relativa: só resolveu com âncora
+                    else:
+                        tier_atual = 2 if p.get("data_pub_precisao") == "ano" else 5
+                    if tier_nova > tier_atual:
+                        p["data_pub"], p["data_pub_precisao"] = nova, prec_nova
+                        p["data_pub_bruta"] = bruta_pagina
                 vp = getattr(c, "veredito_pagina", None)
                 if vp and not p.get("veredito"):
                     v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
@@ -635,6 +700,20 @@ class Pipeline:
         for p in pecas:
             if "corpo_lido" not in p:
                 p["corpo_lido"] = bool(p.get("corpo"))
+        # B1b (T5/D1): BERTimbau/mock mede a CREDIBILIDADE da página (prob_fake);
+        # a direção vem do avaliador (T6 consome p["bert"]). Só páginas lidas.
+        for p in pecas:
+            if not p.get("corpo_lido"):
+                continue
+            try:
+                r = self.detector.analisar_pagina(p.get("titulo") or "", p.get("corpo") or "")
+            except Exception as e:
+                telemetria.fallback("bert_pagina", f"{type(e).__name__}: {e}")
+                continue
+            p["bert"] = {"prob_fake": r.get("prob_fake"),
+                         "modelo": r.get("modelo") or getattr(self.detector, "nome",
+                                                              type(self.detector).__name__)}
+            telemetria.evento("bert_pagina", url=p.get("url"), prob_fake=p["bert"]["prob_fake"])
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
         for p in pecas:
             if p.get("corpo") and not p.get("_generica") \
@@ -682,7 +761,7 @@ class Pipeline:
         """Julga 1× por par (peça, afirmação) via `avaliador.avaliar` (manchete+corpo).
 
         `julg[(pi, ai)] = {"classe": posicao, "citacao", "citacao_score",
-        "citacao_verificada", "pagina_diz", "motor", "erro", "rebaixado", ...}`.
+        "citacao_verificada", "pagina_diz", "raciocinio", "motor", "erro", "rebaixado", ...}`.
         `rebaixado` deriva da citação (`citacao_verificada is False`, como no juiz
         em lote). `_overlap` segue só como ordenação em `_selecionar`, nunca como
         gate. Timeout/cap (teto `JUIZ_TIMEOUT_TOTAL_S`): o parcial já avaliado é
@@ -710,6 +789,7 @@ class Pipeline:
                 "citacao_score": a.get("citacao_score"),
                 "citacao_verificada": a.get("citacao_verificada"),
                 "pagina_diz": a.get("pagina_diz") or "",
+                "raciocinio": a.get("raciocinio") or "",
                 "motor": a.get("motor") or "", "erro": a.get("erro"),
                 "rebaixado": (a.get("rebaixado") if "rebaixado" in a
                               else a.get("citacao_verificada") is False),
@@ -943,6 +1023,16 @@ class Pipeline:
                               rotulo=f"af{v.afirmacao} cluster {v.cluster}: {', '.join(v.classes + v.vereditos)}",
                               valor=v.motivo, confianca=None, direcao=v.direcao, peso=v.peso,
                               evidencias=v.urls[:3])
+        # E4: uma fonte descontada por item de dec.descontos_temporais (decidir segue puro,
+        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao ficam None
+        # quando o desconto não as carrega (compat com traces antigos).
+        for d in dec.descontos_temporais:
+            telemetria.evento("fonte", url=d.get("url"), estagio="data", decisao="descontada",
+                              motivo=f"{d.get('dias_alem_da_janela')} dias além da janela "
+                                     f"de {d.get('janela')}",
+                              afirmacao=d.get("afirmacao"), data_pub=d.get("data_pub"),
+                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("precisao"),
+                              r=d.get("r"), bits=d.get("bits_descartados"))
         telemetria.evento("decisao", nivel=dec.nivel, nivel_agregador=dec.nivel, score=dec.log_odds,
                           sinais=[f"af{v.afirmacao}:{v.cluster}:{v.valor:+.2f}" for v in dec.votos],
                           why=dec.why_1linha(), travas=dec.resumo_trace(), decisao=dec.to_dict())
@@ -966,6 +1056,16 @@ class Pipeline:
             if pi not in melhor or ordem[r.get("classe")] < ordem[melhor[pi][1].get("classe")]:
                 melhor[pi] = (ai, r)
         pesos = {u: v.peso for v in dec.votos for u in v.urls}
+        # E4 Task 6: relevância temporal por URL (menor r = mais descontada).
+        _r_por_url: Dict[str, float] = {}
+        for x in (getattr(dec, "descontos_temporais", None) or []):
+            u = (x or {}).get("url")
+            try:
+                r = float((x or {}).get("r"))
+            except (TypeError, ValueError):
+                continue
+            if u and (u not in _r_por_url or r < _r_por_url[u]):
+                _r_por_url[u] = r
         fontes = []
         for pi, p in enumerate(pecas):
             ai, r = melhor.get(pi, (None, {}))
@@ -981,9 +1081,12 @@ class Pipeline:
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
+                data_pub_bruta=p.get("data_pub_bruta"),
+                relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
                 postura=classe, citacao=r.get("citacao") or None, citacao_verificada=r.get("citacao_verificada"),
+                raciocinio=r.get("raciocinio") or None,
                 motor_juiz=r.get("motor"), cluster=p.get("cluster"), curada=bool(p.get("curada")),
                 confiabilidade=p.get("confiabilidade"),
                 afirmacao=afs[ai].texto if ai is not None else None)))
@@ -997,8 +1100,17 @@ class Pipeline:
         return [f for *_, f in fontes][: teto_exib]
 
     @staticmethod
-    def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes) -> RelatorioChecagem:
+    def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes,
+                   onde_encontrado: Literal["base", "web"] = "web") -> RelatorioChecagem:
+        # E4 Task 6: limitação neutra de data + pergunta de data no topo (bits ficam no JSON).
+        lims = list(limitacoes or [])
+        priorizar_data = bool(getattr(dec, "travas", {}).get("data_incompativel")
+                              and getattr(dec, "descontos_temporais", None))
+        if priorizar_data:
+            n_dt = len(dec.descontos_temporais or [])
+            lims.append(f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
-                                 fontes=fontes, etapas=etapas, limitacoes=limitacoes,
-                                 perguntas_guia=perguntas_guia(), consulta=entrada,
-                                 header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict())
+                                 fontes=fontes, etapas=etapas, limitacoes=lims,
+                                 perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,
+                                 header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
+                                 onde_encontrado=onde_encontrado)

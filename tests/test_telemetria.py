@@ -161,3 +161,48 @@ def test_trace_avaliador_por_peca_tem_campos(tdir):
     assert {"posicao", "n_chars_trecho", "corpo_lido", "metodo"} <= set(fontes[0]["dados"])
     ondes = {e["dados"].get("onde") for e in ev if e["tipo"] == "fallback"}
     assert {"deep-crawl", "avaliador"} <= ondes
+
+
+# ------------------------------------------------------------------ E4: telemetria do desconto temporal (Task 7)
+_JUIZ_E4 = "llm-juiz:llm-local"
+
+
+def _dec_e4_com_desconto(monkeypatch):
+    from factcheck_mvp import decisao
+    from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    texto = "Bolsonaro recebeu alta do hospital hoje"
+    it = ItemEvidencia(url="https://g1.globo.com/noticia-sobre-alta-do-hospital-hoje", cluster="g1",
+                       classe="REFUTA", motor=_JUIZ_E4, citacao_verificada=True, curada=True,
+                       corpo_lido=True, data_pub="2021-01-01")
+    ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=texto, nucleo=texto)], itens=[it],
+                    texto_usuario=texto, data_referencia="2026-10-09")
+    d = decidir(ev)
+    assert d.descontos_temporais
+    return d
+
+
+def test_e4_resumo_trace_traz_contrafactual_e_descontos(tdir, monkeypatch):
+    d = _dec_e4_com_desconto(monkeypatch)
+    r = d.resumo_trace()
+    assert r["L_sem_desconto"] == round(d.log_odds_sem_desconto, 3)
+    assert r["nivel_sem_desconto"] == d.nivel_sem_desconto
+    assert len(r["descontos"]) == len(d.descontos_temporais) <= 6
+    x = d.descontos_temporais[0]
+    assert r["descontos"][0] == f"{x['url'][:60]} +{x['dias_alem_da_janela']}d r={x['r']} −{x['bits_descartados']}b"
+
+
+def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
+    from factcheck_mvp.pipeline import Pipeline
+    d = _dec_e4_com_desconto(monkeypatch)
+    with tel.run({"entrada": "Bolsonaro recebeu alta do hospital hoje"}):
+        Pipeline._emitir_decisao(d)
+    ev = _eventos(tdir, tel.ultimo_run_id())
+    fontes = [e for e in ev if e["tipo"] == "fonte" and e["dados"].get("estagio") == "data"]
+    assert len(fontes) == len(d.descontos_temporais) == 1
+    f = fontes[0]["dados"]
+    x = d.descontos_temporais[0]
+    assert f["decisao"] == "descontada"
+    assert f["motivo"] == f"{x['dias_alem_da_janela']} dias além da janela de {x['janela']}"
+    assert f["afirmacao"] == 0 and f["data_pub"] == "2021-01-01"
+    assert f["r"] == x["r"] and f["bits"] == x["bits_descartados"]

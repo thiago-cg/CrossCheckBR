@@ -1,5 +1,7 @@
 """Comportamento de `decisao.decidir` (função pura): direção, clusters, polaridade, selos,
 faixas simétricas, indeterminação por falta de evidência e coerência do texto com o nível."""
+import math
+
 import pytest
 
 from factcheck_mvp import decisao
@@ -10,11 +12,11 @@ JUIZ = "llm-juiz:llm-local"
 
 
 def _it(url, classe, cluster=None, curada=True, corpo=True, veredito=None, motor=JUIZ, af=0,
-        citacao=True, veiculo=""):
+        citacao=True, veiculo="", origem=None):
     return ItemEvidencia(url=url, afirmacao=af, cluster=cluster or url, classe=classe, motor=motor,
                          citacao_verificada=(citacao if (classe != "NAO_TRATA" or citacao is False) else None), curada=curada,
                          corpo_lido=corpo, veredito=veredito,
-                         origem_veredito="pagina" if veredito else None, veiculo=veiculo)
+                         origem_veredito=origem or ("pagina" if veredito else None), veiculo=veiculo)
 
 
 def _ev(itens, pol="afirma", **kw):
@@ -74,15 +76,19 @@ def test_usuario_nega_e_fontes_sustentam_o_boato_alta():
 
 # ------------------------------------------------------------------ selos
 def test_selo_verdadeiro_do_fato_ou_fake_baixa():
-    """Direção pelo enum, nunca pelo nome do portal ('Fato ou Fake' tem 'fake')."""
+    """Direção pelo enum, nunca pelo nome do portal ('Fato ou Fake' tem 'fake').
+
+    T6: só o selo do ÍNDICE vota (origem_veredito="indice", via E1/aplicabilidade);
+    selo de página (template/JSON-LD do próprio portal) não vota.
+    """
     it = _it("https://g1.globo.com/fato-ou-fake/noticia/2024/x.ghtml", "RELATA_SEM_ENDOSSO",
-             veredito="VERDADEIRO", veiculo="Fato ou Fake")
+             veredito="VERDADEIRO", veiculo="Fato ou Fake", origem="indice")
     d = decidir(_ev([it]))
     assert d.nivel == "baixa" and d.vereditos_aplicados[0]["veredito"] == "VERDADEIRO"
 
 
 def test_selo_falso_aplicavel_alta():
-    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", veiculo="Lupa")
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", veiculo="Lupa", origem="indice")
     assert decidir(_ev([it])).nivel == "alta"
 
 
@@ -99,7 +105,7 @@ def test_selo_sem_direcao_satira_nao_vota():
 
 
 def test_selo_e_postura_em_conflito_nao_votam():
-    it = _it("https://aosfatos.org/x", "SUSTENTA", veredito="FALSO")
+    it = _it("https://aosfatos.org/x", "SUSTENTA", veredito="FALSO", origem="indice")
     d = decidir(_ev([it]))
     assert d.nivel == "indeterminada" and d.conflitos
 
@@ -145,7 +151,7 @@ def test_vago_indeterminada_mesmo_com_votos():
 
 def test_opiniao_sem_selo_indeterminada_com_selo_decide():
     assert decidir(_ev(_tres("REFUTA"), opiniao=True)).nivel == "indeterminada"
-    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO")
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", origem="indice")
     assert decidir(_ev([it], opiniao=True)).nivel == "alta"
 
 
@@ -197,8 +203,10 @@ CASOS = [
     (lambda: _ev(_tres("REFUTA")), "alta"),
     (lambda: _ev(_tres("SUSTENTA")), "baixa"),
     (lambda: _ev(_tres("REFUTA"), pol="nega"), "baixa"),
-    (lambda: _ev([_it("https://g1.globo.com/f", "RELATA_SEM_ENDOSSO", veredito="VERDADEIRO")]), "baixa"),
-    (lambda: _ev([_it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO")]), "alta"),
+    (lambda: _ev([_it("https://g1.globo.com/f", "RELATA_SEM_ENDOSSO", veredito="VERDADEIRO",
+                       origem="indice")]), "baixa"),
+    (lambda: _ev([_it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO",
+                       origem="indice")]), "alta"),
 ]
 
 
@@ -217,3 +225,175 @@ def test_mutacao_ignorar_polaridade_quebra():
     ev = _ev(_tres("REFUTA"), pol="nega")
     ev.afirmacoes[0].polaridade = "afirma"
     assert decidir(ev).nivel == "alta"  # sem a polaridade o caso de negação vira erro grave
+
+
+# ------------------------------------------------------------------ E3: título não vota
+def test_e3_so_titulo_nao_vota_nem_com_selo():
+    itens = [_it(f"https://{d}/a", "REFUTA", cluster=d, corpo=False, veredito="FALSO")
+             for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev(itens))
+    assert d.nivel == "indeterminada" and not d.votos
+    assert len(d.nao_analisadas) == 3 and not d.vereditos_aplicados
+    assert "lidas integralmente" in d.motivo
+
+
+def test_e3_lida_vota_e_so_titulo_fica_listada():
+    lida = _it("https://g1.globo.com/a", "REFUTA", cluster="g1")
+    titulo = _it("https://bbc.com/a", "REFUTA", cluster="bbc", corpo=False)
+    d = decidir(_ev([lida, titulo]))
+    assert [v.urls for v in d.votos] == [["https://g1.globo.com/a"]]
+    assert [n["url"] for n in d.nao_analisadas] == ["https://bbc.com/a"]
+
+
+# ------------------------------------------------------------------ E4: relevância temporal
+def _ev_hoje(itens, texto="Bolsonaro recebeu alta do hospital hoje"):
+    return Evidencias(afirmacoes=[AfirmacaoDecisao(texto=texto, nucleo=texto)], itens=itens,
+                      texto_usuario=texto, data_referencia="2026-10-09")
+
+
+def test_e4_relevancia_temporal_contrato():
+    assert decisao.relevancia_temporal(0, 2) == pytest.approx(1.0)
+    rs = [decisao.relevancia_temporal(e, 2) for e in (1, 5, 30, 2000)]
+    assert all(0.0 <= r <= 1.0 for r in rs) and rs == sorted(rs, reverse=True)
+    assert rs[-1] < 0.05  # anos depois: praticamente outro episódio
+
+
+def test_e4_fonte_antiga_que_confirma_nao_crava_baixa():
+    """Regressão do caso Bolsonaro: checagens antigas confirmando 'recebeu alta' (de outra
+    internação) não podem cravar baixa para um fato apresentado como de hoje."""
+    itens = [
+        ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="SUSTENTA", motor=JUIZ,
+                      citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18")
+        for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel != "baixa"
+    assert d.travas["data_incompativel"] and len(d.descontos_temporais) == 3
+    assert all(x["bits_descartados"] > 0 for x in d.descontos_temporais)
+
+
+def test_e4_simetrico_nao_eleva_propensao():
+    """Fonte antiga que CONTESTA perde o mesmo tanto que a que confirma: E4 nunca empurra
+    o nível para cima por conta própria."""
+    def _um(classe):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe=classe, motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-09-01")
+        return decidir(_ev_hoje([it])).log_odds
+    assert _um("REFUTA") == pytest.approx(-_um("SUSTENTA"))
+    assert abs(_um("REFUTA")) < decisao.W_POSTURA
+
+
+def test_e4_dentro_da_janela_ou_sem_marcador_sem_desconto():
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-10-08")
+    assert not decidir(_ev_hoje([it])).descontos_temporais
+    it.data_pub = "2019-01-01"
+    assert not decidir(_ev_hoje([it], texto="Café cura câncer")).descontos_temporais
+
+
+def test_e4_desconto_e_mistura_de_razoes_de_verossimilhanca():
+    assert decisao._descontar(1.5, 1.0) == 1.5
+    assert decisao._descontar(1.5, 0.0) == pytest.approx(0.0)
+    assert decisao._descontar(-1.5, 0.5) == pytest.approx(-math.log(0.5 * math.exp(1.5) + 0.5))
+
+
+def test_e4_direcao_e_bits_medidos_antes_do_desconto(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True,
+                       veredito="FALSO", origem_veredito="indice", data_pub="2021-01-01")
+    d = decidir(_ev_hoje([it]))
+    x = d.descontos_temporais[0]
+    assert x["direcao"] == 1
+    assert x["bits_descartados"] == pytest.approx(decisao.W_VEREDITO / math.log(2), rel=1e-3)
+
+
+def test_e4_tudo_descontado_motivo_fala_de_periodo(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-01-01")
+             for d in ("g1.globo.com", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "indeterminada"
+    assert "outro episódio" in d.motivo and "se anulam" not in d.motivo
+
+
+def test_e4_motivo_so_quando_o_desconto_muda_o_nivel(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    recente = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
+                             citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-10-08")
+               for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    antiga = ItemEvidencia(url="https://uol.com.br/a", cluster="uol", classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-01-01")
+    d = decidir(_ev_hoje(recente + [antiga]))
+    assert d.nivel == d.nivel_sem_desconto == "alta"
+    assert d.travas["data_incompativel"] and "outro episódio" not in d.motivo
+
+
+def test_e4_contrafactual_nunca_menor_em_modulo(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.3)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe=c, motor=JUIZ, citacao_verificada=True,
+                           curada=True, corpo_lido=True, data_pub=dp)
+             for d, c, dp in (("g1.globo.com", "REFUTA", "2021-01-01"), ("bbc.com", "REFUTA", "2026-10-09"))]
+    d = decidir(_ev_hoje(itens))
+    assert abs(d.log_odds) <= abs(d.log_odds_sem_desconto)
+
+
+# ------------------------------------------------------------------ Task 4: janela por afirmação
+def test_e4_decidir_desconto_por_afirmacao_nao_vaza():
+    """Só a afirmação com marcador próprio é descontada; a sem marcador (n=2) não,
+    mesmo com 'hoje' no texto_usuario (compat: snapshot antigo de 1 afirmação sem
+    janela cai para janela_temporal do texto)."""
+    from factcheck_mvp import aplicabilidade
+    t = "A ponte caiu hoje. A obra custou 2 bilhões."
+    j0 = aplicabilidade.janela_da_afirmacao("A ponte caiu hoje", t, 2)
+    j1 = aplicabilidade.janela_da_afirmacao("A obra custou 2 bilhões", t, 2)
+    assert (j0, j1) == (2, None)
+    itens = [
+        ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="SUSTENTA", motor=JUIZ,
+                      citacao_verificada=True, curada=True, corpo_lido=True,
+                      data_pub="2021-01-01", afirmacao=0),
+        ItemEvidencia(url="https://bbc.com/b", cluster="bbc", classe="SUSTENTA", motor=JUIZ,
+                      citacao_verificada=True, curada=True, corpo_lido=True,
+                      data_pub="2021-01-01", afirmacao=1),
+    ]
+    ev = Evidencias(
+        afirmacoes=[AfirmacaoDecisao(texto="A ponte caiu hoje", nucleo="ponte", janela=j0),
+                    AfirmacaoDecisao(texto="A obra custou 2 bilhões", nucleo="obra", janela=j1)],
+        itens=itens, texto_usuario=t, data_referencia="2026-10-09")
+    d = decidir(ev)
+    assert {x["afirmacao"] for x in d.descontos_temporais} == {0}
+
+    # snapshot antigo (sem janela, 1 afirmação): mantém o desconto pelo texto
+    ev_antigo = _ev_hoje([ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="SUSTENTA",
+                                        motor=JUIZ, citacao_verificada=True, curada=True,
+                                        corpo_lido=True, data_pub="2021-01-01")])
+    assert decidir(ev_antigo).descontos_temporais
+
+
+# ------------------------------------------------------------------ Task 6: superfície ao usuário (neutra)
+def test_e4_aviso_chega_ao_usuario_e_e_neutro(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="SUSTENTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18")
+             for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    texto = d.header() + " " + d.why_1linha() + " " + d.justificativa()
+    assert "outro episódio" in d.justificativa() and "notícia antiga recirculando" in texto
+    assert verificar_neutralidade(texto) == []
+
+
+def test_e4_bot_mostra_data_quando_descontada_e_neutro():
+    from factcheck_mvp.schemas import EntradaConsulta, FonteEvidencia, RelatorioChecagem
+    from factcheck_mvp.telegram_bot import formatar
+    f = FonteEvidencia(url="https://g1.globo.com/a", titulo="Titulo", portal_nome="g1",
+                       corpo_lido=True, relevante=True, postura="SUSTENTA",
+                       data_pub="2021-07-18", relevancia_temporal=0.05)
+    rel = RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[f],
+        decisao={"votos": [], "descontos_temporais": [{"url": f.url, "r": 0.05}]})
+    saida = formatar(rel)
+    assert "📅" in saida
+    assert verificar_neutralidade(saida) == []
+    assert len(saida) <= 3900

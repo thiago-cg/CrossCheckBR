@@ -705,3 +705,46 @@ def llm_post(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]
     telemetria.evento("llm", **base, latencia_ms=lat, saida=saida, erro=erro, cache=r.cache,
                       status=r.status_code)
     return r
+
+
+# --------------------------------------------------------------------------
+# Relógio determinístico (E4 — data de referência do texto)
+
+RELOGIO_URL = "relogio://hoje"
+
+
+def _hoje_brt_iso() -> str:
+    """Data atual em UTC−3 (BRT, sem zoneinfo: UTC menos 3 h) como YYYY-MM-DD."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).date().isoformat()
+
+
+def hoje(contexto: str) -> Optional[str]:
+    """Data de referência ("hoje" do texto) como YYYY-MM-DD.
+
+    live → data atual UTC−3. record → idem e grava o cassete
+    chave("GET", "relogio://hoje", contexto) = {"data": ...} (reusa o cassete
+    existente, como todo record). replay → lê o cassete; miss → None +
+    fallback("relogio", "data de referência não gravada") — nunca levanta
+    ReplayMiss (o caso roda, só sem E4).
+    """
+    k = chave("GET", RELOGIO_URL, contexto)
+    m = modo_atual()
+    if m == "replay":
+        try:
+            return str(_ler(k, RELOGIO_URL).json().get("data"))
+        except Exception:
+            telemetria.fallback("relogio", "data de referência não gravada")
+            return None
+    if m == "record":
+        try:
+            return str(_ler(k, RELOGIO_URL).json().get("data"))
+        except Exception:
+            pass  # sem cassete: mede ao vivo e grava abaixo
+        data = _hoje_brt_iso()
+        resp = Resposta(200, {"content-type": "application/json"},
+                        _json.dumps({"data": data}, ensure_ascii=False).encode("utf-8"),
+                        RELOGIO_URL, cache="live")
+        _gravar(k, "GET", RELOGIO_URL, contexto, resp, 0.0)
+        return data
+    return _hoje_brt_iso()

@@ -291,6 +291,7 @@ def test_base_aplicavel_pula_web(amb, monkeypatch):
     assert chamadas["n"] == 0
     assert any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
     assert rel.propensao == "alta"
+    assert rel.onde_encontrado == "base"
 
 def test_base_inaplicavel_chama_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")
@@ -310,6 +311,7 @@ def test_base_inaplicavel_chama_web(amb, monkeypatch):
     # Guarda anti-vácuo: a base precisa ter devolvido a checagem (senão o gate nem é exercitado)
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+    assert rel.onde_encontrado == "web"
 
 def test_crawl_antes_do_filtro_lexical(amb, monkeypatch):
     """Crawl-primeiro: overlap baixo no título/snippet não exclui do crawl nem do juiz.
@@ -382,7 +384,7 @@ def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
     peça (`p.get("corpo_lido", p.get("corpo"))`), não de `bool(p.get("corpo"))`.
 
     Uma peça com corpo presente mas flag `corpo_lido=False` chega ao juiz como
-    não-lida (desconto `F_SO_TITULO`); outra sem corpo chega como não-lida
+    não-lida (E3: não vota); outra sem corpo chega como não-lida
     também. Espiona `decidir` para pinar o `ItemEvidencia` que o pipeline monta.
     """
     from factcheck_mvp import avaliador as _aval
@@ -440,13 +442,11 @@ def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
     assert fontes[url_so_titulo].corpo_lido is False
     assert fontes[url_sem_corpo].corpo_lido is False
 
-    # Caminho do desconto: só-título pesa F_SO_TITULO × corpo lido (mesma
-    # confiabilidade nas 3 — todas curadas — então a razão é exata).
+    # E3: só a lida vota; as não lidas aparecem como "não analisadas integralmente".
     pesos = {u: v["peso"] for v in rel.decisao["votos"] for u in v["urls"]}
-    assert set(pesos) == {url_lida, url_so_titulo, url_sem_corpo}
-    assert pesos[url_so_titulo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
-    assert pesos[url_sem_corpo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
-    assert rel.propensao == "alta", rel.justificativa
+    assert set(pesos) == {url_lida}
+    assert {n["url"] for n in rel.decisao["nao_analisadas"]} == {url_so_titulo, url_sem_corpo}
+    assert rel.propensao == "media", rel.justificativa  # 1 fonte curada sozinha não satura
 
 
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
@@ -468,3 +468,60 @@ def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     # Guarda anti-vácuo: a base precisa ter devolvido a checagem antiga (o gate barra pela data)
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+
+
+def test_pipeline_usa_data_referencia_da_entrada(amb, monkeypatch):
+    # espiona decisao.decidir; EntradaConsulta(..., data_referencia="2026-01-15")
+    # → ev.data_referencia == "2026-01-15" (não a data de hoje)
+    from factcheck_mvp import decisao as _dec
+    vistos = []
+    _orig = _dec.decidir
+
+    def _espiar(ev):
+        vistos.append(ev)
+        return _orig(ev)
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+    rel = asyncio.run(pipe.executar(
+        EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                        data_referencia="2026-01-15"), usar_llm=False))
+    assert vistos and vistos[-1].data_referencia == "2026-01-15"
+    rec = [e for e in rel.etapas if e.nome == "recebimento"][0]
+    assert "2026-01-15" in rec.detalhe and "origem: entrada" in rec.detalhe
+
+
+def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
+    """A string '11 de ago. de 2025' do Google não pode bloquear o datePublished ISO da página."""
+    from factcheck_mvp.aprofundar import CorpoLido as _CorpoLido
+    from factcheck_mvp.schemas import Afirmacao as _Afirmacao
+    url = "https://www.exemplo.com.br/2025/08/checa-x"
+    parcial = camada.normalizar_item(
+        {"link": url, "title": "Checa X", "snippet": "checagem", "date": "11 de ago. de 2025"},
+        engine="google")
+    peca = pl.Pipeline._peca_web(parcial, {0})
+    # Guarda anti-vácuo: a SerpAPI trouxe data textual válida (dia) — sem a
+    # prioridade, ela bloquearia o ISO da página ("primeiro que chegar").
+    assert peca["data_pub"] == "2025-08-11" and peca["data_pub_precisao"] == "dia"
+    assert peca["data_pub_bruta"] == "11 de ago. de 2025"
+
+    async def fake_aprofundar(cands, catalogo, **kw):
+        return {url: _CorpoLido(
+            url=url, final_url=url, trecho_corpo="É falso que X. " * 100,
+            corpo_lido=True, texto_completo="É falso que X. " * 500, metodo="jsonld",
+            titulo="Checa X", data_pub="2025-08-11T09:00:00-03:00")}
+
+    monkeypatch.setattr(pl, "aprofundar", fake_aprofundar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+
+    async def avisar(msg):
+        return None
+
+    afs = [_Afirmacao(texto="X aconteceu", nucleo="X aconteceu", polaridade="afirma", consulta="x")]
+    n_lidas, n_alvo = asyncio.run(pipe._ler(afs, [peca], avisar))
+    assert (n_lidas, n_alvo) == (1, 1)
+    assert peca["data_pub"] == "2025-08-11"
+    assert peca["data_pub_precisao"] == "dia"
+    assert peca["data_pub_bruta"] == "2025-08-11T09:00:00-03:00"

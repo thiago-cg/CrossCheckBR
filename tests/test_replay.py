@@ -285,3 +285,13 @@ def test_limitador_desligado_com_rpm_zero(monkeypatch):
     monkeypatch.setattr(replay.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("dormiu")))
     replay._esperar_limite_openrouter()
     replay._esperar_limite_openrouter()
+
+
+def test_relogio_replay_grava_e_reproduz(tmp_path, monkeypatch):
+    from factcheck_mvp import replay
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))   # replay.dir_cassetes(), replay.py:126-128
+    with replay.modo("record"):
+        d1 = replay.hoje("Bolsonaro recebeu alta do hospital hoje")
+    with replay.modo("replay"):
+        assert replay.hoje("Bolsonaro recebeu alta do hospital hoje") == d1
+        assert replay.hoje("texto nunca gravado") is None   # + fallback onde=relogio
