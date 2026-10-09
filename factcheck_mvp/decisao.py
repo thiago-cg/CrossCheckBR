@@ -32,8 +32,9 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
       E4: texto com "hoje/ontem/nesta semana" e fonte publicada `e` dias além da janela →
           r = relevancia_temporal(e, janela) e contrib' = sinal·ln(r·e^|contrib| + 1 − r)
           (mistura: com prob. 1−r a fonte fala de outro episódio e não informa nada).
-          Simétrico: nunca eleva nem baixa a propensão por si; os bits descartados
-          ficam em `descontos_temporais`.
+          Simétrico: o desconto não empurra a propensão para nenhum lado por si (a fonte antiga perde
+          peso nos dois sentidos). Quando ela sai e a que resta é do período, o nível pode subir na
+          direção dessa fonte atual (guarda do sinal, abaixo). Bits descartados em `descontos_temporais`.
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
     L_a       = Σ_clusters voto  (um cluster = um voto: republicação não soma)
     p_texto   = 1 − Π_{a: L_a ≥ 0} (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se alguma
@@ -102,9 +103,6 @@ F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEG
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
 CLASSES_TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
-# Trecho do `motivo` de `decidir` quando o desconto temporal zera a evidência (indeterminada):
-# a justificativa e o why já trazem o aviso de data por esse motivo (ver `_motivo_avisa_data`).
-_MARCA_OUTRO_EPISODIO = "outro episódio"
 
 
 @dataclass
@@ -187,6 +185,7 @@ class Decisao:
     parametros: Dict[str, Any] = field(default_factory=dict)
     log_odds_sem_desconto: float = 0.0  # E4: contrafactual sem desconto temporal
     nivel_sem_desconto: str = "indeterminada"  # E4: faixa do contrafactual
+    motivo_avisa_data: bool = False  # m6: a indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -203,13 +202,19 @@ class Decisao:
                     if v.valor * sinal > 0 and not self._afirmacao_fora(v.afirmacao)})
 
     def n_fontes_descontadas(self) -> int:
-        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
-        return len({x.get("url") for x in self.descontos_temporais if x.get("url")})
+        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte. Como em
+        `n_clusters`, as fontes de afirmação excluída da conjunção (só de outro período) não contam (m1)."""
+        return len({x.get("url") for x in self.descontos_temporais
+                    if x.get("url") and not self._afirmacao_fora(x.get("afirmacao"))})
 
-    def _motivo_avisa_data(self) -> bool:
-        """Indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência): o bloco E4
-        da justificativa e o sufixo do why não repetem o aviso."""
-        return self.nivel == "indeterminada" and _MARCA_OUTRO_EPISODIO in self.motivo
+    def _elegivel(self) -> bool:
+        """m2: a elegibilidade não bloqueou o nível (não é vago, não é opinião sem selo, e há voto). Só então
+        um desconto de data pode mudar o nível, e só então o texto avisa de notícia antiga recirculando."""
+        if self.travas.get("vago"):
+            return False
+        if self.travas.get("opiniao") and not self.vereditos_aplicados:
+            return False
+        return any(v.valor != 0 for v in self.votos)
 
     def _sem_fonte_confiavel_no_texto(self) -> bool:
         """A trava sem_fonte_confiavel vista pelo texto: nenhum voto de fonte confiável ATUAL no resultado.
@@ -226,6 +231,8 @@ class Decisao:
     def limitacao_datas(self) -> str:
         """Limitação neutra sobre datas (o bot mostra as 3 primeiras; o pipeline a põe no início)."""
         n = self.n_fontes_descontadas()
+        if n == 0:
+            return ""
         if n == 1:
             return "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
         return f"Datas: {n} fontes anteriores ao período do texto tiveram o peso reduzido."
@@ -255,8 +262,8 @@ class Decisao:
             partes.append(f"{up} fonte(s) independente(s) contestam o que o texto afirma e "
                           f"{down} o confirmam")
             selos = [v for v in self.vereditos_aplicados if not self._afirmacao_fora(v.get("afirmacao"))]
-            if selos:
-                selos_txt = ", ".join(f"{v['veredito']} ({v['veiculo'] or v['url']})" for v in selos[:3])
+            if selos:  # I5: selo sempre atribuído à agência, no formato da T3 ("Selo da Lupa: FALSO")
+                selos_txt = "; ".join(_selo_atribuido(v) for v in selos[:3])
                 partes[-1] += f"; selos de checagem considerados: {selos_txt}"
             partes[-1] += "."
             conflito = self._partes_em_conflito()
@@ -265,7 +272,7 @@ class Decisao:
             if self.conflitos:
                 partes.append(f"{len(self.conflitos)} fonte(s) com selo e texto em sentidos opostos "
                               "foram desconsideradas.")
-            if self._sem_fonte_confiavel_no_texto():
+            if self.nivel == "media" and self._sem_fonte_confiavel_no_texto():  # I2: o "média" só vale em média
                 if self._confiavel_de_outro_periodo():
                     partes.append("As fontes que tomam posição são redes sociais, sites pouco acessados "
                                   "ou de outro período, então o resultado não passa de propensão média.")
@@ -283,7 +290,8 @@ class Decisao:
                          if c.get("citacao_invalida") else "")
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
         # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
-        if self.travas.get("data_incompativel") and self.descontos_temporais and not self._motivo_avisa_data():
+        # m1: só as fontes que pesam; m6: não repete o aviso quando o motivo já é o de data.
+        if self.travas.get("data_incompativel") and self.n_fontes_descontadas() > 0 and not self.motivo_avisa_data:
             n_dt = self.n_fontes_descontadas()
             if n_dt == 1:
                 partes.append("1 fonte foi publicada antes do período que o texto descreve "
@@ -293,7 +301,9 @@ class Decisao:
                 partes.append(f"{n_dt} fontes foram publicadas antes do período que o texto descreve "
                               "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
                               "de outro episódio.")
-            if self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"):
+            # m2: o aviso só sai quando a elegibilidade não bloqueou (não vago, não opinião, há voto)
+            if self._elegivel() and (self.nivel != self.nivel_sem_desconto
+                                     or self.travas.get("so_fontes_de_outro_periodo")):
                 partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
         return " ".join(partes)
@@ -311,9 +321,9 @@ class Decisao:
             if conflito:
                 base += " " + conflito
         # E4 Task 6: sufixo curto só quando o desconto mudou o nível, ou a trava so_fontes cortou (neutro).
-        if (self.travas.get("data_incompativel")
+        if (self.travas.get("data_incompativel") and self.n_fontes_descontadas() > 0
                 and (self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"))
-                and not self._motivo_avisa_data()):
+                and self._elegivel() and not self.motivo_avisa_data):
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
         return base
 
@@ -367,6 +377,26 @@ def _frase_sem_fonte_atual(entrada: Dict[str, Any], idx: int) -> str:
     cit = _citar_afirmacao(entrada, idx)  # '"texto"', ou 'a afirmação N' quando o texto não pode ser citado
     sujeito = f"A afirmação {cit}" if cit.startswith('"') else cit[:1].upper() + cit[1:]
     return f"{sujeito} não tem fonte do período descrito."
+
+
+def _artigo_da_agencia(nome: str) -> str:
+    """Artigo do selo atribuído: "da" se o primeiro nome termina em "a" (Lupa, Agência Tatu), senão "do"
+    (Aos Fatos, Boatos.org). O catálogo não guarda o gênero da agência, então é uma heurística de redação; a
+    neutralidade não depende do artigo (`_SELO_ATRIBUIDO_RE` aceita os dois)."""
+    palavras = (nome or "").split()
+    return "da" if palavras and palavras[0].lower().endswith("a") else "do"
+
+
+def _selo_atribuido(v: Dict[str, Any]) -> str:
+    """I5: o selo de um veredito aparece na justificativa no formato atribuído da T3 ("Selo da Lupa: FALSO"),
+    pelo `formatar_selo` do agregador. Sem nome de agência (veiculo vazio), usa o host da URL."""
+    from urllib.parse import urlsplit
+    from .agregador import formatar_selo
+    agencia = (v.get("veiculo") or "").strip()
+    if not agencia:
+        host = urlsplit(v.get("url") or "").hostname or ""
+        agencia = host[4:] if host.startswith("www.") else host
+    return formatar_selo(agencia, v.get("veredito") or "", artigo=_artigo_da_agencia(agencia))
 
 
 def nivel_de(L: float) -> str:
@@ -720,6 +750,7 @@ def decidir(ev: Evidencias) -> Decisao:
             dec.motivo = ("as fontes com posição são de antes do período que o texto descreve "
                           "(\"hoje\", \"ontem\"…) e podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")
+            dec.motivo_avisa_data = True  # m6: o motivo é o aviso de data (flag, não busca por texto)
         else:
             dec.motivo = "as fontes com postura se anulam dentro do mesmo grupo ou conflitam com o selo"
         dec.nivel = "indeterminada"
@@ -739,5 +770,6 @@ def decidir(ev: Evidencias) -> Decisao:
             dec.motivo = ("as fontes encontradas são anteriores ao período que o texto descreve "
                           "(\"hoje\", \"ontem\"…): podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")
-    dec.travas["data_incompativel"] = bool(dec.descontos_temporais)
+    # m1: a trava diz que alguma data pesa no texto (fontes de afirmação excluída não contam).
+    dec.travas["data_incompativel"] = dec.n_fontes_descontadas() > 0
     return dec

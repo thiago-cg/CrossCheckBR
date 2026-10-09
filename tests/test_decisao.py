@@ -344,7 +344,18 @@ def test_e4_aviso_nao_se_repete_quando_o_desconto_leva_a_indeterminada(monkeypat
 
 
 def test_e4_motivo_so_quando_o_desconto_muda_o_nivel(monkeypatch):
+    """m3: o motivo 'anteriores ao período' e o 'Verifique' só aparecem quando o desconto muda o nível.
+    Caso A (muda): média por desconto, enquanto sem desconto seria alta. Caso B (não muda): alta com e sem."""
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    atual = ItemEvidencia(url="https://bbc.com/a", cluster="bbc", classe="REFUTA", motor=JUIZ, citacao_verificada=True,
+                          curada=False, corpo_lido=True, confiabilidade=confiabilidade.INSTITUCIONAL,
+                          data_pub="2026-10-08")
+    antigas = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ, citacao_verificada=True,
+                             curada=True, corpo_lido=True, data_pub="2021-01-01")
+               for d in ("uol.com.br", "folha.uol.com.br")]
+    a = decidir(_ev_hoje([atual] + antigas))
+    assert a.nivel == "media" and a.nivel_sem_desconto == "alta"
+    assert "outro episódio" in a.motivo and "recirculando" in a.justificativa()
     recente = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
                              citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-10-08")
                for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
@@ -353,6 +364,7 @@ def test_e4_motivo_so_quando_o_desconto_muda_o_nivel(monkeypatch):
     d = decidir(_ev_hoje(recente + [antiga]))
     assert d.nivel == d.nivel_sem_desconto == "alta"
     assert d.travas["data_incompativel"] and "outro episódio" not in d.motivo
+    assert "recirculando" not in d.justificativa() and "Datas anteriores" not in d.why_1linha()
 
 
 def test_e4_contrafactual_nunca_menor_em_modulo(monkeypatch):
@@ -432,10 +444,13 @@ def _it_e4(url, cluster, classe, data, veredito=None, af=0):
                          origem_veredito="indice" if veredito else None, afirmacao=af)
 
 
-def _voto_nao_descontado_na_direcao(d):
-    descontadas = {x["url"] for x in d.descontos_temporais}
+def _voto_nao_descontado_na_direcao(d, itens):
+    """Há contribuição de ITEM não descontado com o sinal do resultado (m3: checa o item e o sinal dele, não só
+    a URL do voto). Com a polaridade 'afirma' dos cenários, REFUTA vale +1 e SUSTENTA vale −1."""
+    descontadas = {(x["url"], x["afirmacao"]) for x in d.descontos_temporais}
     sinal = 1 if d.log_odds > 0 else -1
-    return any(v.direcao == sinal and any(u not in descontadas for u in v.urls) for v in d.votos)
+    return any((1 if it.classe == "REFUTA" else -1) == sinal and (it.url, it.afirmacao) not in descontadas
+               for it in itens)
 
 
 def test_e4_guarda_sinais_opostos_em_clusters_distintos(monkeypatch):
@@ -447,7 +462,7 @@ def test_e4_guarda_sinais_opostos_em_clusters_distintos(monkeypatch):
              _it_e4("https://estadao.com.br/a", "estadao", "REFUTA", _RECENTE)]
     d = decidir(_ev_hoje(itens))
     assert d.nivel_sem_desconto == "media" and d.nivel == "alta"
-    assert _voto_nao_descontado_na_direcao(d)
+    assert _voto_nao_descontado_na_direcao(d, itens)
 
 
 def test_e4_guarda_sinais_opostos_no_mesmo_cluster(monkeypatch):
@@ -458,7 +473,7 @@ def test_e4_guarda_sinais_opostos_no_mesmo_cluster(monkeypatch):
              _it_e4("https://bbc.com/a", "x", "REFUTA", _RECENTE)]
     d = decidir(_ev_hoje(itens))
     assert d.log_odds > 0 and abs(d.log_odds) > abs(d.log_odds_sem_desconto)
-    assert _voto_nao_descontado_na_direcao(d)
+    assert _voto_nao_descontado_na_direcao(d, itens)
 
 
 @pytest.mark.parametrize("sinais", [("SUSTENTA", "REFUTA", "REFUTA"), ("SUSTENTA", "SUSTENTA", "SUSTENTA")])
@@ -490,7 +505,7 @@ def test_e4_trava_nao_atua_com_fonte_do_periodo_na_mesma_direcao(monkeypatch):
     itens += [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA) for i in range(14)]
     d = decidir(_ev_hoje(itens))
     assert d.nivel == "alta" and not d.travas["so_fontes_de_outro_periodo"]
-    assert _voto_nao_descontado_na_direcao(d)
+    assert _voto_nao_descontado_na_direcao(d, itens)
 
 
 def test_e4_trava_antigas_fortes_contra_atual_oposta_nao_viram_alta(monkeypatch):
@@ -504,7 +519,7 @@ def test_e4_trava_antigas_fortes_contra_atual_oposta_nao_viram_alta(monkeypatch)
     assert d.nivel_sem_desconto == "alta"
     assert d.nivel == "media" and d.travas["so_fontes_de_outro_periodo"]
     assert d.log_odds == pytest.approx(0.99 * decisao.TAU, abs=1e-4)  # L é gravado com 4 casas
-    assert not _voto_nao_descontado_na_direcao(d)
+    assert not _voto_nao_descontado_na_direcao(d, itens)
     assert "outro episódio" in d.motivo
     j = d.justificativa()
     assert j.count("outro episódio") == 1 and j.count("recirculando") == 1
@@ -1218,13 +1233,105 @@ def test_t7_selos_considerados_nao_listam_afirmacao_excluida(monkeypatch):
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
     ia = ItemEvidencia(url="https://g1.globo.com/a", afirmacao=0, cluster="g1", classe="SUSTENTA", motor=JUIZ,
                        citacao_verificada=True, curada=True, corpo_lido=True, veredito="VERDADEIRO",
-                       origem_veredito="indice", veiculo="Agencia A")
+                       origem_veredito="indice", veiculo="Lupa")
     ib = ItemEvidencia(url="https://bbc.com/b", afirmacao=1, cluster="bbc", classe="REFUTA", motor=JUIZ,
                        citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18",
-                       veredito="FALSO", origem_veredito="indice", veiculo="Agencia B")
+                       veredito="FALSO", origem_veredito="indice", veiculo="Boatos.org")
     d = decidir(_ev_afs_janela([ia, ib]))
     assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
     assert {v["afirmacao"] for v in d.vereditos_aplicados} == {0, 1}  # trace guarda os dois selos
     j = d.justificativa()
-    assert "selos de checagem considerados: VERDADEIRO (Agencia A)" in j
-    assert "Agencia B" not in j
+    assert "selos de checagem considerados: Selo da Lupa: VERDADEIRO" in j  # I5: formato atribuído da T3
+    assert "Boatos.org" not in j and "FALSO" not in j
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+def test_i5_selo_na_justificativa_segue_o_formato_atribuido_da_t3():
+    """I5: o selo sai como 'Selo da Lupa: FALSO' (formatar_selo do agregador), com o artigo pelo nome da agência
+    ('do' para Aos Fatos). A justificativa segue neutra. Antes saía 'FALSO (Lupa)', fora do formato da T3."""
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", origem="indice", veiculo="Lupa")
+    it2 = _it("https://aosfatos.org/y", "REFUTA", veredito="FALSO", origem="indice", veiculo="Aos Fatos", af=0)
+    d = decidir(_ev([it]))
+    j = d.justificativa()
+    assert "Selo da Lupa: FALSO" in j and "(Lupa)" not in j
+    assert verificar_neutralidade(j) == []
+    d2 = decidir(_ev([it2]))
+    assert "Selo do Aos Fatos: FALSO" in d2.justificativa()
+    assert verificar_neutralidade(d2.justificativa()) == []
+
+
+def test_i5_selo_sem_nome_de_agencia_usa_o_host_no_formato_da_t3():
+    """Veículo vazio: a agência vira o host da URL, sem 'www.', no mesmo formato atribuído (artigo 'do', pois o
+    nome termina em 'r')."""
+    it = _it("https://www.exemplo.com.br/x", "REFUTA", veredito="FALSO", origem="indice", veiculo="")
+    j = decidir(_ev([it])).justificativa()
+    assert "Selo do exemplo.com.br: FALSO" in j
+
+
+# ------------------------------------------------------------------ textos da revisão: I2, m1, m2, m6
+def test_i2_frase_de_media_so_sai_com_nivel_media():
+    """I2: 'o resultado não passa de propensão média' só em média. Duas partes só com plataformas (cada uma
+    cortada para 0,99τ) dão alta pela conjunção, com a trava acesa; o texto não diz 'média' junto de 'alta'."""
+    itens = [_pl(f"rede{k}{i}.com", af=k) for k in range(2) for i in range(5)]
+    d = decidir(_ev_afs(itens, ["X", "Y"]))
+    assert d.nivel == "alta" and d.travas["sem_fonte_confiavel"]
+    assert "não passa de propensão média" not in d.justificativa()
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {d.justificativa()}") == []
+
+
+def test_m1_fontes_de_afirmacao_excluida_nao_contam_nas_datas(monkeypatch):
+    """m1 (M1 do revisor): B só tem fonte antiga (descontada) e sai da conjunção. As datas do texto não contam a
+    fonte de B (nada de 'publicada antes' nem 'Datas'). O trace guarda o desconto de B."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b, textos=("A obra custou 2 bilhões", "A ponte caiu hoje"), janelas=(None, 2)))
+    assert d.n_fontes_descontadas() == 0 and len(d.descontos_temporais) == 1
+    assert d.travas["data_incompativel"] is False
+    j = d.justificativa()
+    assert "publicada antes" not in j and "Datas" not in j
+    assert d.limitacao_datas() == "" and "Datas anteriores" not in d.why_1linha()
+
+
+def test_m2_vago_com_desconto_nao_avisa_recirculando(monkeypatch):
+    """m2 (M2 do revisor): texto vago (indeterminada por vagueza) com 3 fontes antigas descontadas. A elegibilidade
+    bloqueou o nível, então o 'Verifique se não é notícia antiga recirculando' e o sufixo do why ficam de fora."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_datada(f"https://{d}/a", "REFUTA", "2021-01-01", cluster=d)
+             for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    ev = _ev_hoje(itens, texto="O governo é o pior de todos hoje")
+    ev.vago = True
+    d = decidir(ev)
+    assert d.nivel == "indeterminada" and d.descontos_temporais and "vaga" in d.justificativa()
+    assert "recirculando" not in d.justificativa() and "Datas anteriores" not in d.why_1linha()
+
+
+def test_m2_opiniao_sem_selo_com_desconto_nao_avisa_recirculando(monkeypatch):
+    """m2: opinião sem selo bloqueia o nível (indeterminada), e o aviso de notícia antiga não sai."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_datada(f"https://{d}/a", "REFUTA", "2021-01-01", cluster=d) for d in ("g1.globo.com", "bbc.com")]
+    ev = _ev_hoje(itens, texto="Esse governo é um desastre hoje")
+    ev.opiniao = True
+    d = decidir(ev)
+    assert d.nivel == "indeterminada" and d.descontos_temporais
+    assert "recirculando" not in d.justificativa()
+
+
+def test_m6_flag_do_motivo_de_data_e_marcada_pela_decisao(monkeypatch):
+    """m6: o aviso de data é uma flag (motivo_avisa_data), não uma busca por 'outro episódio' no texto. A decisão
+    marca a flag no caminho de desconto que zera a evidência; com a flag, o bloco de datas não se repete."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    itens = [_it_datada(f"https://{d}/a", "REFUTA", "2021-01-01", cluster=d) for d in ("g1.globo.com", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "indeterminada" and d.motivo_avisa_data
+    assert d.justificativa().count("outro episódio") == 1
+
+
+def test_m6_a_flag_manda_e_nao_o_texto_do_motivo():
+    """Com o texto 'outro episódio' e a flag falsa, o bloco de datas sai; com a flag verdadeira, não se repete."""
+    d = decisao.Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="texto com outro episódio",
+                        descontos_temporais=[{"url": "https://g1.globo.com/a", "afirmacao": 0}],
+                        travas={"data_incompativel": True}, nivel_sem_desconto="indeterminada")
+    assert "publicada antes" in d.justificativa()
+    d.motivo_avisa_data = True
+    assert "publicada antes" not in d.justificativa()
