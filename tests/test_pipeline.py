@@ -699,3 +699,169 @@ def test_t6_mock_placeholder_nao_entra_na_decisao(amb, monkeypatch):
     por_url = _itens_decididos(monkeypatch, _prep(amb, [(r1, c1)]), MockDetector())
     assert por_url[r1["link"]].corpo_lido is True
     assert por_url[r1["link"]].prob_fake_pagina is None
+
+
+# --- E4 Task 8: regressão Bolsonaro nas duas direções (offline; base REAL do índice) ---
+_BOATOS_JAN26 = "https://www.boatos.org/politica/bolsonaro-recebe-alta-do-hospital-e-vai-para-casa-em-janeiro-de-2026.html"
+_BOATOS_ABR25 = "https://www.boatos.org/politica/video-nao-mostra-jair-bolsonaro-deixando-hospital-apos-receber-alta-em-abril-de-2025.html"
+
+
+def test_e4_regressao_bolsonaro_refuta_nao_alta(amb, monkeypatch):
+    """A8, direção REFUTA: os selos FALSO antigos do Boatos.org sobre 'Bolsonaro recebeu alta do
+    hospital' (14/01/2026 e 23/04/2025) não podem cravar 'alta' para o fato de hoje. A base é a REAL
+    (data/checagens.jsonl); o juiz e os corpos das páginas são stand-ins de teste (o que se exercita é
+    base -> gate -> avaliador -> decisão, com a data de referência explícita)."""
+    from factcheck_mvp import avaliador as _aval
+    from factcheck_mvp import decisao as _dec
+    from factcheck_mvp import indice as _indice_mod
+    from factcheck_mvp.agregador import verificar_neutralidade
+
+    if not _indice_mod.ARQ_CHECAGENS.exists():
+        pytest.skip(f"base real ausente ({_indice_mod.ARQ_CHECAGENS}): regressão Bolsonaro não roda neste checkout")
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    monkeypatch.setattr(_dec, "relevancia_temporal", lambda e, j: 0.05)
+    corpo = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
+    amb[_BOATOS_JAN26] = corpo
+    amb[_BOATOS_ABR25] = corpo
+    boatos = {_BOATOS_JAN26, _BOATOS_ABR25}
+
+    def fake_avaliar(nucleo, peca):
+        if peca["url"] in boatos:
+            return {"posicao": "REFUTA", "citacao": "É falso que Bolsonaro recebeu alta do hospital",
+                    "citacao_score": 1.0, "citacao_verificada": True,
+                    "pagina_diz": "A página diz que é falso que Bolsonaro recebeu alta do hospital.",
+                    "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+        return {"posicao": "NAO_TRATA", "citacao": "", "citacao_score": 0.0, "citacao_verificada": None,
+                "pagina_diz": "", "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    eventos = _eventos_aplicabilidade(monkeypatch)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), Indice.de_checagens(), Indice(),
+                               serpapi=FakeSerp([]), detector=MockDetector()).executar(
+        EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                        data_referencia="2026-10-09")))
+    # Guarda anti-vácuo: a base real devolveu as duas checagens e o gate as mediu contra a data de hoje
+    medidas = {e["url"]: e for e in eventos if e["url"] in boatos}
+    assert set(medidas) == boatos, sorted(e["url"] for e in eventos)
+    assert all(e["decisao"] == "inaplicavel" and e["motivo"] == "data incompatível" for e in medidas.values())
+    # ... e chegaram à decisão, descontadas com a mesma distância que o gate mediu (268 e 534 dias, menos a janela 2)
+    descontos = {x["url"]: x for x in rel.decisao["descontos_temporais"]}
+    assert set(descontos) == boatos, rel.decisao["descontos_temporais"]
+    assert descontos[_BOATOS_JAN26]["dias_alem_da_janela"] == 266
+    assert descontos[_BOATOS_ABR25]["dias_alem_da_janela"] == 532
+    # Premissa da regressão: sem o desconto, esses selos levariam a 'alta'
+    assert rel.decisao["nivel_sem_desconto"] == "alta", rel.decisao["nivel_sem_desconto"]
+    # Direção REFUTA: com o desconto não é alta, e o aviso neutro de data aparece
+    assert rel.propensao != "alta", rel.justificativa
+    assert rel.decisao["travas"]["data_incompativel"] is True
+    assert "outro episódio" in rel.justificativa and "notícia antiga recirculando" in rel.justificativa
+    assert verificar_neutralidade(rel.justificativa) == []
+    # Web não pulada: a checagem antiga não virou "aplicável" e não pulou a descoberta
+    desc = [e for e in rel.etapas if e.nome == "descoberta"]
+    assert desc and desc[0].status != "pulada", [(e.nome, e.status) for e in rel.etapas]
+    assert rel.onde_encontrado == "web"
+
+
+def test_e4_regressao_bolsonaro_sustenta_nao_baixa(amb, monkeypatch):
+    """Espelho de SUSTENTA no nível pipeline (cf. test_e4_fonte_antiga_que_confirma_nao_crava_baixa):
+    fontes antigas que CONFIRMAM 'Bolsonaro recebeu alta' não podem cravar 'baixa' para o fato de hoje.
+    Usa a web, com a data em PT-BR no formato do SerpAPI: na base real esse fato tem selo FALSO, e postura SUSTENTA contra
+    selo FALSO é conflito (D2), que descartaria o item antes de qualquer desconto."""
+    from factcheck_mvp import avaliador as _aval
+    from factcheck_mvp import decisao as _dec
+
+    monkeypatch.setattr(_dec, "relevancia_temporal", lambda e, j: 0.05)
+    resultados = []
+    for r, corpo in [_pag(f"https://www.{d}/noticia/2025/04/bolsonaro-alta-hospital",
+                          "Bolsonaro recebeu alta do hospital",
+                          "Bolsonaro recebeu alta do hospital e foi para casa, confirma a equipe médica.")
+                     for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]:
+        r["date"] = "23 de abr. de 2025"
+        amb[r["link"]] = corpo
+        resultados.append(r)
+
+    def fake_avaliar(nucleo, peca):
+        return {"posicao": "SUSTENTA", "citacao": "Bolsonaro recebeu alta do hospital e foi para casa",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página confirma que Bolsonaro recebeu alta do hospital.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                               serpapi=FakeSerp(resultados), detector=MockDetector()).executar(
+        EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                        data_referencia="2026-10-09")))
+    # Guarda anti-vácuo: as três fontes chegaram à decisão, descontadas (23/04/2025, janela 2)
+    urls = {r["link"] for r in resultados}
+    descontos = {x["url"]: x for x in rel.decisao["descontos_temporais"]}
+    assert set(descontos) == urls, rel.decisao["descontos_temporais"]
+    assert {x["dias_alem_da_janela"] for x in descontos.values()} == {532}
+    # Premissa da regressão: sem o desconto, as três confirmações cravariam 'baixa'
+    assert rel.decisao["nivel_sem_desconto"] == "baixa", rel.decisao["nivel_sem_desconto"]
+    assert rel.propensao != "baixa", rel.justificativa
+    assert rel.decisao["travas"]["data_incompativel"] is True
+    assert "outro episódio" in rel.justificativa
+
+
+def _base_antiga_para_fato_de_hoje(url: str) -> Indice:
+    """Índice sintético: uma checagem FALSA de 2020 (inaplicável ao fato de hoje) + distratores."""
+    return Indice.de_checagens([{"url": url, "titulo": "Bolsonaro alta hospital",
+                                 "afirmacao_checada": "Bolsonaro recebeu alta do hospital",
+                                 "selo_original": "Falso", "veredito": "FALSO", "agencia": "boatos-org",
+                                 "data_pub": "2020-03-15",
+                                 "trecho": "É falso que Bolsonaro recebeu alta do hospital, segundo apuração."}]
+                               + [{"url": f"https://lupa.uol.com.br/w{i}", "titulo": t, "afirmacao_checada": t,
+                                   "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+                                  for i, t in enumerate(_DISTRATORES_BM25)])
+
+
+def _entrada_bolsonaro_hoje() -> EntradaConsulta:
+    return EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                           data_referencia="2026-10-09")
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "BUG (achado E4 Task 8): a fase base já lê o corpo da peça, mas o n_lidas da passada seguinte "
+    "(_ler, em _executar) só conta as lidas agora; a justificativa sai com 'Lidas 0 página(s)' e "
+    "contagem.lidas fica 0 embora corpo_lido seja True."))
+def test_lidas_conta_pagina_lida_pela_fase_base(amb, monkeypatch):
+    from factcheck_mvp import avaliador as _aval
+
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-lidas-fase-base"
+    amb[url] = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
+
+    def fake_avaliar(nucleo, peca):
+        return {"posicao": "REFUTA", "citacao": "É falso que Bolsonaro recebeu alta do hospital",
+                "citacao_score": 1.0, "citacao_verificada": True, "pagina_diz": "",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), _base_antiga_para_fato_de_hoje(url), Indice(),
+                               serpapi=FakeSerp([]), detector=MockDetector()).executar(_entrada_bolsonaro_hoje()))
+    assert [f.corpo_lido for f in rel.fontes if f.url == url] == [True]  # guarda: a peça foi lida
+    assert rel.decisao["contagem"]["lidas"] == 1, rel.justificativa
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "BUG (achado E4 Task 8, custo): com o gate sem pular a web, _fase_base julga a peça da base e o "
+    "passo 8 julga de novo: o avaliador roda 2x por par (peça, afirmação); _julgar documenta 1x por par."))
+def test_avaliador_uma_vez_por_par_com_base_sem_pular_web(amb, monkeypatch):
+    from factcheck_mvp import avaliador as _aval
+
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-chamadas-fase-base"
+    amb[url] = "É falso que Bolsonaro recebeu alta do hospital, segundo apuração. " * 50
+    chamadas = []
+
+    def fake_avaliar(nucleo, peca):
+        chamadas.append(peca["url"])
+        return {"posicao": "REFUTA", "citacao": "É falso que Bolsonaro recebeu alta do hospital",
+                "citacao_score": 1.0, "citacao_verificada": True, "pagina_diz": "",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), _base_antiga_para_fato_de_hoje(url), Indice(),
+                               serpapi=FakeSerp([]), detector=MockDetector()).executar(_entrada_bolsonaro_hoje()))
+    assert not any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)  # guarda: web não pulada
+    assert chamadas.count(url) == 1, chamadas
