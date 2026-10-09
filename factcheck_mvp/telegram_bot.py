@@ -6,6 +6,7 @@ Sem fotos/vídeos: mídia recebe orientação, não silêncio (RF03).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -181,10 +182,11 @@ class LinkLido:
     data_pub: str | None = None
 
 
-def entrada_de_link(url: str, pagina: LinkLido) -> EntradaConsulta:
+def entrada_de_link(url: str, pagina: LinkLido, ref_fallback: str | None = None) -> EntradaConsulta:
     """Entrada do texto de um link já lido (api e bot). O "hoje" da matéria é a data da própria
-    página; página sem data útil (ou só ano/placeholder) = E4 desligado, nunca a data de hoje."""
-    ref = referencia_de_pagina(pagina.data_pub)
+    página. Sem data útil (ou só ano/placeholder), vale `ref_fallback` (M4: a data do encaminhamento,
+    se o link foi encaminhado). Sem nenhum dos dois, E4 desligado, nunca a data de hoje."""
+    ref = referencia_de_pagina(pagina.data_pub) or ref_fallback
     return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina.texto}"[:20000],
                            data_referencia=ref, sem_referencia_temporal=ref is None)
 
@@ -407,19 +409,20 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
     try:
+        # Encaminhada: o "hoje" é o dia (BRT) em que a mensagem original foi enviada.
+        origem = getattr(update.message, "forward_origin", None)
+        ref_enc = referencia_do_encaminhamento(getattr(origem, "date", None))
         if entrada.tipo == "link":
-            texto_extra = _texto_link(entrada.conteudo, pipe.catalogo) or ""
-            if not texto_extra:
+            # M2: a leitura é bloqueante (curl_cffi); fora da thread do loop, o bot segue respondendo.
+            lido = await asyncio.to_thread(_texto_link, entrada.conteudo, pipe.catalogo)
+            if not lido:
                 # Plano B: sem o conteúdo, a checagem seria só sobre o endereço.
                 await aviso.edit_text(LINK_SEM_TEXTO_MSG)
                 return
-            entrada = entrada_de_link(entrada.conteudo, texto_extra)
-        else:
-            # Encaminhada: o "hoje" do texto é o dia em que a mensagem original foi enviada.
-            origem = getattr(update.message, "forward_origin", None)
-            ref_enc = referencia_do_encaminhamento(getattr(origem, "date", None))
-            if ref_enc:
-                entrada = EntradaConsulta(tipo=entrada.tipo, conteudo=entrada.conteudo, data_referencia=ref_enc)
+            # M4: página sem data útil usa a data do encaminhamento (antes, o E4 ficava desligado).
+            entrada = entrada_de_link(entrada.conteudo, lido, ref_fallback=ref_enc)
+        elif ref_enc:
+            entrada = EntradaConsulta(tipo=entrada.tipo, conteudo=entrada.conteudo, data_referencia=ref_enc)
         # Aviso de rumor de 2ª mão (usa a mesma regex do pipeline, sem drift)
         try:
             from .pipeline import RUMOR_RE as _RR
