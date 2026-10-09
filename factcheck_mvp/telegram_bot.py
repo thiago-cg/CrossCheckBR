@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -171,18 +172,20 @@ RUMOR_MSG = ("Entendi — relato sem fonte nem certeza. Vou checar o núcleo fac
              "como rumor de segunda-mão (se souber onde/quando ouviu, me diga).")
 
 
-class TextoLido(str):
-    """Texto de uma página lida (é um str, como antes) + `data_pub`: data de publicação
-    BRUTA da página (ISO ou texto como veio) ou None. Daqui sai a referência do E4 de um link (A5)."""
+@dataclass(frozen=True)
+class LinkLido:
+    """Página de um link já lida: `texto` (título + parágrafos) e `data_pub`, a data de publicação
+    BRUTA da página (ISO ou texto como veio) ou None. Daqui sai a referência temporal do E4 (A5)."""
 
+    texto: str
     data_pub: str | None = None
 
 
-def entrada_de_link(url: str, pagina: str) -> EntradaConsulta:
+def entrada_de_link(url: str, pagina: LinkLido) -> EntradaConsulta:
     """Entrada do texto de um link já lido (api e bot). O "hoje" da matéria é a data da própria
     página; página sem data útil (ou só ano/placeholder) = E4 desligado, nunca a data de hoje."""
-    ref = referencia_de_pagina(getattr(pagina, "data_pub", None))
-    return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina}"[:20000],
+    ref = referencia_de_pagina(pagina.data_pub)
+    return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina.texto}"[:20000],
                            data_referencia=ref, sem_referencia_temporal=ref is None)
 
 
@@ -198,7 +201,7 @@ def referencia_do_encaminhamento(data_origem: datetime | None) -> str | None:
     return (data_origem.astimezone(timezone.utc) - timedelta(hours=3)).date().isoformat()
 
 
-def _texto_link(url: str, catalogo, timeout: int = 15) -> TextoLido | None:
+def _texto_link(url: str, catalogo, timeout: int = 15) -> LinkLido | None:
     """Baixa link SOMENTE de domínio do catálogo (allow-list anti-SSRF).
 
     Teto de 1,5 MB, timeout curto, e a URL final (após redirects) precisa
@@ -231,9 +234,7 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> TextoLido | None:
         return None
     if texto is None:
         return None
-    lido = TextoLido(texto)
-    lido.data_pub = extracao.data_publicacao_pagina(html, final)
-    return lido
+    return LinkLido(texto=texto, data_pub=extracao.data_publicacao_pagina(html, final))
 
 
 def _urls_nao_analisadas(rel) -> set:

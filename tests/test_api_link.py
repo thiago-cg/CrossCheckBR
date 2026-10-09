@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from factcheck_mvp import api
 from factcheck_mvp.schemas import EntradaConsulta, RelatorioChecagem
+from factcheck_mvp.telegram_bot import LinkLido
 
 URL = "https://www.aosfatos.org/noticias/exemplo/"
 
@@ -21,7 +22,7 @@ class _PipeFalso:
 def _cliente(monkeypatch, texto_pagina):
     pipe = _PipeFalso()
     monkeypatch.setattr(api, "pipeline", lambda: pipe)
-    monkeypatch.setattr(api, "_texto_link", lambda url, catalogo: texto_pagina)
+    monkeypatch.setattr(api, "_texto_link", lambda url, catalogo: LinkLido(texto_pagina, None) if texto_pagina else None)
     monkeypatch.setattr(api, "_rate_ok", lambda request: True)
     return TestClient(api.app), pipe
 
@@ -56,10 +57,17 @@ def test_texto_comum_nao_passa_pela_leitura(monkeypatch):
 
 # --- E4 revisão (item 9, A5): entrada por link usa a data da própria página; sem data, E4 desligado ---
 def _pagina(texto, data_pub):
-    from factcheck_mvp.telegram_bot import TextoLido
-    lido = TextoLido(texto)
-    lido.data_pub = data_pub
-    return lido
+    return LinkLido(texto, data_pub)
+
+
+def test_linklido_nao_e_str_e_leva_a_data_como_campo():
+    """M3: a data é campo do objeto (antes era atributo de um str, que str.strip() e o fatiamento perdiam)."""
+    from dataclasses import fields, is_dataclass
+    from factcheck_mvp.telegram_bot import entrada_de_link
+    lido = LinkLido(texto="Título\n\nCorpo.", data_pub="2021-07-18T10:00:00-03:00")
+    assert not isinstance(lido, str) and is_dataclass(lido)
+    assert [f.name for f in fields(lido)] == ["texto", "data_pub"]
+    assert entrada_de_link(URL, lido).data_referencia == "2021-07-18"
 
 
 def _cliente_com_pagina(monkeypatch, texto, data_pub):
@@ -134,7 +142,7 @@ def test_texto_link_guarda_a_data_publicada_do_json_ld(monkeypatch):
                          '<body><p>' + "Texto da matéria checada. " * 20 + '</p></body></html>')
     monkeypatch.setattr(_curl, "Session", _SessaoFalsa)
     lido = tb._texto_link(URL, _CatalogoAceitaTudo())
-    assert lido and "Texto da matéria" in lido
+    assert lido and "Texto da matéria" in lido.texto
     assert lido.data_pub == "2021-07-18T10:00:00-03:00"
 
 
