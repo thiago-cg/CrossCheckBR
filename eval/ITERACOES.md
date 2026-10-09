@@ -330,3 +330,13 @@ Base: `feat/fase-eb-followup` @ `62c6156`, 39 commits depois de `0c9267c` (o com
 - `pipeline` chama `motivo_data_ilegivel` sem âncora em 3 pontos (pipeline.py:278, 374, 737): uma relativa com âncora válida sai com o motivo "sem âncora".
 - `pipeline.py:22` importa `datetime` e `timezone` sem uso.
 - O docstring de `eval/decisao.py` diz "confere 69/69"; o número real é 40/69 (`validos.json`).
+
+### Adendo: pendências menores fechadas (09/10, itens 1-5)
+
+- `_citar_afirmacao` usa `verificar_neutralidade` (normaliza acento): "E falso que X" vira "a afirmação N".
+- `FRACAO_MIN_VOTO` (5%) vale também para o desconto temporal (E4): contribuição descontada abaixo de 5% do valor bruto não vota. A afirmação que fica sem voto por isso continua contando como "parte sem checagem atual" (D-b). Efeito colateral: com r = 0 (antes: sem voto e fora de D-b) o texto agora também limita baixa a média.
+- Motivo próprio e neutro quando a única postura é descartada pelo BERT.
+- `motivo_data_ilegivel` recebe a âncora da busca em `_peca_web` (`_ancora`). Em `pipeline.py` (índice, página lida) `normalizar_data` roda sem âncora, então "sem âncora" é o motivo correto ali.
+- Import sem uso removido de `pipeline.py`; docstring de `eval/decisao.py` corrigido.
+- Medição: pytest 894 passed; `eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`: acerto 0,1449, acerto+parcial 0,3333, erro grave 0 (igual ao anterior).
+- Item 6 (`/checar --json` devolve raciocínio bruto): aguarda decisão da usuária.

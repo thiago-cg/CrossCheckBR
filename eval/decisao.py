@@ -8,7 +8,7 @@
   Avaliar (sem rede, determinístico):
     python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl
     python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl \
-      --validos docs/review/review2/sondas/validos.json   # confere 69/69 vs trace
+      --validos docs/review/review2/sondas/validos.json   # compara com traces antigos (referência velha: reproduz ~40/69)
 
   A/B do E4 (relevância temporal): a perna controle zera texto_usuario/janela
   antes do decidir (sem flag no código de produto):

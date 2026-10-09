@@ -1017,6 +1017,18 @@ def test_fallback_de_data_relativa_sem_ancora_diz_sem_ancora(monkeypatch):
     assert capturados == [("data_pub", "sem âncora"), ("data_pub", "formato não reconhecido")]
 
 
+def test_fallback_de_data_relativa_usa_a_ancora_da_busca(monkeypatch):
+    """A âncora da busca (created_at) chega à peça e ao motivo: relativa com âncora válida não diz 'sem âncora'."""
+    capturados = []
+    monkeypatch.setattr(pl.telemetria, "fallback",
+                        lambda onde, motivo="", /, **kw: capturados.append((onde, motivo)))
+    base = {"url": "https://g1.globo.com/a", "titulo": "t", "fonte": {}, "data_pub": None,
+            "data_pub_bruta": "há 99999999 dias"}
+    pl.Pipeline._peca_web({**base, "_ancora": "2026-10-09 10:00:00 UTC"}, {0})
+    pl.Pipeline._peca_web({**base, "_ancora": "ontem"}, {0})
+    assert capturados == [("data_pub", "fora do intervalo"), ("data_pub", "âncora inválida")]
+
+
 def _recebimento(rel):
     return [e for e in rel.etapas if e.nome == "recebimento"][0].detalhe
 

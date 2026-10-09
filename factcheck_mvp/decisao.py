@@ -20,7 +20,7 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
     contrib   = s_a * d * w
       postura : d = +1 REFUTA, -1 SUSTENTA (RELATA/NAO_TRATA não votam)
                 w = W_POSTURA * f_fonte * (1 − prob_fake_pagina)  (T6; sem modelo real, fator 1,0)
-                w < 5% de W_POSTURA·f_fonte (prob_fake > 0,95): não vota (D-c, FRACAO_MIN_VOTO)
+                w < 5% de W_POSTURA·f_fonte (prob_fake > 0,95): não vota (D-c, FRACAO_MIN_VOTO); vale também para o desconto temporal do E4
       veredito: d = selos.direcao(veredito) (FALSO +1 … VERDADEIRO -1; SATIRA 0 = não vota)
                 w = W_VEREDITO * f_fonte; só selo do ÍNDICE (origem "pagina" não vota: T6)
       f_fonte = confiabilidade da fonte (confiabilidade.FATOR_POSTURA / FATOR_VEREDITO):
@@ -367,9 +367,9 @@ def _citar_afirmacao(entrada: Dict[str, Any], idx: int) -> str:
     """Como a justificativa cita uma afirmação: entre aspas, como o usuário escreveu (com a
     negação, se houver). Se o texto traz expressão proibida (ex.: "é falso que X"), cita-se pelo
     número, para o nosso texto continuar passando em `verificar_neutralidade` (RF12)."""
-    from .agregador import EXPRESSOES_PROIBIDAS, _SELO_ATRIBUIDO_RE
+    from .agregador import _SELO_ATRIBUIDO_RE, verificar_neutralidade
     texto = " ".join((entrada.get("afirmacao") or "").split())
-    if not texto or any(e in texto.lower() for e in EXPRESSOES_PROIBIDAS) or _SELO_ATRIBUIDO_RE.search(texto):
+    if not texto or verificar_neutralidade(texto) or _SELO_ATRIBUIDO_RE.search(texto):
         return f"a afirmação {idx + 1}"
     if len(texto) > _LIMITE_CITACAO:
         texto = texto[:_LIMITE_CITACAO - 1].rstrip() + "…"
@@ -687,7 +687,9 @@ def decidir(ev: Evidencias) -> Decisao:
                     "direcao": direcao, "confiabilidade": it.nivel_confiabilidade(),
                     "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),
                     "bits_descartados": round(bits, 3)})
-                contribs = descontados
+                # D-c também para o E4: contribuição descontada abaixo de 5% do valor bruto não vota.
+                contribs = [x for x, (vb, _) in zip(descontados, brutos)
+                            if abs(x[0]) >= FRACAO_MIN_VOTO * abs(vb)]
                 ids_descontados.add(id(it))
             if brutos:
                 if descontado:
@@ -719,9 +721,11 @@ def decidir(ev: Evidencias) -> Decisao:
     # sozinha, não chega a um nível não informa o fato atual. Só vale com 2+ afirmações com voto;
     # com uma só não há conjunção e o L é o dela, como antes. Acima de τ, a parte continua.
     com_voto = [a for a in por_af if n_votos[a] > 0]
+    # afirmação cujos votos o E4 zerou (abaixo de 5%) ainda é "parte sem checagem atual": conta como participante
+    zerada = [a for a in por_af if n_votos[a] == 0 and n_brutos[a] > 0 and so_descontada[a]]
     fora = set()
-    if len(com_voto) > 1:  # com uma só não há conjunção: o L é o dela
-        fora = {a for a in com_voto if so_descontada[a] and abs(por_af[a]) < TAU}
+    if len(com_voto) + len(zerada) > 1:  # com uma só não há conjunção: o L é o dela
+        fora = {a for a in com_voto + zerada if so_descontada[a] and abs(por_af[a]) < TAU}
     for a in fora:
         dec.por_afirmacao[a]["fora_da_conjuncao"] = "só evidência de outro período"
     L = _combinar_afirmacoes([por_af[a] for a in com_voto if a not in fora])
@@ -761,6 +765,10 @@ def decidir(ev: Evidencias) -> Decisao:
                           "(\"hoje\", \"ontem\"…) e podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")
             dec.motivo_avisa_data = True  # m6: o motivo é o aviso de data (flag, não busca por texto)
+        elif dec.posturas_fracas and not dec.conflitos:
+            # D-c: a(s) postura(s) foram descartadas pelo modelo de credibilidade; não é "se anulam".
+            dec.motivo = ("as páginas que tomam posição foram avaliadas com credibilidade muito baixa "
+                          "e não pesaram: não sobrou evidência suficiente")
         else:
             dec.motivo = "as fontes com postura se anulam dentro do mesmo grupo ou conflitam com o selo"
         dec.nivel = "indeterminada"

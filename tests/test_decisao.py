@@ -926,7 +926,9 @@ def test_t7_contrafactual_usa_votos_brutos_quando_o_desconto_zera_uma_afirmacao(
                     data_referencia="2026-10-09", n_lidas=len(itens), n_consultadas=len(itens))
     d = decidir(ev)
     assert d.descontos_temporais and d.por_afirmacao[0]["n_votos"] == 0
-    assert d.nivel == "baixa" and d.log_odds == pytest.approx(-5.0)
+    # 09/10: A zerada pelo desconto (abaixo de 5%) é parte sem checagem atual: D-b limita o texto a média
+    assert d.nivel == "media" and d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4)
+    assert d.travas["parte_sem_checagem_atual"]
     assert d.nivel_sem_desconto == "alta"
     # decisão de 09/10: no contrafactual só a contestada (A, +2) soma; a confirmada (B, −5) não entra
     assert d.log_odds_sem_desconto == pytest.approx(2.0, abs=1e-3)
@@ -1136,7 +1138,7 @@ def test_t7_so_descontada_forte_e_cortada_e_sai_da_conjuncao(monkeypatch):
 
 def test_t7_uma_afirmacao_so_descontada_nao_muda(monkeypatch):
     """Uma afirmação só (texto com 'hoje'): a regra não age; o L é o dela, mesmo só descontado e < τ."""
-    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     it = _it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18", cluster="g1")
     d = decidir(_ev_hoje([it]))
     assert d.descontos_temporais and 0 < abs(d.log_odds) < decisao.TAU
@@ -1147,7 +1149,7 @@ def test_t7_uma_afirmacao_so_descontada_nao_muda(monkeypatch):
 def test_t7_sem_conjuncao_com_uma_afirmacao_com_voto_nada_muda(monkeypatch):
     """Com uma só afirmação com voto não há conjunção: a que só tem evidência descontada mantém o L
     (sem marcador). A outra, sem voto, não muda o resultado (D2)."""
-    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     a = [_it("https://bbc.com/a", "NAO_TRATA", af=0)]
     b = [_it_datada("https://g1.globo.com/b", "REFUTA", "2021-07-18", af=1, cluster="g1")]
     d = decidir(_ev_afs_janela(a + b))
@@ -1159,7 +1161,7 @@ def test_t7_sem_conjuncao_com_uma_afirmacao_com_voto_nada_muda(monkeypatch):
 def test_t7_duas_so_descontadas_fracas_nao_informam(monkeypatch):
     """Duas partes com evidência só de outro período e |L|<τ: nenhuma informa o fato atual. O produto
     fica vazio (L=0, media) e as duas ficam marcadas."""
-    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     a = [_it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18", af=0, cluster="g1")]
     b = [_it_datada("https://bbc.com/b", "SUSTENTA", "2021-07-18", af=1, cluster="bbc")]
     d = decidir(_ev_afs_janela(a + b, textos=("A ponte caiu hoje", "A obra custou 2 bilhões hoje"), janelas=(2, 2)))
@@ -1216,7 +1218,7 @@ def test_t7_duas_partes_fora_com_baixa_citam_as_duas_e_ficam_em_media(monkeypatc
 def test_t7_contagem_do_texto_so_conta_afirmacoes_que_entram_no_resultado(monkeypatch):
     """A afirmação excluída da conjunção (só evidência de outro período) mantém os votos no trace (`votos`),
     mas 'N fonte(s) contestam/confirmam' do texto conta só as afirmações que pesaram."""
-    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
     b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
     d = decidir(_ev_afs_janela(a + b))
@@ -1379,3 +1381,37 @@ def test_i4_data_explicita_da_afirmacao_nao_vira_hoje_no_gate_nem_na_decisao():
     assert decisao._medida_temporal(af, ev, "2026-10-01") is None
     assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", af_texto, "2026-10-01", ref,
                                       janela=janela, marco=marco) == (True, "aplicável")
+
+
+# ------------------------------------------------------------------ 09/10 (pendências menores)
+def test_citar_afirmacao_sem_acento_nao_cita_expressao_proibida():
+    """Texto do usuário sem acento ("E falso que X") também vira "a afirmação N" (checagem pelo agregador)."""
+    from factcheck_mvp.decisao import _citar_afirmacao
+    ent = {"afirmacao": "E falso que a vacina altera o DNA"}
+    assert verificar_neutralidade(ent["afirmacao"])
+    assert _citar_afirmacao(ent, 0) == "a afirmação 1"
+    assert _citar_afirmacao({"afirmacao": "A ponte caiu ontem"}, 1) == '"A ponte caiu ontem"'
+
+
+def test_desconto_temporal_abaixo_de_5_por_cento_nao_vota(monkeypatch):
+    """FRACAO_MIN_VOTO vale também para o E4: contribuição descontada a menos de 5% do valor bruto não gera
+    voto. O desconto continua registrado e o texto cai no aviso de data."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    it = _it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18")
+    d = decidir(_ev_afs_janela([it], textos=("A ponte caiu hoje",), janelas=(2,)))
+    assert d.votos == [] and d.nivel == "indeterminada"
+    assert len(d.descontos_temporais) == 1 and d.motivo_avisa_data
+
+
+def test_desconto_temporal_acima_de_5_por_cento_ainda_vota(monkeypatch):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.5)
+    it = _it_datada("https://g1.globo.com/a", "REFUTA", "2021-07-18")
+    d = decidir(_ev_afs_janela([it], textos=("A ponte caiu hoje",), janelas=(2,)))
+    assert len(d.votos) == 1 and 0 < d.votos[0].valor < 1.0
+
+
+def test_unica_postura_descartada_pelo_bert_tem_motivo_proprio():
+    d = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=1.0)]))
+    assert d.nivel == "indeterminada" and len(d.posturas_fracas) == 1
+    assert "anulam" not in d.motivo and "conflitam" not in d.motivo
+    assert not verificar_neutralidade(d.motivo)

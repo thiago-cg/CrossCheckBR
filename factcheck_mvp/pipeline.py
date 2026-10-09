@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
 import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
@@ -247,6 +246,7 @@ class Pipeline:
             for item in (bruto or {}).get(self.serpapi.result_key(q), [])[:6]:
                 d = rotear_fonte(normalizar_item(item, engine=eng, ancora=ancora), self.catalogo)
                 d["_afirmacao"] = consulta
+                d["_ancora"] = ancora
                 saida.append(d)
             return saida
         try:
@@ -275,7 +275,7 @@ class Pipeline:
                 "scholar": bool(d.get("_scholar"))}
         bruta = peca.get("data_pub_bruta")
         if bruta and not peca.get("data_pub"):
-            telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta), valor=str(bruta)[:40])
+            telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta, d.get("_ancora")), valor=str(bruta)[:40])
         return peca
 
     # ------------------------------------------------------------------ principal
