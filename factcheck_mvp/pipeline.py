@@ -145,6 +145,18 @@ def _tier_data(fonte: Optional[str], precisao: Optional[str], relativa: bool = F
     return {"jsonld": 6, "serpapi": 5, "trafilatura": 4}.get(fonte, 4)
 
 
+# Campos que `avaliador.avaliar` lê da peça: se nenhum mudou, a entrada do LLM é a mesma.
+_CAMPOS_JULGAMENTO = ("titulo", "corpo", "texto_completo", "trecho_juiz", "corpo_lido", "veiculo", "dominio",
+                      "tipo_fonte", "data_pub", "data", "veredito", "selo_original", "afirmacao_checada",
+                      "veredito_pagina")
+# Julgamentos válidos da fase base, reaproveitados no passo 8: (afirmação, URL canônica) -> (assinatura, resultado)
+CacheJulgamento = Dict[Tuple[int, str], Tuple[tuple, Dict[str, Any]]]
+
+
+def _assinatura_julgamento(peca: Dict[str, Any]) -> tuple:
+    return tuple(peca.get(c) for c in _CAMPOS_JULGAMENTO)
+
+
 def _contar_lidas(pecas: List[Dict[str, Any]]) -> int:
     """Páginas lidas na lista FINAL de peças (fase base + passadas da web). A lista tem uma peça por
     URL canônica (fundir_por_url), então a página lida na base não se soma de novo na web."""
@@ -404,9 +416,12 @@ class Pipeline:
             _uteis_base.append(p)
         pecas_base = _uteis_base
 
-        # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1)
+        # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1). O que ela julga vai para
+        # `cache_julg`; o passo 8 reaproveita, em vez de chamar o avaliador de novo no mesmo par.
+        cache_julg: CacheJulgamento = {}
         julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar,
-                                                           texto_usuario=texto_base, referencia=ref)
+                                                           texto_usuario=texto_base, referencia=ref,
+                                                           cache=cache_julg)
 
         # Gate (E1): checagem aplicável na base → pula web e ondas extras.
         # Telemetria do gate é evento("etapa"), nunca fallback. Com SERPAPI_KEY ausente
@@ -522,7 +537,7 @@ class Pipeline:
             juiz_ok = False
             if selecionados:
                 await avisar("Julgando o que cada fonte diz sobre a afirmação…")
-                julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm)
+                julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm, cache=cache_julg)
                 n = {k: sum(1 for r in julg.values() if r.get("classe") == k) for k in juiz_llm.CLASSES}
                 n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
                 n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
@@ -603,7 +618,8 @@ class Pipeline:
     # ------------------------------------------------------------------ seleção / juiz
     async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
                          usar_llm: bool = True, avisar=None,
-                         texto_usuario: str = "", referencia: Optional[str] = None
+                         texto_usuario: str = "", referencia: Optional[str] = None,
+                         cache: Optional[CacheJulgamento] = None
                          ) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], bool]:
         """Fase base (E1): seleciona/lê/julga SÓ a base e testa aplicabilidade.
 
@@ -615,7 +631,8 @@ class Pipeline:
         janela=..., excedente=..., referencia=...)` por decisão. O gate (pular a web) é
         evento("etapa"), nunca fallback — fallback só em erro real.
 
-        -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido).
+        -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido). `cache` recebe os
+        julgamentos feitos aqui (ver `_julgar`), para o passo 8 não julgar o mesmo par de novo.
         Base vazia (INDICE_CHECAGENS=0) → ({}, False): fluxo web normal.
         """
         if not pecas_base:
@@ -626,7 +643,7 @@ class Pipeline:
         selecionados = self._selecionar(afs, pecas_base)
         if not selecionados:
             return {}, False
-        julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
+        julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm, cache=cache)
         janelas = [aplicabilidade.janela_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
                    for a in afs]
         marcos = [aplicabilidade.marco_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
@@ -805,7 +822,8 @@ class Pipeline:
             k += 1
         return saida
 
-    async def _julgar(self, afs, pecas, selecionados, usar_llm) -> Tuple[Dict[Tuple[int, int], Dict], bool]:
+    async def _julgar(self, afs, pecas, selecionados, usar_llm,
+                      cache: Optional[CacheJulgamento] = None) -> Tuple[Dict[Tuple[int, int], Dict], bool]:
         """Julga 1× por par (peça, afirmação) via `avaliador.avaliar` (manchete+corpo).
 
         `julg[(pi, ai)] = {"classe": posicao, "citacao", "citacao_score",
@@ -816,7 +834,12 @@ class Pipeline:
         preservado (nunca descartado) + `fallback juiz/avaliador`. Por peça emite
         `fonte` com `estagio="avaliador"` (posicao, n_chars_trecho, corpo_lido,
         metodo) e depois `estagio="juiz"` (agregação). Ondas extras e fase base
-        reutilizam este caminho."""
+        reutilizam este caminho.
+
+        `cache` (um por execução: a fase base grava, o passo 8 lê): par já julgado com a MESMA
+        entrada do avaliador (`_assinatura_julgamento`) reaproveita o resultado, sem nova chamada
+        ao LLM e sem novo evento `avaliador` (o da base já está no trace). Só entra no cache o
+        julgamento válido (`classe` não None): falha de LLM e par sem corpo são avaliados de novo."""
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
@@ -866,6 +889,11 @@ class Pipeline:
                 for ai in sorted(por_af):
                     alvo = afs[ai].alvo()
                     for pi in por_af[ai]:
+                        chave = (ai, corroboracao.url_canonica(pecas[pi].get("url") or ""))
+                        assinatura = _assinatura_julgamento(pecas[pi])
+                        if cache is not None and chave in cache and cache[chave][0] == assinatura:
+                            resultados[(pi, ai)] = dict(cache[chave][1])  # já julgado na fase base
+                            continue
                         try:
                             a = await asyncio.to_thread(avaliador.avaliar, alvo, pecas[pi])
                         except Exception as e:  # 1 par falhou: registra e segue (parcial preservado)
@@ -876,6 +904,8 @@ class Pipeline:
                                  "erro": f"{type(e).__name__}: {e}"[:300], "corpo_lido": False}
                         resultados[(pi, ai)] = _normalizar(a)
                         _evento_avaliador(pi, ai, a)
+                        if cache is not None and resultados[(pi, ai)]["classe"] is not None:
+                            cache[chave] = (assinatura, dict(resultados[(pi, ai)]))
 
             try:
                 await asyncio.wait_for(_todos(), timeout=budget)
