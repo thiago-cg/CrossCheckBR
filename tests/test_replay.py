@@ -33,7 +33,7 @@ class FakeResp:
 
 
 def _eventos(tmp, rid, tipo):
-    linhas = (tmp / "runs" / rid / "trace.jsonl").read_text().splitlines()
+    linhas = (tmp / "runs" / rid / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(x)["dados"] for x in linhas if json.loads(x)["tipo"] == tipo]
 
 
@@ -64,7 +64,7 @@ def test_record_grava_e_replay_reproduz_sem_rede(amb, monkeypatch):
         r = replay.http_get("http://exemplo.test/api", params={"q": "a", "api_key": "SEGREDO"}, timeout=5)
     assert r.json() == {"ok": 1} and r.cache == "live" and chamadas[0]["params"]["q"] == "a"
     arqs = list((amb / "cass").glob("*.json"))
-    assert len(arqs) == 1 and "SEGREDO" not in arqs[0].read_text()
+    assert len(arqs) == 1 and "SEGREDO" not in arqs[0].read_text(encoding="utf-8")
     # replay: rede proibida, mesma resposta
     monkeypatch.setattr(_curl, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
     with replay.modo("replay"):
@@ -106,7 +106,7 @@ def test_llm_post_emite_evento_llm(amb, monkeypatch):
     ev = _eventos(amb, rid, "llm")[0]
     assert ev["motor"] == "llm-local" and ev["modelo"] == "m1" and ev["finalidade"] == "afirmacoes"
     assert ev["saida"] == "Café cura câncer" and ev["cache"] == "live" and ev["prompt_sha"]
-    assert "segredosegredo" not in (amb / "runs" / rid / "trace.jsonl").read_text()
+    assert "segredosegredo" not in (amb / "runs" / rid / "trace.jsonl").read_text(encoding="utf-8")
 
 
 def test_finalidade_inferida_do_chamador(amb, monkeypatch):
@@ -196,7 +196,7 @@ def test_orcamento_serpapi_bloqueia_live_e_cassete_nao_conta(amb, monkeypatch):
         with pytest.raises(replay.OrcamentoSerpAPIEsgotado):
             replay.http_get(url, params={"q": "b", "api_key": "k"})
     tel.finalizar_run(None)
-    uso = json.loads((amb / "uso.json").read_text())
+    uso = json.loads((amb / "uso.json").read_text(encoding="utf-8"))
     assert uso["total_live"] == 3 and uso["chamadas"][-1]["q"] == "a"
     assert replay.uso_serpapi()["restantes"] == 0
     fb = _eventos(amb, rid, "fallback")

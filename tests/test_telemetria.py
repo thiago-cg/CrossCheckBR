@@ -15,7 +15,7 @@ def tdir(tmp_path, monkeypatch):
 
 
 def _eventos(tdir, rid):
-    return [json.loads(x) for x in (tdir / rid / "trace.jsonl").read_text().splitlines()]
+    return [json.loads(x) for x in (tdir / rid / "trace.jsonl").read_text(encoding="utf-8").splitlines()]
 
 
 def test_evento_sem_run_e_noop(tdir):
@@ -44,7 +44,7 @@ def test_run_grava_trace_e_resultado(tdir):
     assert ev[0]["tipo"] == "run_inicio" and ev[0]["dados"]["tipo"] == "titulo"
     assert ev[-1]["tipo"] == "run_fim" and ev[-1]["dados"]["nivel"] == "baixa"
     assert all({"ts", "t_rel_ms", "tipo", "dados"} <= set(e) for e in ev)
-    res = json.loads((tdir / rid / "resultado.json").read_text())
+    res = json.loads((tdir / rid / "resultado.json").read_text(encoding="utf-8"))
     m = res["metricas"]
     assert res["relatorio"]["propensao"] == "baixa"
     assert m["n_llm"] == 1 and m["fallbacks_por_onde"] == {"juiz": 1}
@@ -59,7 +59,7 @@ def test_redacao_de_segredos_e_truncamento(tdir, monkeypatch):
                t="https://api.telegram.org/bot123456:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/getMe",
                bruto="valor segredoSuperLongo123 no meio", grande="x" * 5000)
     tel.finalizar_run(None)
-    txt = (tdir / rid / "trace.jsonl").read_text()
+    txt = (tdir / rid / "trace.jsonl").read_text(encoding="utf-8")
     for s in ("abc123", "zzz", "abcdefghijklmnop", "AAHdqTcv", "segredoSuperLongo123"):
         assert s not in txt
     assert "REDACTED" in txt
@@ -93,7 +93,7 @@ def test_run_aninhado_reusa_id(tdir):
     tel.finalizar_run({"propensao": "alta"})  # fecha só o aninhado
     assert tel.run_atual() == externo
     tel.finalizar_run(None)  # fecha de verdade, com o resultado guardado
-    res = json.loads((tdir / externo / "resultado.json").read_text())
+    res = json.loads((tdir / externo / "resultado.json").read_text(encoding="utf-8"))
     assert res["relatorio"]["propensao"] == "alta"
     assert [e["tipo"] for e in _eventos(tdir, externo)].count("run_fim") == 1
 
@@ -142,7 +142,7 @@ def test_run_context_manager_registra_erro(tdir):
     with pytest.raises(RuntimeError):
         with tel.run({"entrada": "x"}) as rid:
             raise RuntimeError("falhou")
-    res = json.loads((tdir / rid / "resultado.json").read_text())
+    res = json.loads((tdir / rid / "resultado.json").read_text(encoding="utf-8"))
     assert "falhou" in res["erro"]
 
 

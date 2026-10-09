@@ -103,10 +103,10 @@ def test_rodar_metricas_artefatos_baseline_e_gate(amb):
     assert "acerto" in m["intervalos_wilson"]
     d = out["dir"]
     assert (d / "metricas.json").exists() and (d / "casos.jsonl").exists()
-    md = (d / "relatorio.md").read_text()
+    md = (d / "relatorio.md").read_text(encoding="utf-8")
     assert "cli trace" in md and "ATENÇÃO" in md and "🛑" in md
     assert "sempre_alta" in md and "balanceada" in md
-    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text().splitlines()]
+    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text(encoding="utf-8").splitlines()]
     assert all(c["run_id"] and (amb / "runs" / c["run_id"] / "resultado.json").exists() for c in casos)
     ev.salvar_baseline(out["meta"], m, out["casos"], amb / "baseline.json")
 
