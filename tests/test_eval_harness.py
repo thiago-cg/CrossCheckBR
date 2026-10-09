@@ -283,6 +283,24 @@ def test_e4_do_trace_marca_janela_do_texto_sem_try():
     assert _e4_do_trace([{"tipo": "evidencias", "dados": {"afirmacoes": [], "texto_usuario": None}}])["marcador"] is False
 
 
+def test_e4_do_trace_conta_data_explicita_do_fato_como_marcador():
+    """Task 4b: caso só com data explícita (marco por afirmação, sem janela relativa) tem marcador de
+    E4. No trace o `marco` chega como lista [data_evento, folga] (ou null), não como tupla."""
+    from factcheck_mvp import aplicabilidade
+    from eval.run import _e4_do_trace
+    texto = "O jogo foi dia 8"
+    assert aplicabilidade.janela_temporal(texto) is None  # só o marco pode marcar este caso
+    com_marco = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": texto, "janela": None, "marco": ["2026-10-08", 2]}],
+        "texto_usuario": texto, "data_referencia": "2026-10-09"}}]
+    r = _e4_do_trace(com_marco)
+    assert r["marcador"] is True and r["referencia_ausente"] is False
+    sem_marco = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": "Café cura câncer", "janela": None, "marco": None}],
+        "texto_usuario": "Café cura câncer", "data_referencia": "2026-10-09"}}]
+    assert _e4_do_trace(sem_marco)["marcador"] is False
+
+
 def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     from eval.decisao import gerar_snapshot_de_resultado
     res_dir = amb / "resultado"

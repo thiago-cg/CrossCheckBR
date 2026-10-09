@@ -126,7 +126,7 @@ LLM (teto `AGENTE_MAX_BUSCAS` por caso). No trace: `cli trace <run_id> --eventos
 
 | campo | o quê |
 |---|---|
-| `casos_com_marcador` | casos cujo texto/afirmação tem marcador temporal ("hoje", "ontem"…) |
+| `casos_com_marcador` | casos cujo texto/afirmação tem marcador temporal relativo ("hoje", "ontem"…) ou data explícita do fato (marco, Task 4b: "dia 8", "8 de outubro") |
 | `casos_com_desconto` | casos com ≥1 fonte descontada (`descontos_temporais` não vazio) |
 | `casos_nivel_mudou` | casos em que o desconto mudou o nível (`nivel != nivel_sem_desconto`, só conta com desconto real) |
 | `bits_descartados_total` | soma dos `bits_descartados` (força da evidência removida por ser de outro episódio) |
