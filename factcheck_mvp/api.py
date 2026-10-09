@@ -149,7 +149,8 @@ async def checar(entrada: EntradaConsulta, request: Request):
 
 
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
-    from .agregador import NOMES_ETAPAS, STATUS_ETAPA, direcoes_por_url, linha_raciocinio, postura_legivel
+    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
+                            linha_raciocinio, postura_legivel)
     from .confiabilidade import ROTULO
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
@@ -168,7 +169,6 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             _descontadas = set()
 
         def _cartao(f) -> str:
-            import re as _re
             post = postura_legivel(f, direcoes)
             if bool(getattr(f, "corpo_lido", False)) and f.url not in nao_lidas:
                 leitura = "📄 texto lido"
@@ -179,15 +179,7 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             _r = getattr(f, "relevancia_temporal", None)
             _linha_data = ""
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _bruta = getattr(f, "data_pub_bruta", None)
-                _pub = getattr(f, "data_pub", None)
-                _dtxt = ""
-                if _bruta:
-                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
-                elif _pub:
-                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
                 if _dtxt:
                     _linha_data = f"<br/>📅 publicada em {esc(_dtxt)} · anterior ao período do texto"
                 else:

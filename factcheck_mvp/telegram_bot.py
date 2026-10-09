@@ -251,7 +251,7 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import direcoes_por_url, linha_raciocinio, postura_legivel
+        from .agregador import data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
@@ -278,15 +278,7 @@ def formatar(rel: RelatorioChecagem) -> str:
             # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
             _r = getattr(f, "relevancia_temporal", None)
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _bruta = getattr(f, "data_pub_bruta", None)
-                _pub = getattr(f, "data_pub", None)
-                _dtxt = ""
-                if _bruta:
-                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
-                elif _pub:
-                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
                 if _dtxt:
                     linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
                 else:

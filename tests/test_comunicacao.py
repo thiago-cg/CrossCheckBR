@@ -182,6 +182,74 @@ def test_limitacao_de_datas_nao_some_do_bot_com_tres_limitacoes():
     assert verificar_neutralidade(formatar(rel)) == []
 
 
+# ------------------------------------------------------------------ data exibida: precisão e normalizada
+def _fonte_data(**kw):
+    base = dict(url="https://g1.globo.com/a", titulo="Título", portal_nome="g1", corpo_lido=True,
+                relevante=True, postura="SUSTENTA", relevancia_temporal=0.05)
+    return FonteEvidencia(**{**base, **kw})
+
+
+def _rel_com_fonte(f):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[f], decisao={"votos": [], "descontos_temporais": [{"url": f.url, "r": 0.05}]})
+
+
+def test_data_publicacao_legivel_respeita_a_precisao():
+    from factcheck_mvp.agregador import data_publicacao_legivel
+    assert data_publicacao_legivel("2021-12-31", "ano") == "2021"
+    assert data_publicacao_legivel("2026-10-06", "dia") == "06/10/2026"
+    assert data_publicacao_legivel("2026-07-18", None) == "18/07/2026"
+    assert data_publicacao_legivel(None, "dia") == ""
+    assert data_publicacao_legivel("há 3 dias", None) == ""  # nunca o texto bruto
+
+
+def test_bot_placeholder_de_ano_mostra_so_o_ano():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2021-12-31", data_pub_precisao="ano",
+                                            data_pub_bruta="2021-01-01")))
+    assert "📅 publicada em 2021 · anterior ao período do texto" in t
+    assert "01/01/2021" not in t
+
+
+def test_bot_data_relativa_mostra_a_data_normalizada():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
+                                            data_pub_bruta="há 3 dias")))
+    assert "📅 publicada em 06/10/2026" in t and "há 3 dias" not in t
+
+
+def test_bot_iso_com_fuso_mostra_o_dia_brt_usado_na_decisao():
+    # 2026-07-19T02:00Z é 18/07 em BRT (UTC−3): a decisão usou 18/07 e é essa data que se mostra.
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-07-18", data_pub_precisao="dia",
+                                            data_pub_bruta="2026-07-19T02:00:00+00:00")))
+    assert "📅 publicada em 18/07/2026" in t and "19/07" not in t
+
+
+def test_web_data_respeita_a_precisao_e_a_normalizada():
+    from factcheck_mvp.api import _render_html
+    h = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2021-12-31", data_pub_precisao="ano",
+                                                              data_pub_bruta="2021-01-01"))))
+    assert "📅 publicada em 2021 · anterior ao período do texto" in h and "01/01/2021" not in h
+    h2 = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
+                                                               data_pub_bruta="há 3 dias"))))
+    assert "📅 publicada em 06/10/2026" in h2 and "há 3 dias" not in h2
+
+
+def test_fontes_leva_a_precisao_da_data_da_peca():
+    from factcheck_mvp import decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.schemas import Afirmacao
+    peca = {"url": "https://g1.globo.com/a", "titulo": "T", "veiculo": "g1", "corpo": "texto", "corpo_lido": True,
+            "data_pub": "2021-12-31", "data_pub_precisao": "ano", "data_pub_bruta": "2021-01-01"}
+    julg = {(0, 0): {"classe": "REFUTA", "citacao": "x", "citacao_verificada": True, "motor": "llm-juiz:x"}}
+    dec = decisao.Decisao(nivel="media", log_odds=0.0, prob=0.5, motivo="x")
+    f = Pipeline._fontes(None, [Afirmacao(texto="Governo vai confiscar a poupança")], [peca], julg, dec)[0]
+    assert (f.data_pub, f.data_pub_precisao, f.data_pub_bruta) == ("2021-12-31", "ano", "2021-01-01")
+
+
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     from factcheck_mvp.telegram_bot import formatar
     rac = "A página afirma que o café cura o câncer, citando um estudo de dois anos. " * 4  # > cap

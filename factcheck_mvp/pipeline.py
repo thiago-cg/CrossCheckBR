@@ -1098,7 +1098,7 @@ class Pipeline:
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
-                data_pub_bruta=p.get("data_pub_bruta"),
+                data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao"),
                 relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
