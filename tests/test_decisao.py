@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from factcheck_mvp import decisao
+from factcheck_mvp import confiabilidade, decisao
 from factcheck_mvp.agregador import FRASES_BINARIAS, verificar_neutralidade, titulo_propensao
 from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
 
@@ -397,3 +397,153 @@ def test_e4_bot_mostra_data_quando_descontada_e_neutro():
     assert "📅" in saida
     assert verificar_neutralidade(saida) == []
     assert len(saida) <= 3900
+
+
+# ------------------------------------------------------------------ T7 (B2): conjunção entre afirmações (D2)
+def _it_nivel(url, classe, nivel, af=0, cluster=None):
+    """Item com nível de confiabilidade explícito (pesos exatos: curada 1,0; institucional/alto 0,6; baixo 0,3)."""
+    return ItemEvidencia(url=url, afirmacao=af, cluster=cluster or url, classe=classe, motor=JUIZ,
+                         citacao_verificada=True, curada=False, corpo_lido=True, confiabilidade=nivel)
+
+
+def _ev_afs(itens, textos, pols=None, nucleos=None, **kw):
+    pols = pols or ["afirma"] * len(textos)
+    nucleos = nucleos or list(textos)
+    afs = [AfirmacaoDecisao(texto=t, nucleo=n, polaridade=p) for t, n, p in zip(textos, nucleos, pols)]
+    return Evidencias(afirmacoes=afs, itens=itens, n_lidas=len(itens), n_consultadas=len(itens), **kw)
+
+
+def _sig_ref(x):
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _conj_ref(valores):
+    """Referência da fórmula sem atalhos: L = logit(1 − Π(1 − σ(L_a)))."""
+    p = 1.0 - math.prod(1.0 - _sig_ref(v) for v in valores)
+    return math.log(p / (1.0 - p))
+
+
+def test_t7_contestada_e_confirmada_dao_alta_e_justificativa_cita_as_duas():
+    """D2 (a): A contestada (L=+2) e B confirmada (L=-5) => alta; justificativa e why citam as duas partes."""
+    itens = [_it(f"https://{d}/a", "REFUTA", cluster=d, af=0) for d in ("g1.globo.com", "estadao.com.br")]
+    itens += [_it(f"https://{d}/b", "SUSTENTA", cluster=d, af=1)
+              for d in ("bbc.com", "folha.uol.com.br", "agenciabrasil.ebc.com.br", "aosfatos.org", "lupa.uol.com.br")]
+    d = decidir(_ev_afs(itens, ["A ponte caiu em 2024", "A obra custou 2 bilhões"]))
+    assert d.por_afirmacao[0]["L"] == pytest.approx(2.0) and d.por_afirmacao[1]["L"] == pytest.approx(-5.0)
+    assert d.nivel == "alta" and d.parametros["combinacao"].startswith("conjuncao")
+    j = d.justificativa()
+    assert '"A ponte caiu em 2024"' in j and '"A obra custou 2 bilhões"' in j
+    assert "contestam" in j and "é confirmada por fontes" in j
+    assert '"A ponte caiu em 2024"' in d.why_1linha() and '"A obra custou 2 bilhões"' in d.why_1linha()
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+def test_t7_sem_parte_confirmada_nao_cita_partes():
+    """Alta só com partes contestadas: a frase de duas partes não aparece."""
+    itens = [_it(f"https://{d}/a", "REFUTA", cluster=d, af=0) for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev_afs(itens, ["A ponte caiu em 2024"]))
+    assert d.nivel == "alta" and "é confirmada por fontes" not in d.justificativa()
+
+
+def test_t7_parte_falsa_abaixo_do_tau_com_parte_verdadeira_forte_nao_baixa():
+    """D2 (b), caso cr_lula_acabar_bets_que_criou: parte falsa fraca (L=0,9 < τ) com parte verdadeira
+    forte (L=-2,3). Com o máximo |L| dava baixa (erro grave); com a conjunção, média."""
+    itens = [_it_nivel("https://a1.gov.br/x", "REFUTA", confiabilidade.INSTITUCIONAL, af=0),
+             _it_nivel("https://a2.com.br/x", "REFUTA", confiabilidade.BAIXO_TRAFEGO, af=0),
+             _it("https://b1.com/x", "SUSTENTA", cluster="b1", af=1),
+             _it("https://b2.com/x", "SUSTENTA", cluster="b2", af=1),
+             _it_nivel("https://b3.com/x", "SUSTENTA", confiabilidade.BAIXO_TRAFEGO, af=1)]
+    d = decidir(_ev_afs(itens, ["Parte falsa", "Parte verdadeira"]))
+    assert d.por_afirmacao[0]["L"] == pytest.approx(0.9) and d.por_afirmacao[1]["L"] == pytest.approx(-2.3)
+    assert d.nivel == "media" and 0 < d.log_odds < decisao.TAU
+
+
+def test_t7_formula_da_conjuncao_com_os_numeros_do_spec():
+    """Números do spec: (b) p=0,70 e p=0,10 => p_texto=0,73 (media); (a) A=+2, B=-5 (alta)."""
+    valores = [math.log(0.7 / 0.3), math.log(0.1 / 0.9)]
+    assert decisao._combinar_afirmacoes(valores) == pytest.approx(_conj_ref(valores), abs=1e-9)
+    assert _conj_ref(valores) == pytest.approx(math.log(0.73 / 0.27), abs=1e-9)
+    assert decisao.nivel_de(decisao._combinar_afirmacoes(valores)) == "media"
+    assert decisao._combinar_afirmacoes([2.0, -5.0]) == pytest.approx(_conj_ref([2.0, -5.0]), abs=1e-9)
+    assert decisao.nivel_de(decisao._combinar_afirmacoes([2.0, -5.0])) == "alta"
+
+
+@pytest.mark.parametrize("valor", [3.0, -2.0, 0.9, -0.45, 0.0])
+def test_t7_uma_afirmacao_devolve_o_mesmo_L(valor):
+    """Com uma afirmação, σ e logit se cancelam: o L é exatamente o de antes."""
+    assert decisao._combinar_afirmacoes([valor]) == valor
+    assert decisao._combinar_afirmacoes([]) == 0.0
+
+
+@pytest.mark.parametrize("valor", [-4.0, -1.2, 0.3, 1.0, 2.5, 4.0])
+def test_t7_ramo_geral_reproduz_a_unica_parte_quando_a_outra_nao_pesa(valor):
+    """O caminho geral (produto + logit) bate com o L da parte única se a outra é fortemente confirmada."""
+    assert decisao._combinar_afirmacoes([valor, -40.0]) == pytest.approx(valor, abs=1e-6)
+
+
+@pytest.mark.parametrize("valores", [[2.0, -5.0], [0.9, -2.3], [1.0, 1.0], [-3.0, -0.2], [0.5, 0.0, -4.0]])
+def test_t7_combinacao_nunca_fica_abaixo_da_parte_mais_falsa(valores):
+    """Parte falsa não some por causa de parte verdadeira: L >= max(L_a)."""
+    assert decisao._combinar_afirmacoes(valores) >= max(valores) - 1e-9
+
+
+def test_t7_uma_afirmacao_no_decidir_mantem_o_L_de_antes():
+    d = decidir(_ev(_tres("REFUTA")))
+    assert d.log_odds == 3.0 and d.log_odds == d.por_afirmacao[0]["L"]
+    d2 = decidir(_ev([_it_nivel("https://a1.gov.br/x", "SUSTENTA", confiabilidade.INSTITUCIONAL),
+                      _it_nivel("https://a2.com.br/x", "SUSTENTA", confiabilidade.BAIXO_TRAFEGO)]))
+    assert d2.log_odds == -0.9 and d2.nivel == "media"
+
+
+def test_t7_afirmacao_sem_voto_fica_fora_do_produto():
+    """Ausência de evidência não é evidência: B sem voto (relato / fora do tema) não muda A (confirmada, L=-2)."""
+    so_a = [_it(f"https://{d}/a", "SUSTENTA", cluster=d, af=0) for d in ("g1.globo.com", "estadao.com.br")]
+    sem_voto = [_it("https://bbc.com/b", "RELATA_SEM_ENDOSSO", af=1), _it("https://uol.com.br/c", "NAO_TRATA", af=1)]
+    base = decidir(_ev_afs(so_a, ["A", "B"]))
+    com = decidir(_ev_afs(so_a + sem_voto, ["A", "B"]))
+    assert base.log_odds == com.log_odds == -2.0
+    assert base.nivel == com.nivel == "baixa"
+    assert com.por_afirmacao[1]["n_votos"] == 0
+
+
+def test_t7_afirmacao_com_votos_que_se_anulam_tem_voto_e_entra_no_produto():
+    """Votos que se anulam (L=0) não são 'sem voto': a parte entra com p=0,5 (critério n_votos > 0)."""
+    itens = [_it("https://g1.globo.com/a", "SUSTENTA", cluster="g1", af=0),
+             _it("https://estadao.com.br/a", "REFUTA", cluster="estadao", af=0)]
+    itens += [_it(f"https://{d}/b", "SUSTENTA", cluster=d, af=1) for d in ("bbc.com", "folha.uol.com.br")]
+    d = decidir(_ev_afs(itens, ["A", "B"]))
+    assert d.por_afirmacao[0]["L"] == 0 and d.por_afirmacao[0]["n_votos"] == 2
+    assert d.log_odds == pytest.approx(_conj_ref([0.0, -2.0]), abs=1e-4)
+
+
+def test_t7_contrafactual_usa_votos_brutos_quando_o_desconto_zera_uma_afirmacao(monkeypatch):
+    """O desconto temporal zera os votos de A (r=0): no caminho com desconto A fica sem voto; no
+    contrafactual (sem desconto) A entra com os votos brutos (L=+2) e o nível seria alta."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ, citacao_verificada=True,
+                           curada=True, corpo_lido=True, data_pub="2021-01-01", afirmacao=0)
+             for d in ("g1.globo.com", "estadao.com.br")]
+    itens += [_it(f"https://{d}/b", "SUSTENTA", cluster=d, af=1)
+              for d in ("bbc.com", "folha.uol.com.br", "agenciabrasil.ebc.com.br", "aosfatos.org", "lupa.uol.com.br")]
+    ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto="A ponte caiu hoje", nucleo="A ponte caiu hoje", janela=2),
+                                AfirmacaoDecisao(texto="A obra custou 2 bilhões", nucleo="A obra custou 2 bilhões")],
+                    itens=itens, texto_usuario="A ponte caiu hoje. A obra custou 2 bilhões.",
+                    data_referencia="2026-10-09", n_lidas=len(itens), n_consultadas=len(itens))
+    d = decidir(ev)
+    assert d.descontos_temporais and d.por_afirmacao[0]["n_votos"] == 0
+    assert d.nivel == "baixa" and d.log_odds == pytest.approx(-5.0)
+    assert d.nivel_sem_desconto == "alta"
+    assert d.log_odds_sem_desconto == pytest.approx(_conj_ref([2.0, -5.0]), abs=1e-3)
+
+
+def test_t7_citacao_com_expressao_proibida_vira_numero_e_o_texto_segue_neutro():
+    """A afirmação do usuário pode trazer 'É falso que X' (expressão proibida no nosso texto): cita-se pelo número."""
+    itens = [_it(f"https://{d}/a", "SUSTENTA", cluster=d, af=0) for d in ("g1.globo.com", "estadao.com.br")]
+    itens += [_it(f"https://{d}/b", "SUSTENTA", cluster=d, af=1)
+              for d in ("bbc.com", "folha.uol.com.br", "agenciabrasil.ebc.com.br", "aosfatos.org", "lupa.uol.com.br")]
+    d = decidir(_ev_afs(itens, ["É falso que a vacina altera o DNA", "A obra custou 2 bilhões"],
+                        pols=["nega", "afirma"], nucleos=["A vacina altera o DNA", "A obra custou 2 bilhões"]))
+    assert d.nivel == "alta" and d.por_afirmacao[0]["L"] == pytest.approx(2.0)
+    j = d.justificativa()
+    assert "a afirmação 1" in j and "é falso" not in j.lower()
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []

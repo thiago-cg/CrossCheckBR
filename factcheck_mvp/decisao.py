@@ -33,9 +33,14 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
           ficam em `descontos_temporais`.
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
     L_a       = Σ_clusters voto  (um cluster = um voto: republicação não soma)
-    L         = L_a da afirmação com maior L positivo se ele passa da faixa média;
-                senão o L_a de maior |L_a|
+    p_texto   = 1 − Π_a (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se QUALQUER parte for)
+    L         = logit(p_texto)          (0 se nenhuma afirmação tem voto)
     p         = σ(L)  (probabilidade de desinformação, só informativa)
+
+Conjunção (D2): só afirmações COM voto (n_votos > 0) entram no produto. Afirmação sem voto
+fica fora (ausência de evidência não é evidência); votos que se anulam (L_a = 0) entram com
+p = 0,5. Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal) usa o mesmo
+critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
 
 Faixas SIMÉTRICAS em torno de 0 (τ = ln 3 ≈ 1,10, ou seja p ≥ 0,75 / p ≤ 0,25):
     L ≥ +τ → alta · L ≤ −τ → baixa · |L| < τ → media
@@ -48,6 +53,8 @@ Consequências: 1 fonte curada sozinha (w=1,0) → média (não satura); 2 clust
 concordes → alta/baixa; 1 selo de checagem aplicável (1,5) → alta/baixa; fontes em
 conflito → média. Sinais `fallback-*` (sem juiz) são ignorados. Ausência de
 evidência não é evidência: nada empurra o nível sem uma fonte com postura.
+Conjunção: uma parte com L ≥ τ e outra com L ≤ −τ dão alta, e a justificativa cita as duas
+partes; a parte verdadeira não apaga a falsa (L ≥ max L_a).
 
 A justificativa, o header e o why são gerados DO MESMO objeto `Decisao`.
 """
@@ -154,6 +161,20 @@ class Decisao:
     def n_clusters(self, sinal: int) -> int:
         return len({(v.afirmacao, v.cluster) for v in self.votos if v.valor * sinal > 0})
 
+    def _partes_em_conflito(self) -> str:
+        """D2: em alta, uma afirmação contestada (L_a ≥ τ) e outra confirmada (L_a ≤ −τ) são
+        citadas, cada uma pelo próprio texto. "" quando não se aplica."""
+        if self.nivel != "alta":
+            return ""
+        contestadas = [(a["L"], i) for i, a in enumerate(self.por_afirmacao) if a["L"] >= TAU]
+        confirmadas = [(a["L"], i) for i, a in enumerate(self.por_afirmacao) if a["L"] <= -TAU]
+        if not contestadas or not confirmadas:
+            return ""
+        i_c = max(contestadas)[1]
+        i_f = min(confirmadas)[1]
+        return (f"Fontes independentes contestam {_citar_afirmacao(self.por_afirmacao[i_c], i_c)}; "
+                f"já {_citar_afirmacao(self.por_afirmacao[i_f], i_f)} é confirmada por fontes.")
+
     def justificativa(self) -> str:
         from .agregador import titulo_propensao
         c = self.contagem
@@ -169,6 +190,9 @@ class Decisao:
                                       for v in self.vereditos_aplicados[:3])
                 partes[-1] += f"; selos de checagem considerados: {selos_txt}"
             partes[-1] += "."
+            conflito = self._partes_em_conflito()
+            if conflito:
+                partes.append(conflito)
             if self.conflitos:
                 partes.append(f"{len(self.conflitos)} fonte(s) com selo e texto em sentidos opostos "
                               "foram desconsideradas.")
@@ -202,6 +226,9 @@ class Decisao:
             base = (f"{self.n_clusters(+1)} fonte(s) independente(s) contestam e {self.n_clusters(-1)} confirmam "
                     f"o que o texto afirma; {c.get('lidas', 0)} página(s) lida(s), "
                     f"{c.get('fora_do_tema', 0)} fora do tema.")
+            conflito = self._partes_em_conflito()  # D2: o bot e a API mostram o why primeiro
+            if conflito:
+                base += " " + conflito
         # E4 Task 6: sufixo curto só quando o desconto mudou o nível (neutro, sobre datas).
         if self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto:
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
@@ -233,6 +260,22 @@ class Decisao:
 
 def _sig(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, x))))
+
+
+_LIMITE_CITACAO = 160
+
+
+def _citar_afirmacao(entrada: Dict[str, Any], idx: int) -> str:
+    """Como a justificativa cita uma afirmação: entre aspas, como o usuário escreveu (com a
+    negação, se houver). Se o texto traz expressão proibida (ex.: "é falso que X"), cita-se pelo
+    número, para o nosso texto continuar passando em `verificar_neutralidade` (RF12)."""
+    from .agregador import EXPRESSOES_PROIBIDAS, _SELO_ATRIBUIDO_RE
+    texto = " ".join((entrada.get("afirmacao") or "").split())
+    if not texto or any(e in texto.lower() for e in EXPRESSOES_PROIBIDAS) or _SELO_ATRIBUIDO_RE.search(texto):
+        return f"a afirmação {idx + 1}"
+    if len(texto) > _LIMITE_CITACAO:
+        texto = texto[:_LIMITE_CITACAO - 1].rstrip() + "…"
+    return f'"{texto}"'
 
 
 def nivel_de(L: float) -> str:
@@ -351,6 +394,31 @@ def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registr
     return L_a
 
 
+def _clusters_com_voto(clusters: Dict[str, List[tuple]]) -> int:
+    """Clusters que votam (soma ≠ 0): o mesmo critério de `_agregar`, sem registrar nada."""
+    return sum(1 for contribs in clusters.values() if sum(v for v, _, _ in contribs) != 0)
+
+
+def _combinar_afirmacoes(valores: List[float]) -> float:
+    """Conjunção entre afirmações (D2): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto).
+
+    `valores` são os L_a só das afirmações COM voto (quem chama filtra: ausência de evidência
+    não entra no produto). Lista vazia → 0. Uma parte só → o próprio L_a, porque σ e logit se
+    cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
+    cancelamento) e p é limitado em [1e-12, 1 − 1e-12] antes do logit.
+    Propriedade: L ≥ max(L_a); duas partes com p≈0,7 cada dão p_texto≈0,91.
+    """
+    if not valores:
+        return 0.0
+    if len(valores) == 1:
+        return valores[0]
+    descrenca = 1.0  # Π(1 − σ(L_a))
+    for L_a in valores:
+        descrenca *= _sig(-L_a)
+    p = min(max(1.0 - descrenca, 1e-12), 1.0 - 1e-12)
+    return math.log(p / (1.0 - p))
+
+
 def _medida_temporal(af: AfirmacaoDecisao, ev: Evidencias, data_pub: Optional[str]):
     """(janela, dias além da janela) da fonte frente ao marcador da AFIRMAÇÃO.
 
@@ -384,7 +452,8 @@ def decidir(ev: Evidencias) -> Decisao:
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
-                              "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO)})
+                              "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
+                              "combinacao": "conjuncao: 1−Π(1−σ(L_a)) sobre afirmações com voto"})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),
@@ -398,6 +467,8 @@ def decidir(ev: Evidencias) -> Decisao:
     # votos por (afirmação, cluster)
     por_af: Dict[int, float] = {}
     por_af_brutos: Dict[int, float] = {}
+    n_votos: Dict[int, int] = {}
+    n_brutos: Dict[int, int] = {}
     for a_idx, af in enumerate(ev.afirmacoes):
         s = -1.0 if af.polaridade == "nega" else 1.0
         clusters: Dict[str, List[tuple]] = {}
@@ -431,17 +502,15 @@ def decidir(ev: Evidencias) -> Decisao:
         L_a_bruto = _agregar(clusters_brutos, a_idx, dec, registrar=False)
         por_af[a_idx] = L_a
         por_af_brutos[a_idx] = L_a_bruto
+        n_votos[a_idx] = sum(1 for v in dec.votos if v.afirmacao == a_idx)
+        n_brutos[a_idx] = _clusters_com_voto(clusters_brutos)
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
-                                  "L": round(L_a, 4), "n_votos": sum(1 for v in dec.votos if v.afirmacao == a_idx)})
-    # combinação entre afirmações: a mais "falsa" se passa da faixa média; senão a de maior |L|
-    L = 0.0
-    if por_af:
-        mx = max(por_af.values())
-        L = mx if mx >= TAU else max(por_af.values(), key=abs)
-    L_sem = 0.0
-    if por_af_brutos:
-        mx_sem = max(por_af_brutos.values())
-        L_sem = mx_sem if mx_sem >= TAU else max(por_af_brutos.values(), key=abs)
+                                  "L": round(L_a, 4), "n_votos": n_votos[a_idx]})
+    # combinação entre afirmações (D2, conjunção): o texto é desinformação se QUALQUER parte for.
+    # "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o mesmo critério sobre
+    # os votos brutos, isto é, o caso sem o desconto temporal.
+    L = _combinar_afirmacoes([por_af[a] for a in por_af if n_votos[a] > 0])
+    L_sem = _combinar_afirmacoes([por_af_brutos[a] for a in por_af_brutos if n_brutos[a] > 0])
     dec.log_odds = round(L, 4)
     dec.log_odds_sem_desconto = round(L_sem, 4)
     dec.nivel_sem_desconto = nivel_de(L_sem)
