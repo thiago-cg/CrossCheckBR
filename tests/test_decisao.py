@@ -357,6 +357,51 @@ def test_e4_medida_usa_a_janela_da_afirmacao_e_nao_a_do_texto():
     assert not decidir(_ev_com_fonte("2026-10-09")).descontos_temporais
 
 
+def test_e4_marco_do_evento_desconta_fonte_de_outro_episodio_e_tem_precedencia():
+    """Task 4b ligada: o marco (data do evento, folga 2) mede a fonte; ele vence a janela da afirmação.
+    Fonte de 2026-09-01: 35 dias além do evento de 2026-10-08 (não 36, que seria pela referência)."""
+    af = AfirmacaoDecisao(texto="O jogo foi dia 8 e o time ganhou", nucleo="time ganhou o jogo",
+                          janela=2, marco=("2026-10-08", 2))
+
+    def _ev_com_fonte(data_pub):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="SUSTENTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub=data_pub)
+        return Evidencias(afirmacoes=[af], itens=[it], texto_usuario=af.texto, data_referencia="2026-10-09")
+
+    d = decidir(_ev_com_fonte("2026-09-01"))
+    assert [(x["janela"], x["dias_alem_da_janela"]) for x in d.descontos_temporais] == [(2, 35)]
+    assert not decidir(_ev_com_fonte("2026-10-08")).descontos_temporais
+
+
+def test_e4_data_explicita_da_afirmacao_nao_desconta_por_hoje(monkeypatch):
+    """Decisão da usuária: "O deputado disse hoje que a ponte caiu em 2019". Fonte de 2019 não é
+    descontada pelo "hoje" do ato de dizer, nem pelo caminho pelo snapshot antigo (sem janela)."""
+    from factcheck_mvp import aplicabilidade
+    t = "O deputado disse hoje que a ponte caiu em 2019"
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2019-06-01")
+    janela = aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09")
+    ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=t, nucleo="ponte caiu", janela=janela)],
+                    itens=[it], texto_usuario=t, data_referencia="2026-10-09")
+    assert not decidir(ev).descontos_temporais
+    # snapshot antigo (janela não calculada): o caminho legado também respeita a regra
+    ev_antigo = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=t, nucleo="ponte caiu")],
+                           itens=[it], texto_usuario=t, data_referencia="2026-10-09")
+    assert not decidir(ev_antigo).descontos_temporais
+    # e "Bolsonaro recebeu alta do hospital hoje" (sem data explícita) continua descontando
+    assert decidir(_ev_hoje([ItemEvidencia(url="https://g1.globo.com/b", cluster="g1", classe="SUSTENTA",
+                                           motor=JUIZ, citacao_verificada=True, curada=True, corpo_lido=True,
+                                           data_pub="2021-07-18")])).descontos_temporais
+
+
+def test_e4_parametros_registram_as_janelas_efetivas_da_config(monkeypatch):
+    from factcheck_mvp import config
+    monkeypatch.setattr(config, "E4_JANELA_HOJE", 5)
+    d = decidir(_ev_hoje([]))
+    assert d.parametros["e4"]["janelas"]["E4_JANELA_HOJE"] == 5
+    assert d.parametros["e4"]["janelas"]["E4_JANELA_SEMANA"] == config.E4_JANELA_SEMANA
+
+
 # ------------------------------------------------------------------ Task 4: janela por afirmação
 def test_e4_decidir_desconto_por_afirmacao_nao_vaza():
     """Só a afirmação com marcador próprio é descontada; a sem marcador (n=2) não,

@@ -658,6 +658,46 @@ def test_gate_nao_barra_checagem_de_frase_sem_marcador_com_hoje_em_outra_frase(a
     assert rel.decisao["descontos_temporais"] == []
 
 
+@pytest.mark.parametrize("data_checagem,descontada", [("2026-09-01", True), ("2026-10-08", False)])
+def test_marco_do_evento_desconta_checagem_de_outro_dia_e_nao_a_do_proprio_dia(
+        amb, monkeypatch, data_checagem, descontada):
+    """Task 4b ponta a ponta: "dia 8" ancora o evento em 2026-10-08 (referência 2026-10-09). Checagem
+    de 2026-09-01 é de outro episódio: reprovada no gate e descontada na decisão. A de 2026-10-08 é do
+    próprio dia do evento: aplicável e sem desconto. (Uma checagem por execução: duas quase iguais se
+    anulam como ruído no índice, ver `Indice.buscar_checagens`.)"""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url = "https://boatos.org/x-flamengo-venceu-clasico"
+    trecho = "É falso que o Flamengo venceu o clássico, segundo a súmula oficial."
+    idx = Indice.de_checagens([
+        {"url": url, "titulo": "Flamengo venceu o clássico", "afirmacao_checada": "O Flamengo venceu o clássico",
+         "selo_original": "Falso", "veredito": "FALSO", "agencia": "boatos-org", "data_pub": data_checagem,
+         "trecho": trecho}]
+        # Distratores p/ o BM25 ter IDF (ver test_gate_barra_checagem_antiga...).
+        + [{"url": f"https://lupa.uol.com.br/z{i}", "titulo": t, "afirmacao_checada": t,
+            "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+           for i, t in enumerate(_DISTRATORES_BM25)])
+    amb[url] = trecho * 50
+    monkeypatch.setattr(afirmacoes, "extrair_afirmacoes", _extrator_fixo([
+        Afirmacao(texto="O jogo foi dia 8 e o Flamengo venceu o clássico", nucleo="O Flamengo venceu o clássico",
+                  polaridade="afirma", consulta="flamengo venceu classico")]))
+    eventos = _eventos_aplicabilidade(monkeypatch)
+    rel = asyncio.run(Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([]),
+                               detector=MockDetector()).executar(
+        EntradaConsulta(tipo="titulo", conteudo="O jogo foi dia 8 e o Flamengo venceu o clássico",
+                        data_referencia="2026-10-09")))
+    da_checagem = [e for e in eventos if e["url"] == url]
+    # Guarda anti-vácuo: a checagem chegou ao gate, com o marco do "dia 8"
+    assert len(da_checagem) == 1 and da_checagem[0]["marco"] == ("2026-10-08", 2)
+    if descontada:
+        assert da_checagem[0]["decisao"] == "inaplicavel" and da_checagem[0]["motivo"] == "data incompatível"
+        assert da_checagem[0]["excedente"] == 35  # 37 dias de 2026-09-01 a 2026-10-08, menos a folga 2
+        assert [(x["url"], x["janela"], x["dias_alem_da_janela"]) for x in rel.decisao["descontos_temporais"]] == [
+            (url, 2, 35)]
+    else:
+        assert da_checagem[0]["decisao"] == "aplicavel" and da_checagem[0]["excedente"] == 0
+        assert rel.decisao["descontos_temporais"] == []
+
+
 class _BertStub(MockDetector):
     """Detector com cara de modelo real (mock=False): credibilidade fixa de 0,8."""
     nome = "bertimbau:stub"

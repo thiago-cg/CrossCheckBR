@@ -99,16 +99,27 @@ def janelas_efetivas() -> dict[str, int]:
     return {variavel: _cfg_janela(variavel, default) for variavel, default in _DEFAULTS_JANELA.items()}
 
 
-def janela_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int) -> int | None:
-    """Janela temporal de UMA afirmação: marcador na própria afirmação; senão, marcador
-    do texto inteiro só quando há 1 afirmação (com 2+, o 'hoje' de uma frase não vaza
-    para a outra)."""
+def janela_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
+                        referencia: str | None = None) -> int | None:
+    """Janela temporal de UMA afirmação: marcador na própria afirmação; senão, marcador do texto
+    inteiro só quando há 1 afirmação (com 2+, o 'hoje' de uma frase não vaza para a outra).
+
+    Data explícita vence o marcador relativo (decisão da usuária, 09/10): se a afirmação fixa o
+    próprio tempo com data que não é a da `referencia` ("O deputado disse hoje que a ponte caiu em
+    2019"), o "hoje" é do ato de dizer, não do fato, e a janela é None (quem mede é o marco). Com 1
+    afirmação, o texto conta também. Ano igual ao da referência NÃO desliga o marcador: "hoje, em
+    2026, ..." ainda fala do dia de hoje; o ano só desliga quando aponta outro tempo. Limitação
+    conhecida: "Hoje, 2026 começa com..." (ano como sujeito de um fato de janeiro) mantém a janela.
+    """
+    datada = _data_explicita_fora(af_texto, referencia)
+    if n_afirmacoes == 1:
+        datada = datada or _data_explicita_fora(texto_usuario, referencia)
+    if datada:
+        return None
     janela = janela_temporal(af_texto)
     if janela is not None:
         return janela
-    if n_afirmacoes == 1:
-        return janela_temporal(texto_usuario)
-    return None
+    return janela_temporal(texto_usuario) if n_afirmacoes == 1 else None
 
 
 def hoje_brt() -> str:
@@ -136,15 +147,7 @@ def dias_excedentes(texto_usuario: str, data_pub: str | None,
     nunca é descontada. None (default) = comportamento anterior, sem data explícita.
     """
     if marco is not None:
-        if not data_pub:
-            return None
-        try:
-            folga = int(marco[1])
-            evento = datetime.strptime(marco[0][:10], "%Y-%m-%d").date()
-            data = datetime.strptime(data_pub[:10], "%Y-%m-%d").date()
-        except (ValueError, TypeError, IndexError, AttributeError):
-            return None
-        return folga, max(0, (evento - data).days - folga)
+        return dias_excedentes_do_marco(marco, data_pub)
     return dias_excedentes_da_janela(janela_temporal(texto_usuario), data_pub, referencia)
 
 
@@ -187,15 +190,17 @@ def e_aplicavel(
     data_pub: str | None,
     referencia: str | None = AGORA,  # type: ignore[assignment]
     janela: object = JANELA_DO_TEXTO,
+    marco: tuple[str, int] | None = None,
 ) -> tuple[bool, str]:
     """Aplica as 5 regras em ordem; o primeiro False vence.
 
     Regra de data (E1, binária): barra se a fonte está além da janela (excedente > 0,
     isto é, relevancia_temporal < 1; sem limiar). Usa as MESMAS entradas da decisão
     (E4): `janela` da afirmação (`janela_da_afirmacao`; None = a afirmação não tem
-    marcador), `referencia` já resolvida (entrada → relógio → None) e `data_pub`
-    normalizada. `referencia=None` (desconhecida) não barra por data. Sem `janela`,
-    mantém o E1 anterior: a janela é a do próprio `texto_usuario`.
+    marcador), `marco` da afirmação (`marco_da_afirmacao`; tem precedência sobre a janela),
+    `referencia` já resolvida (entrada → relógio → None) e `data_pub` normalizada.
+    `referencia=None` (desconhecida) não barra por data. Sem `janela`, mantém o E1 anterior:
+    a janela é a do próprio `texto_usuario`.
     """
     if corpo_lido is False:
         return (False, "corpo não lido")
@@ -206,7 +211,7 @@ def e_aplicavel(
     if direcao(veredito) == 0.0:
         return (False, "sem selo com direção")
     j = janela_temporal(texto_usuario) if janela is JANELA_DO_TEXTO else janela
-    medida = dias_excedentes_da_janela(j, data_pub, referencia)  # type: ignore[arg-type]
+    medida = medida_da_afirmacao(j, marco, data_pub, referencia)  # type: ignore[arg-type]
     if medida is not None and medida[1] > 0:
         return (False, "data incompatível")
     return (True, "aplicável")
@@ -356,24 +361,40 @@ def normalizar_data(valor: str | None, ancora: str | None = None) -> tuple[str, 
 _MARCO_FOLGA_VAR = "E4_JANELA_HOJE"
 
 _MARCO_MESES = "|".join(sorted(_MESES_DATA, key=len, reverse=True))
-# "08/10" ou "08/10/2026" (dia-primeiro, como normalizar_data). Ano com 2 dígitos
-# não suportado. Bordas excluem versão/hora/URL ("v1.08/10", "08/10:00"); ponto
-# final de frase ("em 08/10.") é permitido.
-_MARCO_DD_MM_RE = re.compile(r"(?<![\w/.:])(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?![/.:]\d)(?!\w)")
+# Ano explícito de 4 dígitos (1900-2099) no texto normalizado.
+_ANO_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# Dia/mês com contexto de data ("dia 08/10", "em 08/10", "no 08/10", "desde", "até"), com ou sem
+# ano. Sem contexto, "2/3", "3/1" e "3/4" são frações e placares: não ancoram nada. Bordas
+# excluem versão/hora/URL ("v1.08/10", "08/10:00"); ponto final de frase ("em 08/10.") é permitido.
+_MARCO_DD_MM_CTX_RE = re.compile(
+    r"\b(?:dia|em|no|na|desde|ate)\s+(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?![/.:]\d)(?!\w)")
+# "08/10/2026" sem contexto: com ano, a barra já é data.
+_MARCO_DD_MM_ANO_RE = re.compile(r"(?<![\w/.:])(\d{1,2})/(\d{1,2})/(\d{4})(?![/.:]\d)(?!\w)")
 # "8 de outubro" ou "8 de outubro de 2023".
 _MARCO_DIA_MES_RE = re.compile(r"\b(\d{1,2})\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?\b")
-# "dia 8" ou "dia 8 de outubro (de 2023)"; "dia 8h" é hora, não data.
-_MARCO_DIA_RE = re.compile(r"\bdia\s+(\d{1,2})(?!\s*h\b)(?:\s+de\s+(" + _MARCO_MESES
-                           + r")(?:\s+de\s+(\d{4}))?)?\b")
+# "dia 8" ou "dia 8 de outubro (de 2023)"; "dia 8h" é hora, não data; "dia 8 de 2026" (sem mês) não é data.
+_MARCO_DIA_RE = re.compile(r"\bdia\s+(\d{1,2})(?!\s*h\b)(?!\s+de\s+\d{4}\b)"
+                           r"(?:\s+de\s+(" + _MARCO_MESES + r")(?:\s+de\s+(\d{4}))?)?\b")
+# "de 2 a 8 de outubro" / "de 30 de setembro a 2 de outubro": o INÍCIO do intervalo é o marco
+# (fonte publicada depois do início não é de outro episódio; ver `_sem_intervalos`).
+_MARCO_INTERVALO_RE = re.compile(r"\bde\s+(\d{1,2})(?:\s+de\s+(" + _MARCO_MESES + r"))?\s+a\s+"
+                                 r"(\d{1,2})\s+de\s+(" + _MARCO_MESES + r")\b")
 
 # Data citada (prazo, aniversário, agenda futura...), não data do fato -> não ancora.
 # Conservador de propósito: prefere não descontar a descontar pelo episódio errado.
-_MARCO_GUARDAS = (
-    "prazo", "vence", "venciment", "inscric", "pagament", "pagar", "boleto",
-    "aniversario", "comemor", "parabens", "completa",
-    "previsto", "adiado", "agendado", "proxim", "que vem",
-    "nasceu", "nascido", "nascimento",
-)
+# "vence/vencem" exatos: o prefixo casaria "venceu" (vencer = ganhar), que é o fato, não prazo.
+_MARCO_GUARDAS = tuple(re.compile(r"\b" + g) for g in (
+    r"prazo", r"vence(?:m)?\b", r"venciment", r"inscric", r"pagament", r"pagar", r"boleto",
+    r"aniversario", r"comemor", r"parabens", r"completa",
+    r"previsto", r"prevista", r"adiado", r"agendad", r"marcad", r"proxim", r"que vem\b",
+    r"nasceu", r"nascid", r"nascimento",
+))
+# Verbo no futuro ("será", "vai", "irá"): a data é do que vai acontecer, não do fato.
+_MARCO_FUTURO_RE = re.compile(r"\b(?:sera|serao|vai|vao|ira|irao)\b")
+# Data comemorativa ("Dia 8 de março é o Dia da Mulher", "é o dia da mulher"): não é data do fato.
+# A forma com maiúscula usa o texto original (o normalizado não tem caixa).
+_MARCO_COMEMORATIVA_RE = re.compile(r"\bDia\s+d[aeo]\s+[A-ZÀ-Ý]")
+_MARCO_COMEMORATIVA_NORM_RE = re.compile(r"\b(?:e|eh) o dia d[aeo]\b")
 _MARCO_ATE_DIA_RE = re.compile(r"\bate\s+(o\s+)?dia\b")
 _MARCO_NOTA_RE = re.compile(r"\bnota\s+\d")
 
@@ -407,17 +428,91 @@ def _marco_dia_bare(dia: int, ref: date) -> date | None:
     return None
 
 
+def _ref_date(referencia: str | None) -> date | None:
+    """Referência (YYYY-MM-DD) como date; None se desconhecida ou ilegível; AGORA = hoje BRT."""
+    if referencia is None:
+        return None
+    if referencia is AGORA:
+        referencia = hoje_brt()
+    try:
+        return datetime.strptime(referencia[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _sem_intervalos(texto_n: str) -> str:
+    """'de 2 a 8 de outubro' -> '2 de outubro': o início do intervalo é a data do fato."""
+    return _MARCO_INTERVALO_RE.sub(lambda m: f"{m.group(1)} de {m.group(2) or m.group(4)}", texto_n)
+
+
+def _datas_citadas(texto_n: str, ref: date) -> list[tuple[date, bool]]:
+    """Datas de dia/mês citadas no texto normalizado, como (data, ano_inferido). Sem filtro de
+    contexto, futuro ou distância: quem chama decide. Ano sem mês não é data."""
+    achadas: list[tuple[date, bool]] = []
+
+    def _add(mes: int | None, dia: int, ano: str | None, bare: bool) -> None:
+        if not 1 <= dia <= 31 or (mes is not None and not 1 <= mes <= 12):
+            return
+        if ano is not None:
+            try:
+                achadas.append((date(int(ano), mes or 0, dia), False))
+            except (ValueError, TypeError):
+                pass
+            return
+        if mes is not None:
+            d = _marco_mais_recente(mes, dia, ref)
+        elif bare:
+            d = _marco_dia_bare(dia, ref)
+        else:
+            return
+        if d is not None:
+            achadas.append((d, True))
+
+    for m in _MARCO_DD_MM_CTX_RE.finditer(texto_n):
+        _add(int(m.group(2)), int(m.group(1)), m.group(3), False)
+    for m in _MARCO_DD_MM_ANO_RE.finditer(texto_n):
+        _add(int(m.group(2)), int(m.group(1)), m.group(3), False)
+    for m in _MARCO_DIA_MES_RE.finditer(texto_n):
+        _add(_MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False)
+    for m in _MARCO_DIA_RE.finditer(texto_n):
+        mes_nome = m.group(2)
+        _add(_MESES_DATA.get(mes_nome) if mes_nome else None, int(m.group(1)), m.group(3), True)
+    return achadas
+
+
+def _tem_data_explicita(texto_n: str) -> bool:
+    """O texto normalizado cita alguma data (dia/mês, com ou sem ano) ou um ano explícito?"""
+    return bool(_ANO_RE.search(texto_n)) or any(
+        p.search(texto_n) for p in (_MARCO_DD_MM_CTX_RE, _MARCO_DD_MM_ANO_RE, _MARCO_DIA_MES_RE, _MARCO_DIA_RE))
+
+
+def _data_explicita_fora(texto: str | None, referencia: str | None) -> bool:
+    """O texto fixa o próprio tempo com data explícita que NÃO é a da referência: ano diferente do
+    ano da referência, ou dia/mês (com ou sem ano) que cai em outro dia. Ano igual ao da referência
+    não conta (ver `janela_da_afirmacao`). Sem referência conhecida, qualquer data explícita conta."""
+    texto_n = _sem_intervalos(_normalizar(texto))
+    if not texto_n:
+        return False
+    ref = _ref_date(referencia)
+    if ref is None:
+        return _tem_data_explicita(texto_n)
+    if any(int(a) != ref.year for a in _ANO_RE.findall(texto_n)):
+        return True
+    return any(d != ref for d, _ in _datas_citadas(texto_n, ref))
+
+
 def marco_do_evento(texto: str | None, referencia: str | None = None) -> tuple[str, int] | None:
     """(data_evento ISO, folga dias) da data explícita do EVENTO ou None.
 
-    "dia 8" / "8 de outubro" / "08/10" ancoram o evento em D = ocorrência mais
-    recente ≤ `referencia` (ano inferido); com ano explícito ("8 de outubro de
-    2023", "08/10/2023") D é a data exata. `referencia=None` (desconhecida) ou
-    ilegível -> None; a sentinela `AGORA` resolve para `hoje_brt()`. Não ancora
-    quando a data é citada e não do fato (prazo, aniversário, agenda futura),
-    quando há 2+ datas distintas (ambíguo: não dá para saber qual é do fato) ou
-    quando D > referência (evento futuro: fonte antiga pode ser preparativo, não
-    outro episódio). Pura (sem I/O, sem fallback).
+    "dia 8" / "8 de outubro" / "08/10" (com contexto de data: "dia", "em", "no", "na",
+    "desde", "até", ou com ano) ancoram o evento em D = ocorrência mais recente ≤
+    `referencia`. Com ano explícito ("8 de outubro de 2023") D é a data exata. Ano inferido
+    com D a mais de `E4_MARCO_MAX_DIAS` (60) da referência não ancora: a data citada tende a
+    não ser a do fato. Em "de 2 a 8 de outubro" o início (2 de outubro) é o marco. Não ancora:
+    referência desconhecida (None; `AGORA` = hoje BRT); data citada e não do fato (prazo,
+    aniversário, agenda, comemorativa "Dia 8 de março é o Dia da Mulher"); frações e placares
+    ("2/3", "3/1") sem contexto de data; verbo no futuro ("será", "vai"); 2+ datas distintas
+    (ambíguo); D > referência (evento futuro). Pura (sem I/O, sem fallback).
 
     Folga = `E4_JANELA_HOJE` (default 2 dias). Justificativa linguística: a data
     explícita ("dia 8" dito dia 9) tem a semântica de recência do "ontem" — o
@@ -427,51 +522,63 @@ def marco_do_evento(texto: str | None, referencia: str | None = None) -> tuple[s
     atraso de publicação. Reusar a janela do "hoje" evita knob novo e mantém a
     agressividade do desconto idêntica à do marcador relativo correspondente.
     """
-    if referencia is None:
-        return None
-    if referencia is AGORA:
-        referencia = hoje_brt()
-    try:
-        ref = datetime.strptime(referencia[:10], "%Y-%m-%d").date()
-    except (ValueError, TypeError):
+    ref = _ref_date(referencia)
+    if ref is None:
         return None
     texto_n = _normalizar(texto)
     if not texto_n:
         return None
-    if any(re.search(r"\b" + g + r"\w*", texto_n) for g in _MARCO_GUARDAS):
+    if any(g.search(texto_n) for g in _MARCO_GUARDAS):
         return None
-    if _MARCO_ATE_DIA_RE.search(texto_n) or _MARCO_NOTA_RE.search(texto_n):
+    if (_MARCO_ATE_DIA_RE.search(texto_n) or _MARCO_NOTA_RE.search(texto_n)
+            or _MARCO_FUTURO_RE.search(texto_n) or _MARCO_COMEMORATIVA_NORM_RE.search(texto_n)
+            or _MARCO_COMEMORATIVA_RE.search(texto or "")):
         return None
-
-    datas: set[date] = set()
-
-    def _add(mes: int | None, dia: int, ano: str | None, bare: bool) -> None:
-        if not 1 <= dia <= 31 or (mes is not None and not 1 <= mes <= 12):
-            return
-        if ano is not None:
-            try:
-                d = date(int(ano), mes or 0, dia)
-            except (ValueError, TypeError):
-                return
-        elif mes is not None:
-            d = _marco_mais_recente(mes, dia, ref)
-        elif bare:
-            d = _marco_dia_bare(dia, ref)
-        else:
-            return
-        if d is not None and d <= ref:
-            datas.add(d)
-
-    for m in _MARCO_DD_MM_RE.finditer(texto_n):
-        _add(int(m.group(2)), int(m.group(1)), m.group(3), False)
-    for m in _MARCO_DIA_MES_RE.finditer(texto_n):
-        _add(_MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False)
-    for m in _MARCO_DIA_RE.finditer(texto_n):
-        mes_nome, ano = m.group(2), m.group(3)
-        if mes_nome is None and ano is not None:
-            continue  # "dia 8 de 2026" (sem mês): ignora, conservador
-        _add(_MESES_DATA.get(mes_nome) if mes_nome else None, int(m.group(1)), ano, True)
-
+    achadas = _datas_citadas(_sem_intervalos(texto_n), ref)
+    datas = {d for d, _ in achadas}
     if len(datas) != 1:
+        return None  # nenhuma data, ou 2+ datas distintas (não dá para saber qual é a do fato)
+    d = datas.pop()
+    if d > ref:
+        return None  # evento futuro: fonte antiga pode ser preparativo, não outro episódio
+    so_ano_inferido = not any(not inferido for _, inferido in achadas)
+    if so_ano_inferido and (ref - d).days > _cfg_janela("E4_MARCO_MAX_DIAS", 60):
+        return None  # ano inferido de uma ocorrência distante: a data citada não é a do fato
+    return d.isoformat(), _cfg_janela(_MARCO_FOLGA_VAR, 2)
+
+
+def marco_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
+                       referencia: str | None = None) -> tuple[str, int] | None:
+    """Marco de UMA afirmação, com a mesma regra da janela: o da própria afirmação; senão, o do
+    texto inteiro só quando há 1 afirmação e nenhuma das duas fixa outro tempo por ano ou data
+    (com 2+ afirmações, a data de uma frase não ancora a outra)."""
+    marco = marco_do_evento(af_texto, referencia)
+    if marco is not None or n_afirmacoes != 1:
+        return marco
+    if _tem_data_explicita(_sem_intervalos(_normalizar(af_texto))) or _ANO_RE.search(_normalizar(texto_usuario)):
         return None
-    return sorted(datas)[0].isoformat(), _cfg_janela(_MARCO_FOLGA_VAR, 2)
+    return marco_do_evento(texto_usuario, referencia)
+
+
+def dias_excedentes_do_marco(marco: tuple[str, int] | None,
+                             data_pub: str | None) -> tuple[int, int] | None:
+    """(folga, dias além do evento) para um marco (D, folga): `max(0, (D − folga) − data_pub)`.
+    Fonte publicada a partir de D − folga nunca é descontada. None sem marco ou data ilegível."""
+    if marco is None or not data_pub:
+        return None
+    try:
+        folga = int(marco[1])
+        evento = datetime.strptime(marco[0][:10], "%Y-%m-%d").date()
+        data = datetime.strptime(data_pub[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError, IndexError, AttributeError):
+        return None
+    return folga, max(0, (evento - data).days - folga)
+
+
+def medida_da_afirmacao(janela: int | None, marco: tuple[str, int] | None,
+                        data_pub: str | None, referencia: str | None) -> tuple[int, int] | None:
+    """(janela ou folga, dias além) da fonte frente à AFIRMAÇÃO. O marco (data explícita do evento)
+    tem precedência sobre a janela relativa. É a medida única da decisão e do gate E1."""
+    if marco is not None:
+        return dias_excedentes_do_marco(marco, data_pub)
+    return dias_excedentes_da_janela(janela, data_pub, referencia)

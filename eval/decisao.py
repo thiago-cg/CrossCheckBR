@@ -20,7 +20,7 @@
 
 Formato do snapshot (1 linha por caso):
   {id, rotulo, esperado, aceitavel, run_id,
-   evidencias: {afirmacoes: [{texto, nucleo, polaridade}],
+   evidencias: {afirmacoes: [{texto, nucleo, polaridade[, janela, marco]}],
                 itens: [{url, afirmacao, cluster, classe, motor,
                          citacao_verificada, curada, corpo_lido,
                          veredito, origem_veredito, veiculo[, prob_fake_pagina]}],
@@ -48,6 +48,8 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         nucleo=a.get("nucleo", ""),
         polaridade=a.get("polaridade", "afirma"),
         janela=a.get("janela"),
+        # Task 4b: marco (data explícita do fato) é opcional; snapshots antigos não têm
+        marco=tuple(a["marco"]) if a.get("marco") else None,
     ) for a in (d.get("afirmacoes") or [])]
     itens = [decisao.ItemEvidencia(
         url=i.get("url", ""),
@@ -108,6 +110,7 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
             ev.texto_usuario = ""
             for a in ev.afirmacoes:
                 a.janela = None
+                a.marco = None
         d = decisao.decidir(ev)
         nivel = d.nivel
         ok = nivel in esp
@@ -120,7 +123,7 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
              "n_llm": 0, "n_fallbacks": 0, "fallbacks_por_onde": {},
              "descartes_por_motivo": {}, "descoberta": "snapshot", "dur_ms": 0,
              "serpapi_live": 0, "http_miss": 0,
-             "e4": {"marcador": any(a.janela is not None for a in ev.afirmacoes)
+             "e4": {"marcador": any(a.janela is not None or a.marco is not None for a in ev.afirmacoes)
                     or aplicabilidade.janela_temporal(ev.texto_usuario) is not None,
                     "desconto": bool(d.descontos_temporais),
                     # só conta com desconto real: sem evidência o contrafactual dá
@@ -179,7 +182,7 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--snapshot", help="snapshot JSONL para avaliar")
     ap.add_argument("--sem-e4", action="store_true",
-                    help="zera texto_usuario/janela antes do decidir (perna controle do A/B, sem flag no produto)")
+                    help="zera texto_usuario/janela/marco antes do decidir (perna controle do A/B, sem flag no produto)")
     ap.add_argument("--gerar-snapshot", action="store_true", help="gera snapshot a partir de validos.json")
     ap.add_argument("--resultado", help="diretório eval/resultados/<ts> p/ --gerar-snapshot a partir de traces")
     ap.add_argument("--validos", default="docs/review/review2/sondas/validos.json")

@@ -108,6 +108,7 @@ class AfirmacaoDecisao:
     nucleo: str = ""
     polaridade: str = "afirma"
     janela: Optional[int] = None  # E4: janela temporal da afirmação (janela_da_afirmacao); None = sem marcador
+    marco: Optional[tuple] = None  # E4 (Task 4b): (data_evento ISO, folga) da data explícita do fato; tem precedência
 
 
 @dataclass
@@ -439,17 +440,23 @@ def _combinar_afirmacoes(valores: List[float]) -> float:
 def _medida_temporal(af: AfirmacaoDecisao, ev: Evidencias, data_pub: Optional[str]):
     """(janela, dias além da janela) da fonte frente ao marcador da AFIRMAÇÃO.
 
-    Usa `af.janela` (montada pelo pipeline via `aplicabilidade.janela_da_afirmacao`): os dias
-    desde a publicação até a referência são medidos diretamente e o excedente é
-    `max(0, dias − janela)`. Snapshot antigo (janela ausente, 1 afirmação: testes e snapshots
-    pré-campo) cai para o marcador do texto inteiro; com 2+ afirmações e janela ausente não
-    mede (o "hoje" de uma frase não desconta a outra).
+    Com `af.marco` (data explícita do fato, Task 4b) o marco tem precedência sobre a janela.
+    Senão usa `af.janela` (montada pelo pipeline via `aplicabilidade.janela_da_afirmacao`): os
+    dias desde a publicação até a referência são medidos diretamente e o excedente é
+    `max(0, dias − janela)`. Snapshot antigo (janela não calculada, 1 afirmação: testes e
+    snapshots pré-campo) usa só o marcador do texto, como antes; com 2+ afirmações e janela
+    ausente não mede (o "hoje" de uma frase não desconta a outra). A janela do snapshot antigo
+    NÃO olha a própria afirmação: `--sem-e4` zera o texto e o desconto some por construção.
     """
-    if af.janela is None and len(ev.afirmacoes) != 1:
-        return None
+    if af.marco is not None:
+        return aplicabilidade.dias_excedentes_do_marco(af.marco, data_pub)
     if af.janela is None:
-        return aplicabilidade.dias_excedentes(ev.texto_usuario, data_pub, ev.data_referencia)
-    return aplicabilidade.dias_excedentes_da_janela(af.janela, data_pub, ev.data_referencia)
+        if len(ev.afirmacoes) != 1:
+            return None
+        janela = aplicabilidade.janela_da_afirmacao("", ev.texto_usuario, 1, ev.data_referencia)
+    else:
+        janela = af.janela
+    return aplicabilidade.dias_excedentes_da_janela(janela, data_pub, ev.data_referencia)
 
 
 def decidir(ev: Evidencias) -> Decisao:

@@ -554,7 +554,8 @@ class Pipeline:
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(
                 texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
-                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs)))
+                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs), referencia=ref),
+                marco=aplicabilidade.marco_da_afirmacao(a.texto, texto_base, len(afs), referencia=ref))
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
             n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
@@ -577,8 +578,8 @@ class Pipeline:
         """Fase base (E1): seleciona/lê/julga SÓ a base e testa aplicabilidade.
 
         Para cada par (peça, afirmação) chama `aplicabilidade.e_aplicavel` com as mesmas
-        entradas da decisão (E4): janela da afirmação (`janela_da_afirmacao` sobre
-        `texto_usuario` e nº de afirmações), `referencia` já resolvida em `_executar`
+        entradas da decisão (E4): janela e marco da afirmação (`janela_da_afirmacao` e
+        `marco_da_afirmacao` sobre `texto_usuario` e nº de afirmações), `referencia` já resolvida em `_executar`
         (a mesma de `Evidencias.data_referencia`) e `data_pub` normalizada. Emite
         `telemetria.evento("fonte", estagio="aplicabilidade", decisao=..., motivo=...,
         janela=..., excedente=..., referencia=...)` por decisão. O gate (pular a web) é
@@ -596,21 +597,24 @@ class Pipeline:
         if not selecionados:
             return {}, False
         julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
-        janelas = [aplicabilidade.janela_da_afirmacao(a.texto, texto_usuario, len(afs)) for a in afs]
+        janelas = [aplicabilidade.janela_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
+                   for a in afs]
+        marcos = [aplicabilidade.marco_da_afirmacao(a.texto, texto_usuario, len(afs), referencia=referencia)
+                  for a in afs]
         houve = False
         for (pi, ai), r in julg.items():
             p = pecas_base[pi]
-            janela = janelas[ai]
+            janela, marco = janelas[ai], marcos[ai]
             aplicavel, motivo = aplicabilidade.e_aplicavel(
                 r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
                 p.get("veredito"), texto_usuario, p.get("data_pub"),
-                referencia=referencia, janela=janela)
-            medida = aplicabilidade.dias_excedentes_da_janela(janela, p.get("data_pub"), referencia)
+                referencia=referencia, janela=janela, marco=marco)
+            medida = aplicabilidade.medida_da_afirmacao(janela, marco, p.get("data_pub"), referencia)
             telemetria.evento("fonte", url=p.get("url"), estagio="aplicabilidade",
                               decisao="aplicavel" if aplicavel else "inaplicavel",
                               motivo=motivo, afirmacao=ai, classe=r.get("classe"),
                               corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"),
-                              janela=janela, excedente=medida[1] if medida else None,
+                              janela=janela, marco=marco, excedente=medida[1] if medida else None,
                               referencia=referencia)
             if aplicavel:
                 houve = True
