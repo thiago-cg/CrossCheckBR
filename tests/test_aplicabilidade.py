@@ -70,6 +70,90 @@ def test_normalizar_data_desconhecida_vira_none(valor):
 def test_janela_marcadores(texto, janela):
     assert aplicabilidade.janela_temporal(texto) == janela
 
+@pytest.mark.parametrize("texto,janela", [
+    # falsos positivos excluídos: "há pouco mais de N…" é quantidade, e "nos dias de hoje" é
+    # a mesma classe de "hoje em dia" (não marca o momento do fato)
+    ("Há pouco mais de dez anos o país mudou", None),
+    ("Nos dias de hoje ninguém lê jornal impresso", None),
+    # lacunas da mesma razão linguística das já existentes (semana / fim de semana / mês)
+    ("Neste final de semana houve jogo", 8),
+    ("Este domingo houve apagão em SP", 8),
+    ("Esta segunda-feira o STF decidiu", 8),
+    ("Esta semana o governo anunciou o pacote", 8),
+    ("Nessa segunda o presidente viajou", 8),
+    ("Nesse domingo houve apagão", 8),
+    ("Na última semana o dólar caiu", 15),   # = "semana passada": mesmo período (semana anterior)
+    ("Agora, em outubro, a inflação subiu", 32),
+    ("Agora em outubro a inflação subiu", 32),
+    ("Nesse mês houve queda da renda", 32),
+    # "segunda" ordinal não é dia da semana
+    ("Esta segunda parte do documentário é ruim", None),
+])
+def test_janela_marcadores_exclusoes_e_lacunas(texto, janela):
+    assert aplicabilidade.janela_temporal(texto) == janela
+
+
+def test_config_janela_invalida_cai_no_default_e_avisa(monkeypatch):
+    from factcheck_mvp import config
+    for bruto in ("0", "-3", "abc"):
+        monkeypatch.setenv("X_TESTE_JANELA_E4", bruto)
+        avisos = []
+        assert config._janela_positiva("X_TESTE_JANELA_E4", 2, avisos=avisos) == 2
+        assert len(avisos) == 1 and "X_TESTE_JANELA_E4" in avisos[0]
+    monkeypatch.setenv("X_TESTE_JANELA_E4", "5")
+    avisos = []
+    assert config._janela_positiva("X_TESTE_JANELA_E4", 2, avisos=avisos) == 5 and not avisos
+
+
+def test_janelas_efetivas_vem_da_config(monkeypatch):
+    from factcheck_mvp import config
+    monkeypatch.setattr(config, "E4_JANELA_SEMANA", 11)
+    efetivas = aplicabilidade.janelas_efetivas()
+    assert efetivas["E4_JANELA_SEMANA"] == 11 and efetivas["E4_JANELA_HOJE"] == config.E4_JANELA_HOJE
+    assert aplicabilidade.janela_temporal("Nesta semana houve chuva") == 11
+
+
+# --- Item E4 (decisão da usuária, 09/10): data explícita vence o marcador relativo ---
+def test_data_explicita_da_afirmacao_vence_o_hoje_do_ato_de_dizer():
+    """"O deputado disse hoje que a ponte caiu em 2019": o "hoje" é do ato de dizer. Sem janela."""
+    t = "O deputado disse hoje que a ponte caiu em 2019"
+    assert aplicabilidade.janela_temporal(t) == 2  # o marcador existe; a regra é que não se aplica
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") is None
+    # frase com o ano na afirmação e o "hoje" no texto inteiro (2 frases): nenhuma herda o "hoje"
+    texto = "O deputado disse hoje que a ponte caiu. A ponte foi inaugurada em 2019."
+    assert aplicabilidade.janela_da_afirmacao("A ponte foi inaugurada em 2019", texto, 2, "2026-10-09") is None
+
+
+def test_marcador_sem_data_explicita_continua_valendo():
+    assert aplicabilidade.janela_da_afirmacao("Bolsonaro recebeu alta do hospital hoje",
+                                              "Bolsonaro recebeu alta do hospital hoje", 1, "2026-10-09") == 2
+
+
+def test_ano_igual_ao_da_referencia_nao_desliga_o_marcador():
+    """Decisão documentada: "hoje, em 2026, ..." (ano = ano da referência) segue sendo o fato de hoje.
+    Só ano diferente da referência aponta outro tempo e desliga o marcador."""
+    assert aplicabilidade.janela_da_afirmacao("Hoje, em 2026, o ministro caiu",
+                                              "Hoje, em 2026, o ministro caiu", 1, "2026-10-09") == 2
+    assert aplicabilidade.janela_da_afirmacao("Hoje, em 2025, o ministro caiu",
+                                              "Hoje, em 2025, o ministro caiu", 1, "2026-10-09") is None
+
+
+def test_data_completa_igual_a_referencia_mantem_e_diferente_desliga():
+    assert aplicabilidade.janela_da_afirmacao("Hoje, 09/10/2026, o ministro caiu",
+                                              "Hoje, 09/10/2026, o ministro caiu", 1, "2026-10-09") == 2
+    # dia 8 (outro dia) é data explícita: o "hoje" não descreve o fato; o marco (dia 8) mede
+    assert aplicabilidade.janela_da_afirmacao("Hoje, dia 8, o time ganhou",
+                                              "Hoje, dia 8, o time ganhou", 1, "2026-10-09") is None
+    assert aplicabilidade.marco_da_afirmacao("Hoje, dia 8, o time ganhou",
+                                             "Hoje, dia 8, o time ganhou", 1, "2026-10-09") == ("2026-10-08", 2)
+
+
+def test_data_explicita_sem_referencia_conhecida_tambem_desliga():
+    """Sem referência não dá para confirmar que a data coincide com o "hoje": conta como explícita."""
+    assert aplicabilidade.janela_da_afirmacao("O deputado disse hoje que a ponte caiu em 2019",
+                                              "O deputado disse hoje que a ponte caiu em 2019", 1) is None
+
+
 def test_janela_por_afirmacao_nao_vaza_para_outra_frase():
     t = "O deputado disse hoje que a ponte caiu em 2019. A obra custou 2 bilhões."
     assert aplicabilidade.janela_da_afirmacao("A obra custou 2 bilhões", t, 2) is None
@@ -112,6 +196,46 @@ def test_marco_do_evento_citada_ambigua_ou_futura_nao_ancora():
     assert aplicabilidade.marco_do_evento("Café cura câncer", "2026-10-09") is None
     assert aplicabilidade.marco_do_evento("Bolsonaro recebeu alta do hospital hoje", "2026-10-09") is None
     assert aplicabilidade.marco_do_evento("O jogo foi dia 8", None) is None
+
+
+@pytest.mark.parametrize("texto", [
+    "2/3 dos eleitores aprovam o projeto",          # fração (N/M seguido de "dos")
+    "A taxa de 3/4 do PIB caiu",                     # fração sem contexto de data
+    "O placar foi 3/1 para o time",                  # placar, sem contexto de data
+    "A eleição será no dia 25 de outubro",           # agendamento: verbo no futuro
+    "A votação será no dia 20",                      # agendamento
+    "Dia 8 de março é o Dia da Mulher",              # data comemorativa, não data do fato
+    "O jogo foi dia 8 de 2026",                      # dia com ano e sem mês: não é data
+])
+def test_marco_do_evento_rejeita_fracoes_agendamento_e_comemorativa(texto):
+    assert aplicabilidade.marco_do_evento(texto, "2026-10-09") is None
+
+
+def test_marco_do_evento_intervalo_usa_o_inicio():
+    """'de 2 a 8 de outubro': o início do intervalo é o marco. Fonte posterior ao início não é
+    outro episódio (fica sem desconto); só fonte bem anterior ao início é descontada."""
+    assert aplicabilidade.marco_do_evento("O evento foi de 2 a 8 de outubro", "2026-10-09") == ("2026-10-02", 2)
+    assert aplicabilidade.marco_do_evento("A feira foi de 30 de setembro a 2 de outubro", "2026-10-09") == (
+        "2026-09-30", 2)
+
+
+def test_marco_do_evento_ano_inferido_limitado_a_60_dias():
+    """Ano inferido com ocorrência a mais de 60 dias da referência não é confiável: não ancora.
+    Ano explícito vale qualquer que seja a distância."""
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-10-09") is None
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março de 2026", "2026-10-09") == ("2026-03-08", 2)
+
+
+def test_e_aplicavel_com_marco_barra_fonte_de_outro_episodio():
+    """O gate usa o mesmo marco da decisão (Task 5 + 4b): fonte de 2026-09-01 está 35 dias além do
+    evento de 2026-10-08 (folga 2); fonte do próprio dia do evento é aplicável."""
+    marco = ("2026-10-08", 2)
+    texto = "O jogo foi dia 8 e o time ganhou"
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", texto, "2026-09-01",
+                                      "2026-10-09", janela=None, marco=marco) == (False, "data incompatível")
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", texto, "2026-10-08",
+                                      "2026-10-09", janela=None, marco=marco) == (True, "aplicável")
+    assert aplicabilidade.medida_da_afirmacao(None, marco, "2026-09-01", "2026-10-09") == (2, 35)
 
 
 def test_dias_excedentes_sem_marco_mantem_comportamento():

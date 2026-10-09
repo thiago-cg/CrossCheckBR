@@ -126,13 +126,39 @@ API_RATE_LIMIT_PER_MIN = _int("API_RATE_LIMIT_PER_MIN", 30)
 DISCOVERY_MAX_SITES = _int("DISCOVERY_MAX_SITES", 2)
 DISCOVERY_TIMEOUT_S = _int("DISCOVERY_TIMEOUT_S", 8)
 DISCOVERY_MAX_BYTES = _int("DISCOVERY_MAX_BYTES", 5_000_000)
+# Avisos de configuração inválida (valor ≤ 0 ou não inteiro → default). O pipeline grava cada
+# aviso como fallback("config") no trace da consulta, em vez de falhar o bot por um env ruim.
+AVISOS_CONFIG: list = []
+
+
+def _janela_positiva(name: str, default: int, avisos: list | None = None) -> int:
+    """Inteiro > 0 (dias) lido do ambiente. Vazio → default em silêncio; inválido → default + aviso."""
+    bruto = os.getenv(name, "")
+    if not bruto.strip():
+        return default
+    try:
+        valor = int(bruto)
+    except (TypeError, ValueError):
+        valor = 0
+    if valor <= 0:
+        (AVISOS_CONFIG if avisos is None else avisos).append(
+            f"{name}={bruto!r} inválido (esperado inteiro > 0); usando {default}")
+        return default
+    return valor
+
+
 # E4 relevância temporal: janelas (dias) por marcador; lidas em aplicabilidade.janela_temporal.
-E4_JANELA_HOJE = _int("E4_JANELA_HOJE", 2)
-E4_JANELA_ONTEM = _int("E4_JANELA_ONTEM", 3)
-E4_JANELA_SEMANA = _int("E4_JANELA_SEMANA", 8)
-E4_JANELA_ANTEONTEM = _int("E4_JANELA_ANTEONTEM", 4)
-E4_JANELA_SEMANA_PASSADA = _int("E4_JANELA_SEMANA_PASSADA", 15)
-E4_JANELA_MES = _int("E4_JANELA_MES", 32)
+E4_JANELA_HOJE = _janela_positiva("E4_JANELA_HOJE", 2)
+E4_JANELA_ONTEM = _janela_positiva("E4_JANELA_ONTEM", 3)
+E4_JANELA_SEMANA = _janela_positiva("E4_JANELA_SEMANA", 8)
+E4_JANELA_ANTEONTEM = _janela_positiva("E4_JANELA_ANTEONTEM", 4)
+E4_JANELA_SEMANA_PASSADA = _janela_positiva("E4_JANELA_SEMANA_PASSADA", 15)
+E4_JANELA_MES = _janela_positiva("E4_JANELA_MES", 32)
+# Data sem ano ("dia 8", "8 de março") só ancora o evento se a ocorrência mais recente estiver a até
+# este número de dias da referência (aplicabilidade.marco_do_evento). Regra geral: texto de checagem
+# fala de fato recente; data sem ano a mais de ~2 meses para trás tende a ser outra data (aniversário,
+# data histórica) e a inferência do ano erra. 60 dias ≈ o dobro da janela de mês (E4_JANELA_MES = 32).
+E4_MARCO_MAX_DIAS = _janela_positiva("E4_MARCO_MAX_DIAS", 60)
 # Cascata de extração: ReaderLM-v2 como penúltimo nível (desligado por padrão; servidor próprio)
 EXTRACAO_READERLM = _get("EXTRACAO_READERLM", "0")
 READERLM_BASE_URL = _get("READERLM_BASE_URL", "http://127.0.0.1:8889/v1")

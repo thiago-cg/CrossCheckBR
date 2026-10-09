@@ -339,6 +339,132 @@ def test_e4_contrafactual_nunca_menor_em_modulo(monkeypatch):
     assert abs(d.log_odds) <= abs(d.log_odds_sem_desconto)
 
 
+# ------------------------------------------------------------------ E4 (review): reancoragem da medida
+def test_e4_medida_usa_a_janela_da_afirmacao_e_nao_a_do_texto():
+    """Review: o texto diz 'nesta semana' (8) e a afirmação diz 'hoje' (2). Fonte de 2026-10-04 está
+    5 dias antes da referência: 3 dias além de 'hoje' (e não 6); fonte do mesmo dia não é descontada."""
+    texto = "Nesta semana o ministro caiu."
+    af = AfirmacaoDecisao(texto="Hoje o ministro caiu", nucleo="ministro caiu", janela=2)
+
+    def _ev_com_fonte(data_pub):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub=data_pub)
+        return Evidencias(afirmacoes=[af], itens=[it], texto_usuario=texto, data_referencia="2026-10-09")
+
+    d = decidir(_ev_com_fonte("2026-10-04"))
+    assert len(d.descontos_temporais) == 1
+    assert d.descontos_temporais[0]["janela"] == 2 and d.descontos_temporais[0]["dias_alem_da_janela"] == 3
+    assert not decidir(_ev_com_fonte("2026-10-09")).descontos_temporais
+
+
+def test_e4_marco_do_evento_desconta_fonte_de_outro_episodio_e_tem_precedencia():
+    """Task 4b ligada: o marco (data do evento, folga 2) mede a fonte; ele vence a janela da afirmação.
+    Fonte de 2026-09-01: 35 dias além do evento de 2026-10-08 (não 36, que seria pela referência)."""
+    af = AfirmacaoDecisao(texto="O jogo foi dia 8 e o time ganhou", nucleo="time ganhou o jogo",
+                          janela=2, marco=("2026-10-08", 2))
+
+    def _ev_com_fonte(data_pub):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="SUSTENTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub=data_pub)
+        return Evidencias(afirmacoes=[af], itens=[it], texto_usuario=af.texto, data_referencia="2026-10-09")
+
+    d = decidir(_ev_com_fonte("2026-09-01"))
+    assert [(x["janela"], x["dias_alem_da_janela"]) for x in d.descontos_temporais] == [(2, 35)]
+    assert not decidir(_ev_com_fonte("2026-10-08")).descontos_temporais
+
+
+def test_e4_data_explicita_da_afirmacao_nao_desconta_por_hoje(monkeypatch):
+    """Decisão da usuária: "O deputado disse hoje que a ponte caiu em 2019". Fonte de 2019 não é
+    descontada pelo "hoje" do ato de dizer, nem pelo caminho pelo snapshot antigo (sem janela)."""
+    from factcheck_mvp import aplicabilidade
+    t = "O deputado disse hoje que a ponte caiu em 2019"
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2019-06-01")
+    janela = aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09")
+    ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=t, nucleo="ponte caiu", janela=janela)],
+                    itens=[it], texto_usuario=t, data_referencia="2026-10-09")
+    assert not decidir(ev).descontos_temporais
+    # snapshot antigo (janela não calculada): o caminho legado também respeita a regra
+    ev_antigo = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=t, nucleo="ponte caiu")],
+                           itens=[it], texto_usuario=t, data_referencia="2026-10-09")
+    assert not decidir(ev_antigo).descontos_temporais
+    # e "Bolsonaro recebeu alta do hospital hoje" (sem data explícita) continua descontando
+    assert decidir(_ev_hoje([ItemEvidencia(url="https://g1.globo.com/b", cluster="g1", classe="SUSTENTA",
+                                           motor=JUIZ, citacao_verificada=True, curada=True, corpo_lido=True,
+                                           data_pub="2021-07-18")])).descontos_temporais
+
+
+# ------------------------------------------------------------------ E4 (item 5): guarda do sinal
+# Decisão da usuária (09/10, após review): E4 só remove informação de fonte de outro episódio. O nível
+# pode ficar mais extremo quando a fonte antiga de sinal oposto perde peso, desde que haja voto NÃO
+# descontado (fonte do período) na direção do resultado; nunca sustentado só por fonte descontada.
+_RECENTE, _ANTIGA = "2026-10-08", "2021-07-18"  # "ontem" e 2021 em relação a 2026-10-09
+
+
+def _it_e4(url, cluster, classe, data, veredito=None):
+    return ItemEvidencia(url=url, cluster=cluster, classe=classe, motor=JUIZ, citacao_verificada=True,
+                         curada=True, corpo_lido=True, data_pub=data, veredito=veredito,
+                         origem_veredito="indice" if veredito else None)
+
+
+def _voto_nao_descontado_na_direcao(d):
+    descontadas = {x["url"] for x in d.descontos_temporais}
+    sinal = 1 if d.log_odds > 0 else -1
+    return any(v.direcao == sinal and any(u not in descontadas for u in v.urls) for v in d.votos)
+
+
+def test_e4_guarda_sinais_opostos_em_clusters_distintos(monkeypatch):
+    """Caso A: g1 SUSTENTA de 2021 (perde peso) + bbc e estadão REFUTAM de ontem. O nível sobe de
+    media para alta, e isso vem de fontes do período (voto não descontado na direção de L)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4("https://g1.globo.com/a", "g1", "SUSTENTA", _ANTIGA),
+             _it_e4("https://bbc.com/a", "bbc", "REFUTA", _RECENTE),
+             _it_e4("https://estadao.com.br/a", "estadao", "REFUTA", _RECENTE)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel_sem_desconto == "media" and d.nivel == "alta"
+    assert _voto_nao_descontado_na_direcao(d)
+
+
+def test_e4_guarda_sinais_opostos_no_mesmo_cluster(monkeypatch):
+    """Caso B: a mesma mistura (g1 SUSTENTA de 2021 + bbc REFUTA de ontem) no MESMO cluster. O voto do
+    cluster passa a ser o da fonte do período (+1,0), que é não descontado: a magnitude sobe na direção dele."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4("https://g1.globo.com/a", "x", "SUSTENTA", _ANTIGA),
+             _it_e4("https://bbc.com/a", "x", "REFUTA", _RECENTE)]
+    d = decidir(_ev_hoje(itens))
+    assert d.log_odds > 0 and abs(d.log_odds) > abs(d.log_odds_sem_desconto)
+    assert _voto_nao_descontado_na_direcao(d)
+
+
+@pytest.mark.parametrize("sinais", [("SUSTENTA", "REFUTA", "REFUTA"), ("SUSTENTA", "SUSTENTA", "SUSTENTA")])
+def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_nem_baixa(monkeypatch, sinais):
+    """Só fontes de outro episódio (3 clusters, r = 0,05): nenhum nível extremo, nem com sinais mistos."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4(f"https://{dom}/a", dom, classe, _ANTIGA)
+             for dom, classe in zip(("g1.globo.com", "estadao.com.br", "bbc.com"), sinais)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "media" and d.travas["data_incompativel"]
+
+
+@pytest.mark.xfail(strict=True, reason="contraexemplo à guarda, decisão pendente da usuária: fontes "
+                   "descontadas independentes podem somar até τ (14 posturas ou 7 selos FALSO do índice, "
+                   "a ~38 dias da janela, r=0,05) e virar alta sem nenhum voto do período")
+@pytest.mark.parametrize("veredito,n", [(None, 14), ("FALSO", 7)])
+def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_com_muitas_fontes(monkeypatch, veredito, n):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA, veredito=veredito) for i in range(n)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "media"
+
+
+def test_e4_parametros_registram_as_janelas_efetivas_da_config(monkeypatch):
+    from factcheck_mvp import config
+    monkeypatch.setattr(config, "E4_JANELA_HOJE", 5)
+    d = decidir(_ev_hoje([]))
+    assert d.parametros["e4"]["janelas"]["E4_JANELA_HOJE"] == 5
+    assert d.parametros["e4"]["janelas"]["E4_JANELA_SEMANA"] == config.E4_JANELA_SEMANA
+
+
 # ------------------------------------------------------------------ Task 4: janela por afirmação
 def test_e4_decidir_desconto_por_afirmacao_nao_vaza():
     """Só a afirmação com marcador próprio é descontada; a sem marcador (n=2) não,
