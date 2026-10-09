@@ -586,6 +586,20 @@ def test_relativa_em_anos_e_meses_usa_o_fim_do_intervalo(valor, esperado):
 
 
 # --- E4 revisão (M-8): motivo do fallback com âncora: relativa fora do intervalo não é "sem âncora" ---
+def test_texto_longo_com_muitas_datas_responde_em_menos_de_300_ms():
+    """Desempenho (E4 revisão): 20.000 caracteres com milhares de datas, recorrências e comemorativas
+    (antes do ajuste, varrer o texto a cada data levava vários segundos). Melhor de 3 execuções."""
+    import time
+    texto = ("dia 5 e 8 de outubro, Dia das Mães, 2/3 dos casos, todo dia 10; hoje, ontem. " * 400)[:20000]
+    melhor = float("inf")
+    for _ in range(3):
+        t0 = time.perf_counter()
+        aplicabilidade.marcas_da_afirmacao(texto, texto, 1, "2026-10-09")
+        aplicabilidade.marco_do_evento(texto, "2026-10-09")
+        melhor = min(melhor, time.perf_counter() - t0)
+    assert melhor < 0.300
+
+
 def test_motivo_relativa_com_ancora_fora_do_intervalo():
     assert aplicabilidade.motivo_data_ilegivel("há 999999 dias", "2026-10-09") == "fora do intervalo"
     assert aplicabilidade.motivo_data_ilegivel("há 999999999 dias", "2026-10-09") == "fora do intervalo"

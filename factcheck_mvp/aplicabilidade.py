@@ -4,6 +4,7 @@ Módulo puro: sem I/O, sem LLM, sem rede.
 """
 from __future__ import annotations
 
+import bisect
 import calendar
 import re
 import unicodedata
@@ -687,14 +688,20 @@ _COMEMORATIVA_RE = re.compile(r"\bdia\s+(?:de|da|do|das|dos|internacional|nacion
 _FRASE_FIM_RE = re.compile(r"[.!?;\n]")
 
 
-def _recorrente_ou_comemorativa(texto_n: str, ini: int, fim: int) -> bool:
-    """True se a data em texto_n[ini:fim] é recorrente ou comemorativa (I-3), e não data do fato."""
+def _recorrente_ou_comemorativa(texto_n: str, ini: int, fim: int,
+                                delimitadores: list[int], comemoracoes: list[int]) -> bool:
+    """True se a data em texto_n[ini:fim] é recorrente ou comemorativa (I-3), e não data do fato.
+    `delimitadores` (posição de . ! ? ; e quebra de linha) e `comemoracoes` (início de "dia de/da/…"),
+    ordenados e calculados UMA vez por texto: a frase de cada data é achada por bisseção, sem varrer o
+    texto a cada data (desempenho: 20.000 caracteres em < 300 ms, mesmo com milhares de datas)."""
     if _RECORRENTE_ANTES_RE.search(texto_n[max(0, ini - 16):ini]) or _RECORRENTE_DEPOIS_RE.match(texto_n, fim):
         return True
-    ini_frase = max((m.end() for m in _FRASE_FIM_RE.finditer(texto_n, 0, ini)), default=0)
-    m_fim = _FRASE_FIM_RE.search(texto_n, fim)
-    fim_frase = m_fim.start() if m_fim else len(texto_n)
-    return _COMEMORATIVA_RE.search(texto_n[ini_frase:fim_frase]) is not None
+    i_ant = bisect.bisect_left(delimitadores, ini)
+    ini_frase = delimitadores[i_ant - 1] + 1 if i_ant > 0 else 0
+    i_pos = bisect.bisect_left(delimitadores, fim)
+    fim_frase = delimitadores[i_pos] if i_pos < len(delimitadores) else len(texto_n)
+    j = bisect.bisect_left(comemoracoes, ini_frase)
+    return j < len(comemoracoes) and comemoracoes[j] < fim_frase
 
 
 def _ocorrencias(texto_n: str, bare: bool) -> list[tuple[int | None, int, str | None, bool]]:
@@ -721,8 +728,10 @@ def _ocorrencias(texto_n: str, bare: bool) -> list[tuple[int | None, int, str | 
         mes_nome = m.group(2)
         brutas.append((m.start(), m.end(), _MESES_DATA.get(mes_nome) if mes_nome else None,
                        int(m.group(1)), m.group(3), True))
+    delimitadores = [m.start() for m in _FRASE_FIM_RE.finditer(texto_n)]
+    comemoracoes = [m.start() for m in _COMEMORATIVA_RE.finditer(texto_n)]
     return [(mes, dia, ano, solto) for ini, fim, mes, dia, ano, solto in brutas
-            if not _recorrente_ou_comemorativa(texto_n, ini, fim)]
+            if not _recorrente_ou_comemorativa(texto_n, ini, fim, delimitadores, comemoracoes)]
 
 
 def _datas_citadas(texto_n: str, ref: date, bare: bool = False) -> list[tuple[date, bool]]:
