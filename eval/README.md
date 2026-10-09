@@ -31,6 +31,14 @@ python3 -m eval.run --gate                           # exit 1 se piorar vs basel
 | `split` | não | `dev` (padrão, iterar aqui) \| `holdout` (só conferir no fim) |
 | `origem` | não | `sonda \| claimreview \| manual` |
 | `nota` | não | justificativa do rótulo |
+| `data_referencia` | não | `YYYY-MM-DD` = "hoje" do texto p/ relevância temporal (E4); vira `EntradaConsulta.data_referencia` |
+
+Padrão = relógio gravado no record (reproduz o que o sistema fez ao vivo no dia do
+record): em `replay` o pipeline lê a data do cassete `relogio://hoje`; cassete antigo
+sem relógio → E4 desligado com `fallback onde=relogio`. O campo `data_referencia` no
+caso é só quando o texto descreve um momento conhecido (ex.: = `data_checagem` de um
+caso ClaimReview), com justificativa na `nota`, decidido **antes** de rodar e registrado
+em `ITERACOES.md`; nunca mexer depois de ver o resultado.
 
 Mapeamento padrão (nível = propensão **a se tratar de desinformação**):
 
@@ -111,5 +119,35 @@ Compare os `metricas.json` (`acerto`, `n_erro_grave`, `taxa_indeterminada`, `ser
 `avancada` = 2 buscas/afirmação (crua + `site:` das agências do catálogo), sem crítico; `agente` =
 as mesmas 2 da onda 1 + crítico pós-juiz com até `AGENTE_MAX_ONDAS_EXTRAS` ondas reescritas pelo
 LLM (teto `AGENTE_MAX_BUSCAS` por caso). No trace: `cli trace <run_id> --eventos agente,etapa`.
+
+## Medição do E4 (relevância temporal)
+
+`metricas.json` tem o bloco `e4` (também no nível 0, via `eval.decisao`):
+
+| campo | o quê |
+|---|---|
+| `casos_com_marcador` | casos cujo texto/afirmação tem marcador temporal ("hoje", "ontem"…) |
+| `casos_com_desconto` | casos com ≥1 fonte descontada (`descontos_temporais` não vazio) |
+| `casos_nivel_mudou` | casos em que o desconto mudou o nível (`nivel != nivel_sem_desconto`, só conta com desconto real) |
+| `bits_descartados_total` | soma dos `bits_descartados` (força da evidência removida por ser de outro episódio) |
+| `referencia_ausente` | casos sem `data_referencia` (E4 sem âncora: não mede) |
+
+A/B honesto sem flag no código de produto — a perna controle zera `texto_usuario`/`janela`
+antes do `decidir` (o E4 desliga por construção, pois `dias_excedentes` não mede sem marcador):
+
+```bash
+python3 -m eval.decisao --snapshot eval/snapshots/e4-sub20.jsonl            # com E4
+python3 -m eval.decisao --snapshot eval/snapshots/e4-sub20.jsonl --sem-e4   # controle
+```
+
+Snapshot a partir de um eval de pipeline (Task 8: traces com evento `evidencias`):
+
+```bash
+python3 -m eval.decisao --gerar-snapshot --resultado eval/resultados/<ts>-nome \
+  --saida eval/snapshots/e4-sub20.jsonl
+```
+
+(lê `casos.jsonl` do resultado → `run_id` → evento `evidencias` do trace via
+`decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem o evento.)
 
 Testes do harness: `tests/test_eval_harness.py` (Pipeline falso, sem rede).

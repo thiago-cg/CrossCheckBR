@@ -356,11 +356,15 @@ class SerpAPIClient:
 
 
 def normalizar_item(item: Dict[str, Any], engine: str = "google_news",
-                    top_story: bool = False) -> Dict[str, Any]:
+                    top_story: bool = False, ancora: str | None = None) -> Dict[str, Any]:
     """news_results[]/organic_results[]/top_stories[] -> ArtigoNoticia PARCIAL.
 
     Sem corpo/veredito: exige deep crawl. Snippet guardado em `_snippet`
     (fallback de leitura quando não há corpo — manchete sozinha vale menos).
+    `ancora` = data da busca (payload["search_metadata"]["created_at"]): resolve
+    datas relativas ("há 2 dias"); sem âncora elas ficam sem data. A data bruta
+    vai em `data_publicacao` (exibir) e a normalizada (fim do intervalo, E4) em
+    `data_pub`/`data_pub_precisao`/`data_pub_bruta`.
     """
     fonte = item.get("source", {}) or {}
     if isinstance(fonte, str):
@@ -438,6 +442,12 @@ def normalizar_item(item: Dict[str, Any], engine: str = "google_news",
             "posicao": item.get("position"),
         })
     base["_secao_checagem"] = eh_secao_checagem(base["url"])
+    from .aplicabilidade import normalizar_data
+    bruta = base.get("data_publicacao")
+    norm = normalizar_data(bruta, ancora) if isinstance(bruta, str) and bruta.strip() else None
+    base["data_pub"] = norm[0] if norm else None
+    base["data_pub_precisao"] = norm[1] if norm else None
+    base["data_pub_bruta"] = bruta
     return base
 
 

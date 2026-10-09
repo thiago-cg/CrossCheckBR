@@ -247,6 +247,11 @@ def formatar(rel: RelatorioChecagem) -> str:
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
+        try:
+            _dec = getattr(rel, "decisao", None) or {}
+            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
+        except Exception:
+            _descontadas = set()
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
             selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
@@ -262,6 +267,22 @@ def formatar(rel: RelatorioChecagem) -> str:
                 linhas.append(f"   “{f.quote[:140]}”")
             if f.url:
                 linhas.append(f"   {f.url}")
+            # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
+            _r = getattr(f, "relevancia_temporal", None)
+            if (_r is not None and _r < 1.0) or (f.url in _descontadas):
+                _bruta = getattr(f, "data_pub_bruta", None)
+                _pub = getattr(f, "data_pub", None)
+                _dtxt = ""
+                if _bruta:
+                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
+                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
+                elif _pub:
+                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
+                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                if _dtxt:
+                    linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
+                else:
+                    linhas.append("   📅 anterior ao período do texto")
         if len(uteis) > 3:
             linhas.append(f"+{len(uteis)-3} fonte(s) no relatório completo.")
         linhas.append("")

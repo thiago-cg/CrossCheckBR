@@ -490,3 +490,38 @@ def test_pipeline_usa_data_referencia_da_entrada(amb, monkeypatch):
     assert vistos and vistos[-1].data_referencia == "2026-01-15"
     rec = [e for e in rel.etapas if e.nome == "recebimento"][0]
     assert "2026-01-15" in rec.detalhe and "origem: entrada" in rec.detalhe
+
+
+def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
+    """A string '11 de ago. de 2025' do Google não pode bloquear o datePublished ISO da página."""
+    from factcheck_mvp.aprofundar import CorpoLido as _CorpoLido
+    from factcheck_mvp.schemas import Afirmacao as _Afirmacao
+    url = "https://www.exemplo.com.br/2025/08/checa-x"
+    parcial = camada.normalizar_item(
+        {"link": url, "title": "Checa X", "snippet": "checagem", "date": "11 de ago. de 2025"},
+        engine="google")
+    peca = pl.Pipeline._peca_web(parcial, {0})
+    # Guarda anti-vácuo: a SerpAPI trouxe data textual válida (dia) — sem a
+    # prioridade, ela bloquearia o ISO da página ("primeiro que chegar").
+    assert peca["data_pub"] == "2025-08-11" and peca["data_pub_precisao"] == "dia"
+    assert peca["data_pub_bruta"] == "11 de ago. de 2025"
+
+    async def fake_aprofundar(cands, catalogo, **kw):
+        return {url: _CorpoLido(
+            url=url, final_url=url, trecho_corpo="É falso que X. " * 100,
+            corpo_lido=True, texto_completo="É falso que X. " * 500, metodo="jsonld",
+            titulo="Checa X", data_pub="2025-08-11T09:00:00-03:00")}
+
+    monkeypatch.setattr(pl, "aprofundar", fake_aprofundar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+
+    async def avisar(msg):
+        return None
+
+    afs = [_Afirmacao(texto="X aconteceu", nucleo="X aconteceu", polaridade="afirma", consulta="x")]
+    n_lidas, n_alvo = asyncio.run(pipe._ler(afs, [peca], avisar))
+    assert (n_lidas, n_alvo) == (1, 1)
+    assert peca["data_pub"] == "2025-08-11"
+    assert peca["data_pub_precisao"] == "dia"
+    assert peca["data_pub_bruta"] == "2025-08-11T09:00:00-03:00"

@@ -97,6 +97,7 @@ class AfirmacaoDecisao:
     texto: str
     nucleo: str = ""
     polaridade: str = "afirma"
+    janela: Optional[int] = None  # E4: janela temporal da afirmação (janela_da_afirmacao); None = sem marcador
 
 
 @dataclass
@@ -143,6 +144,8 @@ class Decisao:
     contagem: Dict[str, int] = field(default_factory=dict)
     travas: Dict[str, bool] = field(default_factory=dict)
     parametros: Dict[str, Any] = field(default_factory=dict)
+    log_odds_sem_desconto: float = 0.0  # E4: contrafactual sem desconto temporal
+    nivel_sem_desconto: str = "indeterminada"  # E4: faixa do contrafactual
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -179,17 +182,30 @@ class Decisao:
                       + (f" ({c.get('citacao_invalida', 0)} por citação não encontrada no texto)"
                          if c.get("citacao_invalida") else "")
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
+        # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
+        if self.travas.get("data_incompativel") and self.descontos_temporais:
+            n_dt = len(self.descontos_temporais)
+            partes.append(f"{n_dt} fonte(s) foram publicadas antes do período que o texto descreve "
+                          "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
+                          "de outro episódio.")
+            if self.nivel != self.nivel_sem_desconto:
+                partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
         return " ".join(partes)
 
     def why_1linha(self) -> str:
         c = self.contagem
         if self.nivel == "indeterminada":
-            return (f"{self.motivo}; {c.get('julgadas', 0)} fonte(s) julgada(s), "
+            base = (f"{self.motivo}; {c.get('julgadas', 0)} fonte(s) julgada(s), "
                     f"{c.get('fora_do_tema', 0)} fora do tema — compare as fontes abaixo.")
-        return (f"{self.n_clusters(+1)} fonte(s) independente(s) contestam e {self.n_clusters(-1)} confirmam "
-                f"o que o texto afirma; {c.get('lidas', 0)} página(s) lida(s), "
-                f"{c.get('fora_do_tema', 0)} fora do tema.")
+        else:
+            base = (f"{self.n_clusters(+1)} fonte(s) independente(s) contestam e {self.n_clusters(-1)} confirmam "
+                    f"o que o texto afirma; {c.get('lidas', 0)} página(s) lida(s), "
+                    f"{c.get('fora_do_tema', 0)} fora do tema.")
+        # E4 Task 6: sufixo curto só quando o desconto mudou o nível (neutro, sobre datas).
+        if self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto:
+            base += " Datas anteriores ao período do texto tiveram o peso reduzido."
+        return base
 
     def header(self) -> str:
         from .agregador import EMOJI_PROPENSAO, titulo_propensao
@@ -198,6 +214,12 @@ class Decisao:
     def resumo_trace(self) -> Dict[str, Any]:
         """Versão compacta para o evento `decisao` (lida no `cli trace`)."""
         return {
+            "L": round(self.log_odds, 3), "p": round(self.prob, 3), "motivo": self.motivo,
+            "L_sem_desconto": round(self.log_odds_sem_desconto, 3),
+            "nivel_sem_desconto": self.nivel_sem_desconto,
+            "descontos": [f"{d.get('url', '')[:60]} +{d.get('dias_alem_da_janela')}d "
+                          f"r={d.get('r')} −{d.get('bits_descartados')}b"
+                          for d in self.descontos_temporais][:6],
             "L": round(self.log_odds, 3), "p": round(self.prob, 3), "motivo": self.motivo,
             "votos": [f"af{v.afirmacao}:{v.cluster} {v.valor:+.2f} [{','.join(v.classes)}"
                       f"{'|' + ','.join(v.vereditos) if v.vereditos else ''}] {v.motivo}" for v in self.votos],
@@ -294,6 +316,66 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     return out
 
 
+def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registrar: bool) -> float:
+    """Agrega os votos de UMA afirmação (um voto por cluster + trava de confiabilidade).
+
+    Mesma regra para o caminho com desconto e para o contrafactual sem desconto;
+    só o caminho com desconto registra votos/travas em `dec` (o `decidir` segue puro).
+    """
+    L_a = 0.0
+    novos: List[Voto] = []
+    for cid, contribs in clusters.items():
+        soma = sum(v for v, _, _ in contribs)
+        if soma == 0:
+            continue
+        sinal = 1.0 if soma > 0 else -1.0
+        peso = max(abs(v) for v, _, _ in contribs if v * sinal > 0)
+        voto = Voto(afirmacao=a_idx, cluster=cid, direcao=sinal, peso=round(peso, 4),
+                    valor=round(sinal * peso, 4),
+                    urls=sorted({it.url for _, _, it in contribs}),
+                    classes=sorted({it.classe for _, _, it in contribs if it.classe}),
+                    vereditos=sorted({it.veredito for _, _, it in contribs if it.veredito}),
+                    motivo="; ".join(sorted({d for _, d, _ in contribs})),
+                    confiavel=any(it.nivel_confiabilidade() in confiabilidade.CONFIAVEIS
+                                  for v, _, it in contribs if v * sinal > 0))
+        novos.append(voto)
+        L_a += voto.valor
+    # Fontes pouco confiáveis (rede social, site pouco acessado) votam, mas sozinhas não
+    # cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na faixa média.
+    if abs(L_a) >= TAU and not any(v.confiavel and v.valor * L_a > 0 for v in novos):
+        L_a = math.copysign(TAU * 0.99, L_a)
+        if registrar:
+            dec.travas["sem_fonte_confiavel"] = True
+    if registrar:
+        dec.votos.extend(novos)
+    return L_a
+
+
+def _medida_temporal(af: AfirmacaoDecisao, ev: Evidencias, data_pub: Optional[str]):
+    """(janela, dias além da janela) da fonte frente ao marcador da AFIRMAÇÃO.
+
+    Usa `af.janela` (montada pelo pipeline via `aplicabilidade.janela_da_afirmacao`).
+    Snapshot antigo (janela ausente, 1 afirmação: testes e snapshots pré-campo) cai para
+    o marcador do texto inteiro; com 2+ afirmações e janela ausente não mede (o "hoje"
+    de uma frase não desconta a outra). O cálculo de datas é o de `dias_excedentes`
+    (região da Task 3, reaproveitado sem duplicar): o total de dias além da origem
+    (excedente + janela do texto) é reancorado na janela da afirmação.
+    """
+    if af.janela is None and len(ev.afirmacoes) != 1:
+        return None
+    legado = aplicabilidade.dias_excedentes(ev.texto_usuario, data_pub, ev.data_referencia)
+    if af.janela is None:
+        return legado  # snapshot antigo de 1 afirmação: comportamento anterior
+    if legado is None:
+        medida_af = aplicabilidade.dias_excedentes(af.texto, data_pub, ev.data_referencia)
+        if medida_af is None:
+            return None
+        total = medida_af[1] + medida_af[0]
+    else:
+        total = legado[1] + legado[0]
+    return (af.janela, max(0, total - af.janela))
+
+
 def decidir(ev: Evidencias) -> Decisao:
     """Função pura: mesma entrada, mesma Decisao. Não faz I/O nem telemetria."""
     dec = Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="",
@@ -315,49 +397,40 @@ def decidir(ev: Evidencias) -> Decisao:
     }
     # votos por (afirmação, cluster)
     por_af: Dict[int, float] = {}
+    por_af_brutos: Dict[int, float] = {}
     for a_idx, af in enumerate(ev.afirmacoes):
         s = -1.0 if af.polaridade == "nega" else 1.0
         clusters: Dict[str, List[tuple]] = {}
+        clusters_brutos: Dict[str, List[tuple]] = {}
         for it in ev.itens:
             if it.afirmacao != a_idx:
                 continue
             contribs = _contribuicoes(it, s, dec)
-            medida = (aplicabilidade.dias_excedentes(ev.texto_usuario, it.data_pub, ev.data_referencia)
-                      if contribs else None)
+            brutos = list(contribs)
+            medida = (_medida_temporal(af, ev, it.data_pub) if contribs else None)
             if medida and medida[1] > 0:
                 r = relevancia_temporal(medida[1], medida[0])
-                antes = sum(abs(v) for v, _ in contribs)
-                contribs = [(_descontar(v, r), f"{d} (data: r={r:.2f})") for v, d in contribs]
+                top = max(brutos, key=lambda x: abs(x[0]))
+                direcao = 1 if top[0] > 0 else -1
+                nats_antes = max(abs(v) for v, _ in brutos)
+                descontados = [(_descontar(v, r), f"{d} (data: r={r:.2f})") for v, d in brutos]
+                nats_depois = max(abs(v) for v, _ in descontados)
+                bits = (nats_antes - nats_depois) / math.log(2)
                 dec.descontos_temporais.append({
-                    "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub, "r": round(r, 3),
-                    "dias_alem_da_janela": medida[1], "direcao": 1 if contribs[0][0] > 0 else -1,
-                    "bits_descartados": round((antes - sum(abs(v) for v, _ in contribs)) / math.log(2), 3)})
+                    "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub,
+                    "janela": medida[0], "dias_alem_da_janela": medida[1], "r": round(r, 3),
+                    "direcao": direcao,
+                    "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),
+                    "bits_descartados": round(bits, 3)})
+                contribs = descontados
             for valor, desc in contribs:
                 clusters.setdefault(it.cluster or it.url, []).append((valor, desc, it))
-        L_a = 0.0
-        for cid, contribs in clusters.items():
-            soma = sum(v for v, _, _ in contribs)
-            if soma == 0:
-                continue
-            sinal = 1.0 if soma > 0 else -1.0
-            peso = max(abs(v) for v, _, _ in contribs if v * sinal > 0)
-            voto = Voto(afirmacao=a_idx, cluster=cid, direcao=sinal, peso=round(peso, 4),
-                        valor=round(sinal * peso, 4),
-                        urls=sorted({it.url for _, _, it in contribs}),
-                        classes=sorted({it.classe for _, _, it in contribs if it.classe}),
-                        vereditos=sorted({it.veredito for _, _, it in contribs if it.veredito}),
-                        motivo="; ".join(sorted({d for _, d, _ in contribs})),
-                        confiavel=any(it.nivel_confiabilidade() in confiabilidade.CONFIAVEIS
-                                      for v, _, it in contribs if v * sinal > 0))
-            dec.votos.append(voto)
-            L_a += voto.valor
-        # Fontes pouco confiáveis (rede social, site pouco acessado) votam, mas sozinhas não
-        # cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na faixa média.
-        if abs(L_a) >= TAU and not any(v.confiavel and v.afirmacao == a_idx and v.valor * L_a > 0
-                                       for v in dec.votos):
-            L_a = math.copysign(TAU * 0.99, L_a)
-            dec.travas["sem_fonte_confiavel"] = True
+            for valor, desc in brutos:
+                clusters_brutos.setdefault(it.cluster or it.url, []).append((valor, desc, it))
+        L_a = _agregar(clusters, a_idx, dec, registrar=True)
+        L_a_bruto = _agregar(clusters_brutos, a_idx, dec, registrar=False)
         por_af[a_idx] = L_a
+        por_af_brutos[a_idx] = L_a_bruto
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": sum(1 for v in dec.votos if v.afirmacao == a_idx)})
     # combinação entre afirmações: a mais "falsa" se passa da faixa média; senão a de maior |L|
@@ -365,8 +438,16 @@ def decidir(ev: Evidencias) -> Decisao:
     if por_af:
         mx = max(por_af.values())
         L = mx if mx >= TAU else max(por_af.values(), key=abs)
+    L_sem = 0.0
+    if por_af_brutos:
+        mx_sem = max(por_af_brutos.values())
+        L_sem = mx_sem if mx_sem >= TAU else max(por_af_brutos.values(), key=abs)
     dec.log_odds = round(L, 4)
+    dec.log_odds_sem_desconto = round(L_sem, 4)
+    dec.nivel_sem_desconto = nivel_de(L_sem)
     dec.prob = round(_sig(L), 4)
+    dec.parametros["e4"] = {"janelas": dict(aplicabilidade._JANELAS),
+                            "formula": "sinal·ln(r·e^|c| + 1 − r)"}
 
     # elegibilidade (antes: travas espalhadas no pipeline)
     tem_voto = any(v.valor != 0 for v in dec.votos)
@@ -384,6 +465,10 @@ def decidir(ev: Evidencias) -> Decisao:
                           "(só título/resumo)")
         elif dec.contagem["sustenta"] + dec.contagem["refuta"] == 0:
             dec.motivo = "nenhuma fonte consultada confirma ou contesta a afirmação (só relatos ou fora do tema)"
+        elif L_sem != 0 and dec.descontos_temporais:
+            dec.motivo = ("as fontes com posição são de antes do período que o texto descreve "
+                          "(\"hoje\", \"ontem\"…) e podem tratar de outro episódio — "
+                          "verifique se não é notícia antiga recirculando")
         else:
             dec.motivo = "as fontes com postura se anulam dentro do mesmo grupo ou conflitam com o selo"
         dec.nivel = "indeterminada"
@@ -397,7 +482,7 @@ def decidir(ev: Evidencias) -> Decisao:
         if dec.nivel == "media" and dec.travas.get("sem_fonte_confiavel"):
             dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados; "
                           "falta a confirmação de um veículo, órgão público ou site muito acessado")
-        elif dec.nivel == "media" and dec.descontos_temporais:
+        elif dec.nivel == "media" and dec.nivel != dec.nivel_sem_desconto:
             dec.motivo = ("as fontes encontradas são anteriores ao período que o texto descreve "
                           "(\"hoje\", \"ontem\"…): podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")

@@ -218,9 +218,10 @@ class Pipeline:
         async def _q(consulta: str, q: Dict[str, Any]) -> List[Dict[str, Any]]:
             bruto = await asyncio.to_thread(self.serpapi.buscar, q)
             eng = self.serpapi.engine_de(q)
+            ancora = ((bruto or {}).get("search_metadata") or {}).get("created_at")
             saida = []
             for item in (bruto or {}).get(self.serpapi.result_key(q), [])[:6]:
-                d = rotear_fonte(normalizar_item(item, engine=eng), self.catalogo)
+                d = rotear_fonte(normalizar_item(item, engine=eng, ancora=ancora), self.catalogo)
                 d["_afirmacao"] = consulta
                 saida.append(d)
             return saida
@@ -242,10 +243,16 @@ class Pipeline:
 
     @staticmethod
     def _peca_web(d: Dict[str, Any], ais: set) -> Dict[str, Any]:
-        return {"url": d["url"], "titulo": d.get("titulo") or "", "snippet": d.get("_snippet") or "",
+        peca = {"url": d["url"], "titulo": d.get("titulo") or "", "snippet": d.get("_snippet") or "",
                 "veiculo": (d.get("fonte") or {}).get("nome", ""), "afs": set(ais),
-                "origens": {"web"}, "data_pub": d.get("data_publicacao"),
+                "origens": {"web"}, "data_pub": d.get("data_pub"),
+                "data_pub_precisao": d.get("data_pub_precisao"),
+                "data_pub_bruta": d.get("data_pub_bruta"),
                 "scholar": bool(d.get("_scholar"))}
+        bruta = peca.get("data_pub_bruta")
+        if bruta and not peca.get("data_pub"):
+            telemetria.fallback("data_pub", "formato não reconhecido", valor=str(bruta)[:40])
+        return peca
 
     # ------------------------------------------------------------------ principal
     async def _executar(self, entrada: EntradaConsulta, progresso: Progresso = _nada,
@@ -328,10 +335,18 @@ class Pipeline:
                     if not h.get("url"):
                         continue
                     n_hits += 1
+                    bruta_base = h.get("data_pub")
+                    norm_base = (aplicabilidade.normalizar_data(bruta_base)
+                                 if isinstance(bruta_base, str) and bruta_base.strip() else None)
+                    if bruta_base and not norm_base:
+                        telemetria.fallback("data_pub", "formato não reconhecido",
+                                            valor=str(bruta_base)[:40])
                     pecas_base.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
-                                  "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
-                                  "afs": {ai}, "origens": {"indice"}, "trecho": h.get("trecho") or "",
-                                  "data_pub": h.get("data_pub"), "agencia": h.get("agencia"),
+                                   "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
+                                   "afs": {ai}, "origens": {"indice"}, "trecho": h.get("trecho") or "",
+                                   "data_pub": norm_base[0] if norm_base else None,
+                                   "data_pub_precisao": norm_base[1] if norm_base else None,
+                                   "data_pub_bruta": bruta_base, "agencia": h.get("agencia"),
                                   "selo_original": h.get("selo_original"),
                                   "afirmacao_checada": h.get("afirmacao_checada"),
                                   "veredito": _veredito_tipado(h.get("veredito"), h.get("selo_original"),
@@ -528,7 +543,9 @@ class Pipeline:
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
                 confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub")))
         ev = decisao.Evidencias(
-            afirmacoes=[decisao.AfirmacaoDecisao(texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade)
+            afirmacoes=[decisao.AfirmacaoDecisao(
+                texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
+                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs)))
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
             n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
@@ -644,8 +661,35 @@ class Pipeline:
                     p["corpo_lido"] = False
                 if getattr(c, "titulo", "") and not p.get("titulo"):
                     p["titulo"] = c.titulo
-                if getattr(c, "data_pub", None) and not p.get("data_pub"):
-                    p["data_pub"] = c.data_pub
+                # E4 Task 2: prioridade da data (fim do intervalo normalizado) —
+                # JSON-LD da página (dia) > SerpAPI absoluta/ISO (dia) > trafilatura (dia)
+                # > SerpAPI relativa ancorada > ano > ReaderLM. A troca usa o tier
+                # (fonte+precisão), nunca "primeiro que chegar".
+                bruta_pagina = getattr(c, "data_pub", None)
+                norm_pagina = (aplicabilidade.normalizar_data(bruta_pagina)
+                               if isinstance(bruta_pagina, str) and bruta_pagina.strip() else None)
+                if bruta_pagina and not norm_pagina:
+                    telemetria.fallback("data_pub", "formato não reconhecido",
+                                        valor=str(bruta_pagina)[:40])
+                elif norm_pagina is not None:
+                    nova, prec_nova = norm_pagina
+                    metodo = getattr(c, "metodo", "") or ""
+                    fonte_nova = {"jsonld": "jsonld", "readerlm": "readerlm",
+                                  "falha": "readerlm"}.get(metodo, "trafilatura")
+                    tier_nova = (1 if fonte_nova == "readerlm" else
+                                 2 if prec_nova == "ano" else
+                                 6 if fonte_nova == "jsonld" else 4)
+                    bruta_atual = p.get("data_pub_bruta")
+                    if not p.get("data_pub"):
+                        tier_atual = -1
+                    elif (isinstance(bruta_atual, str) and bruta_atual.strip()
+                          and aplicabilidade.normalizar_data(bruta_atual) is None):
+                        tier_atual = 3  # SerpAPI relativa: só resolveu com âncora
+                    else:
+                        tier_atual = 2 if p.get("data_pub_precisao") == "ano" else 5
+                    if tier_nova > tier_atual:
+                        p["data_pub"], p["data_pub_precisao"] = nova, prec_nova
+                        p["data_pub_bruta"] = bruta_pagina
                 vp = getattr(c, "veredito_pagina", None)
                 if vp and not p.get("veredito"):
                     v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
@@ -979,6 +1023,16 @@ class Pipeline:
                               rotulo=f"af{v.afirmacao} cluster {v.cluster}: {', '.join(v.classes + v.vereditos)}",
                               valor=v.motivo, confianca=None, direcao=v.direcao, peso=v.peso,
                               evidencias=v.urls[:3])
+        # E4: uma fonte descontada por item de dec.descontos_temporais (decidir segue puro,
+        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao ficam None
+        # quando o desconto não as carrega (compat com traces antigos).
+        for d in dec.descontos_temporais:
+            telemetria.evento("fonte", url=d.get("url"), estagio="data", decisao="descontada",
+                              motivo=f"{d.get('dias_alem_da_janela')} dias além da janela "
+                                     f"de {d.get('janela')}",
+                              afirmacao=d.get("afirmacao"), data_pub=d.get("data_pub"),
+                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("precisao"),
+                              r=d.get("r"), bits=d.get("bits_descartados"))
         telemetria.evento("decisao", nivel=dec.nivel, nivel_agregador=dec.nivel, score=dec.log_odds,
                           sinais=[f"af{v.afirmacao}:{v.cluster}:{v.valor:+.2f}" for v in dec.votos],
                           why=dec.why_1linha(), travas=dec.resumo_trace(), decisao=dec.to_dict())
@@ -1002,6 +1056,16 @@ class Pipeline:
             if pi not in melhor or ordem[r.get("classe")] < ordem[melhor[pi][1].get("classe")]:
                 melhor[pi] = (ai, r)
         pesos = {u: v.peso for v in dec.votos for u in v.urls}
+        # E4 Task 6: relevância temporal por URL (menor r = mais descontada).
+        _r_por_url: Dict[str, float] = {}
+        for x in (getattr(dec, "descontos_temporais", None) or []):
+            u = (x or {}).get("url")
+            try:
+                r = float((x or {}).get("r"))
+            except (TypeError, ValueError):
+                continue
+            if u and (u not in _r_por_url or r < _r_por_url[u]):
+                _r_por_url[u] = r
         fontes = []
         for pi, p in enumerate(pecas):
             ai, r = melhor.get(pi, (None, {}))
@@ -1017,6 +1081,8 @@ class Pipeline:
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
+                data_pub_bruta=p.get("data_pub_bruta"),
+                relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
                 postura=classe, citacao=r.get("citacao") or None, citacao_verificada=r.get("citacao_verificada"),
@@ -1036,8 +1102,15 @@ class Pipeline:
     @staticmethod
     def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes,
                    onde_encontrado: Literal["base", "web"] = "web") -> RelatorioChecagem:
+        # E4 Task 6: limitação neutra de data + pergunta de data no topo (bits ficam no JSON).
+        lims = list(limitacoes or [])
+        priorizar_data = bool(getattr(dec, "travas", {}).get("data_incompativel")
+                              and getattr(dec, "descontos_temporais", None))
+        if priorizar_data:
+            n_dt = len(dec.descontos_temporais or [])
+            lims.append(f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
-                                 fontes=fontes, etapas=etapas, limitacoes=limitacoes,
-                                 perguntas_guia=perguntas_guia(), consulta=entrada,
+                                 fontes=fontes, etapas=etapas, limitacoes=lims,
+                                 perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,
                                  header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
                                  onde_encontrado=onde_encontrado)

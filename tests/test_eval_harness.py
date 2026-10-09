@@ -185,3 +185,60 @@ def test_descoberta_status_ignora_descoberta_catalogo():
     assert _descoberta_status([descoberta_ok, catalogo_ok, ok]) == "rodou"
     assert _descoberta_status([agente_ok, ok]) == "rodou"
     assert _descoberta_status([catalogo_ok]) == "ausente"
+
+
+# ------------------------------------------------------------------ E4: medição do desconto temporal (Task 7)
+def _linha_snapshot_e4():
+    return {"id": "e4-hoje", "rotulo": "falso", "esperado": ["alta"], "aceitavel": ["media"],
+            "tags": [], "run_id": "x",
+            "evidencias": {
+                "afirmacoes": [{"texto": "Bolsonaro recebeu alta do hospital hoje",
+                                "nucleo": "Bolsonaro recebeu alta do hospital", "polaridade": "afirma"}],
+                "itens": [{"url": "https://g1.globo.com/a", "afirmacao": 0, "cluster": "g1",
+                           "classe": "REFUTA", "motor": "llm-juiz:llm-local",
+                           "citacao_verificada": True, "curada": True, "corpo_lido": True,
+                           "veredito": None, "origem_veredito": None, "veiculo": "",
+                           "data_pub": "2021-01-01"}],
+                "vago": False, "opiniao": False, "rumor": False, "juiz_disponivel": True,
+                "n_lidas": 1, "n_consultadas": 1,
+                "texto_usuario": "Bolsonaro recebeu alta do hospital hoje",
+                "data_referencia": "2026-10-09"}}
+
+
+def test_sem_e4_zera_desconto_e_recupera_modulo():
+    from eval.decisao import avaliar_snapshot
+    base = avaliar_snapshot([_linha_snapshot_e4()])
+    sem = avaliar_snapshot([_linha_snapshot_e4()], sem_e4=True)
+    assert base[0]["e4"]["desconto"] and not sem[0]["e4"]["desconto"]
+    assert abs(sem[0]["log_odds"]) > abs(base[0]["log_odds"])
+
+
+def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
+    from eval.decisao import gerar_snapshot_de_resultado
+    res_dir = amb / "resultado"
+    res_dir.mkdir()
+    runs = amb / "runs"
+    (runs / "rid1").mkdir(parents=True)
+    evd = dict(_linha_snapshot_e4()["evidencias"])
+    (runs / "rid1" / "trace.jsonl").write_text(
+        json.dumps({"ts": "2026-10-09T00:00:00+00:00", "t_rel_ms": 1.0, "tipo": "evidencias",
+                    "dados": evd}, ensure_ascii=False) + "\n", encoding="utf-8")
+    (res_dir / "casos.jsonl").write_text(
+        json.dumps({"id": "e4-hoje", "rotulo": "falso", "esperado": ["alta"], "aceitavel": ["media"],
+                    "tags": [], "run_id": "rid1"}) + "\n", encoding="utf-8")
+    n, pul = gerar_snapshot_de_resultado(res_dir, amb / "snap.jsonl", runs_dir=runs)
+    assert (n, pul) == (1, 0)
+    linha = json.loads((amb / "snap.jsonl").read_text(encoding="utf-8"))
+    assert linha["id"] == "e4-hoje" and linha["evidencias"]["data_referencia"] == "2026-10-09"
+
+
+def test_metricas_e4_agrega_por_caso():
+    assert ev.calcular_metricas([
+        {"rotulo": "falso", "nivel": "media", "ok": False, "parcial": True, "grave": False,
+         "e4": {"marcador": True, "desconto": True, "nivel_mudou": True, "bits": 1.5,
+                "referencia_ausente": False}},
+        {"rotulo": "verdadeiro", "nivel": "baixa", "ok": True, "parcial": False, "grave": False,
+         "e4": {"marcador": False, "desconto": False, "nivel_mudou": False, "bits": 0.0,
+                "referencia_ausente": True}},
+    ])["e4"] == {"casos_com_marcador": 1, "casos_com_desconto": 1, "casos_nivel_mudou": 1,
+                 "bits_descartados_total": 1.5, "referencia_ausente": 1}

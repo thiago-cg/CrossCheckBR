@@ -67,6 +67,8 @@ class FonteEvidencia(BaseModel):
     corpo_lido: bool = False
     # Clareza lado-a-lado (check #1): data + quote + tipo p/ tabela
     data_pub: Optional[str] = None
+    data_pub_bruta: Optional[str] = None
+    relevancia_temporal: Optional[float] = None
     quote: Optional[str] = None
     tipo_conteudo: Optional[str] = None  # noticia|checagem|opiniao|satira
     # LLM-juiz: resumo da peça frente à afirmação + termômetro (-100..+100)

@@ -63,10 +63,11 @@ n_fallbacks, fallbacks_por_onde, descartes_por_motivo, n_erros, dur_ms, nivel}`.
 | `agente` | decisão do crítico pós-juiz, 1 por afirmação por rodada: `afirmacao`, `decisao` (parar\|nova_onda), `motivo`, `contagens{SUSTENTA, REFUTA, RELATA_SEM_ENDOSSO, NAO_TRATA, sem_juiz, clusters_postura, veredito_aplicavel}`, `extras_feitas`, `buscas_restantes` | `agente.criticar` |
 | `llm` | `motor` (llm-local\|openrouter\|openrouter-decisions), `modelo`, `finalidade`, `latencia_ms`, `prompt_sha`, `n_chars_prompt`, `saida` (truncada), `erro`, `cache` (live\|hit\|miss), `status` | `replay.llm_post` |
 | `http` | `metodo`, `url` (redigida), `status`, `bytes`, `latencia_ms`, `cache` (live\|hit\|miss), `erro`, `truncado`, `gravado` | todo wrapper do `replay` |
-| `fonte` | `url`, `estagio` (deep-crawl\|descoberta-site\|relatorio), `decisao` (mantida\|descartada), `motivo` (+ `tipo_fonte`, `corpo_lido`, `confianca` no estágio relatorio) | aprofundar, descoberta_site, `Pipeline.executar` |
+| `fonte` | `url`, `estagio` (deep-crawl\|descoberta-site\|relatorio\|**data**), `decisao` (mantida\|descartada\|**descontada**), `motivo` (+ `tipo_fonte`, `corpo_lido`, `confianca` no estágio relatorio; no estágio `data`: `afirmacao`, `data_pub`, `data_pub_bruta`, `precisao`, `r`, `bits`) | aprofundar, descoberta_site, `Pipeline.executar`, `Pipeline._emitir_decisao` (estágio `data`, 1 por fonte com desconto temporal) |
 | `fallback` | `onde`, `motivo` (+ extras) | ver tabela abaixo |
 | `sinal` | `motor`, `rotulo`, `valor`, `confianca`, `direcao` (via `agregador._direcao`, `None` se não existir), `peso` (`agregador.PESOS`), `evidencias` | pipeline, antes de `agregar` |
 | `decisao` | `nivel` (final), `nivel_agregador`, `score`, `sinais` (lista `motor:rotulo`), `why`, `travas{opiniao, vago, rumor, tem_veredito, tem_corpo, n_corpo}` | pipeline (fim, e no retorno "sem afirmação") |
+| | `travas` é o `decisao.resumo_trace()`: inclui `contagem`, `L_sem_desconto`, `nivel_sem_desconto` (contrafactual sem desconto temporal, E4) e `descontos` (≤6, `"<url[:60]> +<dias>d r=<r> −<bits>b"`) | |
 | `erro` | `onde`, `erro` | pipeline (exceção), replay (gravar cassete), eval |
 | `span_inicio` / `span_fim` | `nome`, extras; no fim `dur_ms`, `ok`, `erro` | quem usar `span` |
 
@@ -84,6 +85,8 @@ modelo que falhou; teto diário), `juiz` (item julgado por fallback léxico; tim
 `agente` (onda passou de `AGENTE_TIMEOUT_S`, parcial preservado; falha nas ondas extras),
 `agente.reformular` (LLM de reformulação falhou → consulta determinística), `deep-crawl`, `aprofundar`,
 `descoberta-catalogo`, `descoberta-site`, `descoberta-site.jev`.
+`relogio` (E4: data de referência não gravada no cassete em replay → E4 desligado neste caso),
+`data_pub` (E4: `data_pub` não-vazia em formato não reconhecido, com `valor` = bruta[:40]).
 
 **Regra:** todo fallback novo deve chamar `telemetria.fallback(onde, motivo)`.
 
@@ -94,6 +97,8 @@ modelo que falhou; teto diário), `juiz` (item julgado por fallback léxico; tim
   chamadas LLM, HTTP com erro, fallbacks agrupados, fontes mantidas/descartadas por motivo,
   sinais com direção/peso, decisão (nível final × agregador × travas).
 - `telemetria.listar_runs(n)`, `telemetria.eventos_de(id, ["llm","fallback"])`.
+- Desconto temporal (E4): `cli trace <id>` mostra `L_sem_desconto`/`nivel_sem_desconto`/`descontos`
+  no bloco DECISAO (via `travas`); `cli trace <id> --eventos fonte` lista os `estagio=data`.
 
 ## 2. Replay (I/O determinístico)
 

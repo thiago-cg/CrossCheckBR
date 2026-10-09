@@ -141,7 +141,8 @@ class EstadoBusca:
         for item, top in itens:
             if not isinstance(item, dict):
                 continue
-            d = camada.normalizar_item(item, engine=engine, top_story=top)
+            d = camada.normalizar_item(item, engine=engine, top_story=top,
+                                         ancora=((payload or {}).get("search_metadata") or {}).get("created_at"))
             canon = corroboracao.url_canonica(d.get("url", "")) if d.get("url") else ""
             if not canon:
                 continue

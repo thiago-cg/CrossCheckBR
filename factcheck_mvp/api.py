@@ -161,14 +161,37 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
         nao_lidas = _urls_nao_analisadas(rel)
         uteis = [f for f in rel.fontes if f.relevante is not False][:5]
         cor = {"contesta o que o texto afirma": "#b42318", "confirma o que o texto afirma": "#067647"}
+        try:
+            _dec = rel.decisao or {}
+            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
+        except Exception:
+            _descontadas = set()
 
         def _cartao(f) -> str:
+            import re as _re
             post = postura_legivel(f, direcoes)
             if bool(getattr(f, "corpo_lido", False)) and f.url not in nao_lidas:
                 leitura = "📄 texto lido"
             else:
                 # E3: só título/snippet não foi analisada integralmente (não vota).
                 leitura = "📰 só manchete — não analisada integralmente"
+            # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
+            _r = getattr(f, "relevancia_temporal", None)
+            _linha_data = ""
+            if (_r is not None and _r < 1.0) or (f.url in _descontadas):
+                _bruta = getattr(f, "data_pub_bruta", None)
+                _pub = getattr(f, "data_pub", None)
+                _dtxt = ""
+                if _bruta:
+                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
+                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
+                elif _pub:
+                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
+                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                if _dtxt:
+                    _linha_data = f"<br/>📅 publicada em {esc(_dtxt)} · anterior ao período do texto"
+                else:
+                    _linha_data = "<br/>📅 anterior ao período do texto"
             return (f"<div style='border:1px solid #ccc;border-radius:6px;padding:8px;margin:6px 0'>"
                     f"<b>{esc(f.portal_nome or 'web')}</b> "
                     f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
@@ -177,6 +200,7 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                     f"{' · ' + esc(ROTULO[f.confiabilidade]) if f.confiabilidade in ROTULO else ''}<br/>"
                     f"{esc(f.titulo[:200])}<br/>"
                     f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
+                    f"{_linha_data}"
                     f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")
         fontes = "".join(_cartao(f) for f in uteis)
         etapas = "".join(f"<li>{STATUS_ETAPA.get(e.status, '')} <b>{esc(NOMES_ETAPAS.get(e.nome, e.nome))}</b>: "
