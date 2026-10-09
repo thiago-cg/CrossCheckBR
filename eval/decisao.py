@@ -52,6 +52,7 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         veredito=i.get("veredito"),
         origem_veredito=i.get("origem_veredito"),
         veiculo=i.get("veiculo") or "",
+        data_pub=i.get("data_pub"),
     ) for i in (d.get("itens") or [])]
     return decisao.Evidencias(
         afirmacoes=afs, itens=itens,
@@ -61,6 +62,8 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         juiz_disponivel=bool(d.get("juiz_disponivel", True)),
         n_lidas=int(d.get("n_lidas") or 0),
         n_consultadas=int(d.get("n_consultadas") or 0),
+        texto_usuario=d.get("texto_usuario") or "",
+        data_referencia=d.get("data_referencia"),
     )
 
 

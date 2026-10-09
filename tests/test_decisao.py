@@ -1,5 +1,7 @@
 """Comportamento de `decisao.decidir` (função pura): direção, clusters, polaridade, selos,
 faixas simétricas, indeterminação por falta de evidência e coerência do texto com o nível."""
+import math
+
 import pytest
 
 from factcheck_mvp import decisao
@@ -217,3 +219,72 @@ def test_mutacao_ignorar_polaridade_quebra():
     ev = _ev(_tres("REFUTA"), pol="nega")
     ev.afirmacoes[0].polaridade = "afirma"
     assert decidir(ev).nivel == "alta"  # sem a polaridade o caso de negação vira erro grave
+
+
+# ------------------------------------------------------------------ E3: título não vota
+def test_e3_so_titulo_nao_vota_nem_com_selo():
+    itens = [_it(f"https://{d}/a", "REFUTA", cluster=d, corpo=False, veredito="FALSO")
+             for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev(itens))
+    assert d.nivel == "indeterminada" and not d.votos
+    assert len(d.nao_analisadas) == 3 and not d.vereditos_aplicados
+    assert "lidas integralmente" in d.motivo
+
+
+def test_e3_lida_vota_e_so_titulo_fica_listada():
+    lida = _it("https://g1.globo.com/a", "REFUTA", cluster="g1")
+    titulo = _it("https://bbc.com/a", "REFUTA", cluster="bbc", corpo=False)
+    d = decidir(_ev([lida, titulo]))
+    assert [v.urls for v in d.votos] == [["https://g1.globo.com/a"]]
+    assert [n["url"] for n in d.nao_analisadas] == ["https://bbc.com/a"]
+
+
+# ------------------------------------------------------------------ E4: relevância temporal
+def _ev_hoje(itens, texto="Bolsonaro recebeu alta do hospital hoje"):
+    return Evidencias(afirmacoes=[AfirmacaoDecisao(texto=texto, nucleo=texto)], itens=itens,
+                      texto_usuario=texto, data_referencia="2026-10-09")
+
+
+def test_e4_relevancia_temporal_contrato():
+    assert decisao.relevancia_temporal(0, 2) == pytest.approx(1.0)
+    rs = [decisao.relevancia_temporal(e, 2) for e in (1, 5, 30, 2000)]
+    assert all(0.0 <= r <= 1.0 for r in rs) and rs == sorted(rs, reverse=True)
+    assert rs[-1] < 0.05  # anos depois: praticamente outro episódio
+
+
+def test_e4_fonte_antiga_que_confirma_nao_crava_baixa():
+    """Regressão do caso Bolsonaro: checagens antigas confirmando 'recebeu alta' (de outra
+    internação) não podem cravar baixa para um fato apresentado como de hoje."""
+    itens = [
+        ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="SUSTENTA", motor=JUIZ,
+                      citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18")
+        for d in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel != "baixa"
+    assert d.travas["data_incompativel"] and len(d.descontos_temporais) == 3
+    assert all(x["bits_descartados"] > 0 for x in d.descontos_temporais)
+
+
+def test_e4_simetrico_nao_eleva_propensao():
+    """Fonte antiga que CONTESTA perde o mesmo tanto que a que confirma: E4 nunca empurra
+    o nível para cima por conta própria."""
+    def _um(classe):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe=classe, motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-09-01")
+        return decidir(_ev_hoje([it])).log_odds
+    assert _um("REFUTA") == pytest.approx(-_um("SUSTENTA"))
+    assert abs(_um("REFUTA")) < decisao.W_POSTURA
+
+
+def test_e4_dentro_da_janela_ou_sem_marcador_sem_desconto():
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2026-10-08")
+    assert not decidir(_ev_hoje([it])).descontos_temporais
+    it.data_pub = "2019-01-01"
+    assert not decidir(_ev_hoje([it], texto="Café cura câncer")).descontos_temporais
+
+
+def test_e4_desconto_e_mistura_de_razoes_de_verossimilhanca():
+    assert decisao._descontar(1.5, 1.0) == 1.5
+    assert decisao._descontar(1.5, 0.0) == pytest.approx(0.0)
+    assert decisao._descontar(-1.5, 0.5) == pytest.approx(-math.log(0.5 * math.exp(1.5) + 0.5))

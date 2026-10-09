@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
@@ -507,12 +508,13 @@ class Pipeline:
                 curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
-                confiabilidade=p.get("confiabilidade")))
+                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub")))
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade)
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
-            n_lidas=n_lidas, n_consultadas=len(pecas))
+            n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
+            data_referencia=datetime.now(timezone.utc).date().isoformat())
         telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
         self._emitir_decisao(dec)

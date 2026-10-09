@@ -35,23 +35,40 @@ def _normalizar(texto: str | None) -> str:
     return re.sub(r"\s+", " ", sem_acento.lower()).strip()
 
 
-def data_compativel(texto_usuario: str, data_pub: str | None) -> bool:
-    """True se a data de publicação é compatível com os marcadores temporais do texto."""
+def janela_temporal(texto_usuario: str) -> int | None:
+    """Menor janela (dias) entre os marcadores temporais do texto; None se não há marcador."""
     janela = None
     texto = _normalizar(texto_usuario)
     for padrao, dias in _JANELA_PADROES:
         if padrao.search(texto):
             janela = dias if janela is None else min(janela, dias)
-    if janela is None:
-        return True
-    if not data_pub:
-        return True
+    return janela
+
+
+def dias_excedentes(texto_usuario: str, data_pub: str | None,
+                    referencia: str | None = None) -> tuple[int, int] | None:
+    """(janela, dias além da janela) da fonte frente ao "hoje/ontem/..." do texto.
+
+    None quando não dá para medir (sem marcador, sem data ou data ilegível): nesse caso
+    a data não informa nada e a fonte segue sem desconto. `referencia` (YYYY-MM-DD) é o
+    "hoje" do texto; vazio = data atual UTC.
+    """
+    janela = janela_temporal(texto_usuario)
+    if janela is None or not data_pub:
+        return None
     try:
-        data = datetime.strptime(data_pub[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc).date()
+        data = datetime.strptime(data_pub[:10], "%Y-%m-%d").date()
+        ref = (datetime.strptime(referencia[:10], "%Y-%m-%d").date() if referencia
+               else datetime.now(timezone.utc).date())
     except (ValueError, TypeError):
-        return True
-    hoje = datetime.now(timezone.utc).date()
-    return (hoje - data).days <= janela
+        return None
+    return janela, max(0, (ref - data).days - janela)
+
+
+def data_compativel(texto_usuario: str, data_pub: str | None) -> bool:
+    """True se a data de publicação é compatível com os marcadores temporais do texto."""
+    medida = dias_excedentes(texto_usuario, data_pub)
+    return medida is None or medida[1] == 0
 
 
 def e_aplicavel(

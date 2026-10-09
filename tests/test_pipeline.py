@@ -382,7 +382,7 @@ def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
     peça (`p.get("corpo_lido", p.get("corpo"))`), não de `bool(p.get("corpo"))`.
 
     Uma peça com corpo presente mas flag `corpo_lido=False` chega ao juiz como
-    não-lida (desconto `F_SO_TITULO`); outra sem corpo chega como não-lida
+    não-lida (E3: não vota); outra sem corpo chega como não-lida
     também. Espiona `decidir` para pinar o `ItemEvidencia` que o pipeline monta.
     """
     from factcheck_mvp import avaliador as _aval
@@ -440,13 +440,11 @@ def test_juiz_final_usa_flag_corpo_lido_do_pipeline(amb, monkeypatch):
     assert fontes[url_so_titulo].corpo_lido is False
     assert fontes[url_sem_corpo].corpo_lido is False
 
-    # Caminho do desconto: só-título pesa F_SO_TITULO × corpo lido (mesma
-    # confiabilidade nas 3 — todas curadas — então a razão é exata).
+    # E3: só a lida vota; as não lidas aparecem como "não analisadas integralmente".
     pesos = {u: v["peso"] for v in rel.decisao["votos"] for u in v["urls"]}
-    assert set(pesos) == {url_lida, url_so_titulo, url_sem_corpo}
-    assert pesos[url_so_titulo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
-    assert pesos[url_sem_corpo] == pytest.approx(pesos[url_lida] * _dec.F_SO_TITULO)
-    assert rel.propensao == "alta", rel.justificativa
+    assert set(pesos) == {url_lida}
+    assert {n["url"] for n in rel.decisao["nao_analisadas"]} == {url_so_titulo, url_sem_corpo}
+    assert rel.propensao == "media", rel.justificativa  # 1 fonte curada sozinha não satura
 
 
 def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):

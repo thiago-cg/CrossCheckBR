@@ -13,3 +13,11 @@ def test_data_incompativel_barra_bolsonaro():
     assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", "2020-01-01") is False
     assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", None) is True
     assert aplicabilidade.data_compativel("Café cura câncer", "2020-01-01") is True
+
+
+def test_dias_excedentes_mede_alem_da_janela():
+    from factcheck_mvp import aplicabilidade
+    assert aplicabilidade.dias_excedentes("recebeu alta hoje", "2026-10-08", "2026-10-09") == (2, 0)
+    assert aplicabilidade.dias_excedentes("recebeu alta hoje", "2026-10-01", "2026-10-09") == (2, 6)
+    assert aplicabilidade.dias_excedentes("Café cura câncer", "2020-01-01", "2026-10-09") is None
+    assert aplicabilidade.dias_excedentes("recebeu alta hoje", None, "2026-10-09") is None

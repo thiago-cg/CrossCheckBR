@@ -3,7 +3,7 @@
 Este módulo é o juiz-agregador determinístico sobre os outputs do avaliador 1:1
 (`avaliador.avaliar`, manchete+corpo, 1 chamada por par peça×afirmação): o pipeline
 monta cada `ItemEvidencia` com `classe = julg posicao`, `corpo_lido` da peça
-(com `F_SO_TITULO` quando só título/snippet) e `citacao_verificada` do avaliador;
+e `citacao_verificada` do avaliador;
 `decidir` agrega em 1 voto por cluster. Não chama LLM nem faz I/O.
 
 O nível é propensão a a entrada ser desinformação, só a partir de VERACIDADE:
@@ -25,6 +25,12 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
                 rede social / plataforma 0,45 (selo 0,55) · site pouco acessado 0,3 (selo 0,4)
       página com postura e veredito: vale a contribuição de maior |.| se concordam;
       se discordam, 0 (conflito registrado).
+      E3: peça lida só pelo título/snippet não vota (nem postura nem selo).
+      E4: texto com "hoje/ontem/nesta semana" e fonte publicada `e` dias além da janela →
+          r = relevancia_temporal(e, janela) e contrib' = sinal·ln(r·e^|contrib| + 1 − r)
+          (mistura: com prob. 1−r a fonte fala de outro episódio e não informa nada).
+          Simétrico: nunca eleva nem baixa a propensão por si; os bits descartados
+          ficam em `descontos_temporais`.
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
     L_a       = Σ_clusters voto  (um cluster = um voto: republicação não soma)
     L         = L_a da afirmação com maior L positivo se ele passa da faixa média;
@@ -51,7 +57,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-from . import confiabilidade, selos
+from . import aplicabilidade, confiabilidade, selos
 
 # ------------------------------------------------------------------ parâmetros (únicos)
 TAU = math.log(3)            # faixa média: |L| < ln 3  <=>  0,25 < p < 0,75
@@ -60,7 +66,6 @@ W_VEREDITO = 1.5             # selo de checagem tipado, aplicável à afirmaçã
 # Fonte fora do catálogo: o fator vem do nível de confiabilidade (confiabilidade.py).
 F_NAO_CURADA = confiabilidade.FATOR_POSTURA[confiabilidade.ALTO_TRAFEGO]            # 0,6 (como antes)
 F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEGO]  # 0,8 (como antes)
-F_SO_TITULO = 0.7            # postura julgada só com título/snippet (corpo não lido)
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
 CLASSES_TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
@@ -81,6 +86,7 @@ class ItemEvidencia:
     origem_veredito: Optional[str] = None  # pagina|indice
     veiculo: str = ""
     confiabilidade: Optional[str] = None   # confiabilidade.NIVEIS; None = calcula pela URL
+    data_pub: Optional[str] = None         # YYYY-MM-DD da peça (E4: relevância temporal)
 
     def nivel_confiabilidade(self) -> str:
         return self.confiabilidade or confiabilidade.classificar(self.url, self.curada)
@@ -103,6 +109,8 @@ class Evidencias:
     juiz_disponivel: bool = True
     n_lidas: int = 0           # páginas com corpo lido
     n_consultadas: int = 0     # peças únicas após dedupe
+    texto_usuario: str = ""    # E4: marcadores "hoje/ontem/nesta semana" do texto
+    data_referencia: Optional[str] = None  # E4: "hoje" do texto (YYYY-MM-DD); None = data atual
 
 
 @dataclass
@@ -130,6 +138,8 @@ class Decisao:
     vereditos_aplicados: List[Dict[str, Any]] = field(default_factory=list)
     vereditos_ignorados: List[Dict[str, Any]] = field(default_factory=list)
     conflitos: List[Dict[str, Any]] = field(default_factory=list)
+    nao_analisadas: List[Dict[str, Any]] = field(default_factory=list)       # E3: só título, não vota
+    descontos_temporais: List[Dict[str, Any]] = field(default_factory=list)  # E4: evidência de outro episódio
     contagem: Dict[str, int] = field(default_factory=dict)
     travas: Dict[str, bool] = field(default_factory=dict)
     parametros: Dict[str, Any] = field(default_factory=dict)
@@ -211,6 +221,28 @@ def nivel_de(L: float) -> str:
     return "media"
 
 
+def relevancia_temporal(excedente: int, janela: int) -> float:
+    """r = P(a fonte trata do MESMO episódio | publicada `excedente` dias além da janela).
+
+    `janela` vem do marcador do texto (hoje=2, ontem=3, nesta semana=8 dias);
+    `excedente` = 0 quando a fonte está dentro da janela. Deve devolver r em [0, 1],
+    com r = 1 para excedente 0 e decrescente depois.
+    """
+    # Hiperbólica: r = 1/2 quando o atraso iguala a janela; cauda longa, mas ~0 em meses/anos.
+    return janela / (janela + max(0, excedente)) if janela > 0 else (1.0 if excedente <= 0 else 0.0)
+
+
+def _descontar(valor: float, r: float) -> float:
+    """Peso de evidência (log-likelihood ratio, em nats) de uma fonte que só com probabilidade
+    r trata do mesmo episódio: com prob. 1−r ela fala de outro fato e não informa nada
+    (razão de verossimilhança 1). Mistura: LR_ef = r·LR + (1−r). Simétrica em |L| para
+    não favorecer direção (contesta e confirma perdem o mesmo tanto) — por isso E4 nunca
+    eleva a propensão: só tira informação de fonte de outro episódio."""
+    if r >= 1.0 or valor == 0:
+        return valor
+    return math.copysign(math.log(r * math.exp(abs(valor)) + (1.0 - r)), valor)
+
+
 def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     """(valor, descrição) de um item; registra vereditos aplicados/ignorados e conflitos."""
     if (it.motor or "").startswith("fallback") or it.classe is None:
@@ -218,12 +250,19 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
             dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
                                             "motivo": "página não julgada (sem juiz)"})
         return []
+    if not it.corpo_lido:
+        # E3: só título/snippet não vota (nem postura nem selo): "não analisada integralmente".
+        dec.nao_analisadas.append({"url": it.url, "classe": it.classe, "veredito": it.veredito,
+                                   "afirmacao": it.afirmacao})
+        if it.veredito:
+            dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
+                                            "motivo": "página não lida integralmente"})
+        return []
     out: List[tuple] = []
     post = None
     if it.classe in CLASSES_VOTO:
         d = 1.0 if it.classe == "REFUTA" else -1.0
-        w = (W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]
-             * (1.0 if it.corpo_lido else F_SO_TITULO))
+        w = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]
         post = (s * d * w, f"postura {it.classe}")
     ver = None
     if it.veredito:
@@ -262,7 +301,6 @@ def decidir(ev: Evidencias) -> Decisao:
                           "juiz_disponivel": ev.juiz_disponivel},
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
-                              "f_so_titulo": F_SO_TITULO,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
                               "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO)})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
@@ -283,7 +321,18 @@ def decidir(ev: Evidencias) -> Decisao:
         for it in ev.itens:
             if it.afirmacao != a_idx:
                 continue
-            for valor, desc in _contribuicoes(it, s, dec):
+            contribs = _contribuicoes(it, s, dec)
+            medida = (aplicabilidade.dias_excedentes(ev.texto_usuario, it.data_pub, ev.data_referencia)
+                      if contribs else None)
+            if medida and medida[1] > 0:
+                r = relevancia_temporal(medida[1], medida[0])
+                antes = sum(abs(v) for v, _ in contribs)
+                contribs = [(_descontar(v, r), f"{d} (data: r={r:.2f})") for v, d in contribs]
+                dec.descontos_temporais.append({
+                    "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub, "r": round(r, 3),
+                    "dias_alem_da_janela": medida[1], "direcao": 1 if contribs[0][0] > 0 else -1,
+                    "bits_descartados": round((antes - sum(abs(v) for v, _ in contribs)) / math.log(2), 3)})
+            for valor, desc in contribs:
                 clusters.setdefault(it.cluster or it.url, []).append((valor, desc, it))
         L_a = 0.0
         for cid, contribs in clusters.items():
@@ -329,6 +378,10 @@ def decidir(ev: Evidencias) -> Decisao:
             dec.motivo = "sem julgamento de conteúdo (LLM-juiz indisponível): nenhuma fonte foi avaliada"
         elif not ev.itens:
             dec.motivo = "nenhuma fonte encontrada sobre a afirmação"
+        elif dec.nao_analisadas and not any(it.corpo_lido for it in julgados
+                                            if it.classe in CLASSES_VOTO):
+            dec.motivo = ("evidência insuficiente: as fontes com posição não foram lidas integralmente "
+                          "(só título/resumo)")
         elif dec.contagem["sustenta"] + dec.contagem["refuta"] == 0:
             dec.motivo = "nenhuma fonte consultada confirma ou contesta a afirmação (só relatos ou fora do tema)"
         else:
@@ -344,4 +397,9 @@ def decidir(ev: Evidencias) -> Decisao:
         if dec.nivel == "media" and dec.travas.get("sem_fonte_confiavel"):
             dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados; "
                           "falta a confirmação de um veículo, órgão público ou site muito acessado")
+        elif dec.nivel == "media" and dec.descontos_temporais:
+            dec.motivo = ("as fontes encontradas são anteriores ao período que o texto descreve "
+                          "(\"hoje\", \"ontem\"…): podem tratar de outro episódio — "
+                          "verifique se não é notícia antiga recirculando")
+    dec.travas["data_incompativel"] = bool(dec.descontos_temporais)
     return dec
