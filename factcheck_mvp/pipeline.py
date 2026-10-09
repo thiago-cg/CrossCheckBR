@@ -656,6 +656,20 @@ class Pipeline:
         for p in pecas:
             if "corpo_lido" not in p:
                 p["corpo_lido"] = bool(p.get("corpo"))
+        # B1b (T5/D1): BERTimbau/mock mede a CREDIBILIDADE da página (prob_fake);
+        # a direção vem do avaliador (T6 consome p["bert"]). Só páginas lidas.
+        for p in pecas:
+            if not p.get("corpo_lido"):
+                continue
+            try:
+                r = self.detector.analisar_pagina(p.get("titulo") or "", p.get("corpo") or "")
+            except Exception as e:
+                telemetria.fallback("bert_pagina", f"{type(e).__name__}: {e}")
+                continue
+            p["bert"] = {"prob_fake": r.get("prob_fake"),
+                         "modelo": r.get("modelo") or getattr(self.detector, "nome",
+                                                              type(self.detector).__name__)}
+            telemetria.evento("bert_pagina", url=p.get("url"), prob_fake=p["bert"]["prob_fake"])
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
         for p in pecas:
             if p.get("corpo") and not p.get("_generica") \

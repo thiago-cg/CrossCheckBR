@@ -8,16 +8,35 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, List, Protocol
 
 from . import config
 
 log = logging.getLogger("factcheck.modelo")
 
+# T5 (B1b/D1): modelo treinado com texto curto → credibilidade da página em
+# blocos de max_length tokens (192), até 4 blocos, com média.
+BERT_MAX_LENGTH = 192
+BERT_MAX_BLOCOS = 4
+
+
+def _blocos(texto: str, max_length: int = BERT_MAX_LENGTH,
+            max_blocos: int = BERT_MAX_BLOCOS) -> List[str]:
+    toks = (texto or "").split()
+    return [" ".join(toks[i:i + max_length])
+            for i in range(0, len(toks), max_length)][:max_blocos]
+
+
+def _combinar(titulo: str, corpo: str) -> str:
+    return "\n".join(t for t in (titulo or "", corpo or "") if t.strip())
+
 
 class DetectorFake(Protocol):
     def analisar(self, texto: str) -> Dict[str, Any]:
         """Retorna {prob_fake 0..1, modelo, mock bool}."""
+
+    def analisar_pagina(self, titulo: str, corpo: str) -> Dict[str, Any]:
+        """Credibilidade da página: {prob_fake 0..1, modelo, mock bool}."""
 
 
 _SINAIS_LEXICOS = [
@@ -44,6 +63,13 @@ class MockDetector:
             score += 0.05  # texto curto demais p/ avaliar
         return {"prob_fake": round(min(0.95, max(0.05, score)), 3), "modelo": self.nome, "mock": True}
 
+    def analisar_pagina(self, titulo: str, corpo: str) -> Dict[str, Any]:
+        """Média do mock por bloco de 192 tokens (máx 4)."""
+        blocos = _blocos(_combinar(titulo, corpo)) or [""]
+        probs = [self.analisar(b)["prob_fake"] for b in blocos]
+        return {"prob_fake": round(sum(probs) / len(probs), 3),
+                "modelo": self.nome, "mock": True}
+
 
 class ModeloTreinadoDetector:
     """Hook p/ o modelo real da equipe. Formato esperado: joblib/sklearn com
@@ -58,6 +84,10 @@ class ModeloTreinadoDetector:
     def analisar(self, texto: str) -> Dict[str, Any]:
         proba = float(self._modelo.predict_proba([texto or ""])[0][1])
         return {"prob_fake": round(proba, 3), "modelo": self.nome, "mock": False}
+
+    def analisar_pagina(self, titulo: str, corpo: str) -> Dict[str, Any]:
+        """sklearn de texto curto: 1 chamada no texto combinado (sem blocos)."""
+        return self.analisar(_combinar(titulo, corpo))
 
 
 class BertimbauDetector:
@@ -106,6 +136,15 @@ class BertimbauDetector:
         margem = logits[1] - logits[0] if len(logits) > 1 else logits[0]
         proba = 1.0 / (1.0 + math.exp(-(self._a * margem + self._b)))
         return {"prob_fake": round(min(0.99, max(0.01, proba)), 3),
+                "modelo": self.nome, "mock": False}
+
+    def analisar_pagina(self, titulo: str, corpo: str) -> Dict[str, Any]:
+        """Média calibrada por bloco de max_length tokens (máx 4)."""
+        ids = self._tok(_combinar(titulo, corpo), add_special_tokens=False).get("input_ids") or []
+        blocos = [ids[i:i + self._max_len]
+                  for i in range(0, len(ids), self._max_len)][:BERT_MAX_BLOCOS] or [[]]
+        probs = [self.analisar(self._tok.decode(b))["prob_fake"] for b in blocos]
+        return {"prob_fake": round(sum(probs) / len(probs), 3),
                 "modelo": self.nome, "mock": False}
 
 
