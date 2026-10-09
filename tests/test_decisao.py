@@ -525,7 +525,8 @@ def test_e4_trava_sem_marcador_temporal_nao_muda_nada():
 
 def test_e4_trava_corta_afirmacao_so_descontada_e_a_tira_da_conjuncao(monkeypatch):
     """Trava + conjunção: A confirmada por fontes atuais (L=−3) e B só com 14 posturas antigas (r=0,05,
-    L_b≈+1,15 → cortado para 0,99τ). B sai do produto: o texto fica baixa. Sem a trava, B sustentaria alta."""
+    L_b≈+1,15 → cortado para 0,99τ). B sai do produto. O que sobra é A (−3), e a baixa que sobraria fica
+    limitada a média (D-b, decisão de 09/10): a baixa dependeria de B, que não tem fonte do período."""
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     a = [_it_e4(f"https://{dom}/a", dom, "SUSTENTA", _RECENTE, af=0)
          for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
@@ -533,8 +534,8 @@ def test_e4_trava_corta_afirmacao_so_descontada_e_a_tira_da_conjuncao(monkeypatc
     d = decidir(_ev_afs_janela(a + b, textos=("A obra custou 2 bilhões", "A ponte caiu hoje"), janelas=(None, 2)))
     assert d.por_afirmacao[1]["L"] == pytest.approx(0.99 * decisao.TAU, abs=1e-4)
     assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
-    assert d.travas["so_fontes_de_outro_periodo"]
-    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
+    assert d.travas["so_fontes_de_outro_periodo"] and d.travas["parte_sem_checagem_atual"]
+    assert d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4) and d.nivel == "media"
 
 
 def test_e4_trava_e_sem_fonte_confiavel_juntas_registram_as_duas_flags(monkeypatch):
@@ -961,7 +962,8 @@ def _ev_afs_janela(itens, textos=("A obra custou 2 bilhões", "A ponte caiu hoje
 
 def test_t7_so_evidencia_descontada_sai_da_conjuncao(monkeypatch):
     """Achado do T7 (09/10): A confirmada (L=-3, fontes atuais) + B só com fonte de 2021, descontada
-    (r≈0,001, L_b≈+0,002). Antes B entrava com p≈0,5 e o texto ficava media; agora B fica fora do produto."""
+    (r≈0,001, L_b≈+0,002). B fica fora do produto. Sem B, A daria baixa, e D-b limita o texto a média, com a
+    frase neutra sobre a afirmação B."""
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
     a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
     b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
@@ -969,7 +971,8 @@ def test_t7_so_evidencia_descontada_sai_da_conjuncao(monkeypatch):
     assert d.por_afirmacao[0]["L"] == pytest.approx(-3.0)
     assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
     assert "fora_da_conjuncao" not in d.por_afirmacao[0]
-    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
+    assert d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4) and d.nivel == "media"  # D-b
+    assert d.travas["parte_sem_checagem_atual"]
     assert "E4" in d.parametros["combinacao"]
     # o contrafactual (sem desconto) usa o mesmo critério (decisão de 09/10): lá B conta com o voto bruto
     # (REFUTA, +1, contestada) e é a única parte que soma; A, confirmada (−3), não entra
@@ -995,7 +998,8 @@ def test_t7_votos_atuais_que_se_anulam_continuam_no_produto():
 def test_t7_so_descontada_forte_e_cortada_e_sai_da_conjuncao(monkeypatch):
     """Regra decidida (09/10, guarda do sinal: E4 nunca sustenta extremo só com fonte descontada). Antes da
     trava, B (3 fontes de 2021, r=0,9 no stub, L_b≈+2,8 ≥ τ) entrava na conjunção e A (confirmada, −3)
-    virava alta (L≈+2,85). Agora a trava so_fontes corta B para 0,99τ e ela sai do produto: fica baixa."""
+    virava alta (L≈+2,85). Agora a trava so_fontes corta B para 0,99τ e ela sai do produto. Sobra A (−3),
+    e D-b limita a baixa a média, porque a baixa dependeria de B, sem fonte do período."""
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.9)
     a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
     b = [_it_datada(f"https://{dom}/b", "REFUTA", "2021-07-18", af=1)
@@ -1004,7 +1008,7 @@ def test_t7_so_descontada_forte_e_cortada_e_sai_da_conjuncao(monkeypatch):
     assert d.por_afirmacao[1]["L"] == pytest.approx(0.99 * decisao.TAU, abs=1e-4)
     assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
     assert d.travas["so_fontes_de_outro_periodo"]
-    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
+    assert d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4) and d.nivel == "media"  # D-b
 
 
 def test_t7_uma_afirmacao_so_descontada_nao_muda(monkeypatch):
@@ -1039,6 +1043,50 @@ def test_t7_duas_so_descontadas_fracas_nao_informam(monkeypatch):
     assert {x["afirmacao"] for x in d.descontos_temporais} == {0, 1}
     assert all(p["fora_da_conjuncao"] == "só evidência de outro período" for p in d.por_afirmacao)
     assert d.log_odds == 0 and d.nivel == "media"
+
+
+# ------------------------------------------------------------------ D-b (09/10): parte sem fonte atual limita a média
+def test_t7_parte_sem_fonte_atual_nao_deixa_o_texto_cravar_baixa(monkeypatch):
+    """Repro do revisor: A confirmada por 3 curadas atuais (L=−3) e B "A ponte caiu hoje" só com REFUTA de 2021
+    (fora da conjunção). Antes o texto ficava baixa. Agora fica média (L = −0,99τ), com a trava, a frase
+    neutra sobre B e o registro no trace."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.nivel == "media" and d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4)
+    assert d.travas["parte_sem_checagem_atual"] is True
+    assert d.resumo_trace()["parte_sem_checagem_atual"] is True
+    j = d.justificativa()
+    assert 'A afirmação "A ponte caiu hoje" não tem fonte do período descrito.' in j
+    assert "não tem fonte" not in d.why_1linha()
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+def test_t7_parte_sem_fonte_atual_mantem_alta_pela_contestada_atual(monkeypatch):
+    """D-b: se o nível é alta pelas partes contestadas atuais, a parte só de outro período não rebaixa nada,
+    não há limite e a frase neutra não aparece."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "REFUTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br")]
+    b = [_it_datada("https://folha.uol.com.br/b", "SUSTENTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.nivel == "alta" and d.log_odds == pytest.approx(2.0, abs=1e-4)
+    assert not d.travas["parte_sem_checagem_atual"]
+    assert "não tem fonte do período descrito" not in d.justificativa()
+
+
+def test_t7_duas_partes_fora_com_baixa_citam_as_duas_e_ficam_em_media(monkeypatch):
+    """Com duas afirmações fora (só de outro período) e a confirmada atual, a frase neutra cita as duas."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    textos = ("A obra custou 2 bilhões", "A ponte caiu hoje", "O prefeito renunciou hoje")
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    c = [_it_datada("https://uol.com.br/c", "SUSTENTA", "2021-07-18", af=2)]
+    d = decidir(_ev_afs_janela(a + b + c, textos=textos, janelas=(None, 2, 2)))
+    assert d.nivel == "media" and d.travas["parte_sem_checagem_atual"]
+    j = d.justificativa()
+    assert '"A ponte caiu hoje" não tem fonte do período descrito' in j
+    assert '"O prefeito renunciou hoje" não tem fonte do período descrito' in j
 
 
 # ------------------------------------------------------------------ contagem do texto (só o que pesou)

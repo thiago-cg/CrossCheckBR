@@ -51,6 +51,10 @@ fontes fora da janela (descontadas) e cujo |L_a| < τ ("só evidência de outro 
 `por_afirmacao[i]`): evidência de outro episódio que não chega a um nível não informa o fato
 atual. Também sai a afirmação que a trava so_fontes (abaixo) cortou. O contrafactual (sem
 desconto) não muda.
+D-b (decisão da usuária, 09/10): se alguma afirmação saiu por "só evidência de outro período" e o
+nível sairia baixa, o texto fica em média (L = −0,99τ), `travas["parte_sem_checagem_atual"] = True`,
+e a justificativa diz, de forma neutra, que a afirmação não tem fonte do período descrito. Se o nível
+é alta pelas partes contestadas atuais, ele se mantém.
 E4, guarda do sinal (decisão da usuária, 09/10): E4 só remove informação de fonte de outro episódio.
 O nível pode ficar mais extremo apenas na direção de fontes do período, nunca sustentado só por
 fonte descontada. Trava `so_fontes_de_outro_periodo` (só no caminho COM desconto): por afirmação, se
@@ -247,6 +251,9 @@ class Decisao:
             if self.travas.get("sem_fonte_confiavel"):
                 partes.append("As fontes que tomam posição são redes sociais ou sites pouco acessados, "
                               "então o resultado não passa de propensão média.")
+            if self.travas.get("parte_sem_checagem_atual"):  # D-b
+                partes += [_frase_sem_fonte_atual(e, i) for i, e in enumerate(self.por_afirmacao)
+                           if "fora_da_conjuncao" in e]
         partes.append(f"Lidas {c.get('lidas', 0)} página(s) de {c.get('consultadas', 0)} consultada(s); "
                       f"{c.get('julgadas', 0)} julgada(s): {c.get('sustenta', 0)} confirmam, "
                       f"{c.get('refuta', 0)} contestam, {c.get('relata', 0)} só relatam, "
@@ -330,6 +337,13 @@ def _citar_afirmacao(entrada: Dict[str, Any], idx: int) -> str:
     if len(texto) > _LIMITE_CITACAO:
         texto = texto[:_LIMITE_CITACAO - 1].rstrip() + "…"
     return f'"{texto}"'
+
+
+def _frase_sem_fonte_atual(entrada: Dict[str, Any], idx: int) -> str:
+    """D-b (09/10): a afirmação que saiu por "só evidência de outro período", dita de forma neutra."""
+    cit = _citar_afirmacao(entrada, idx)  # '"texto"', ou 'a afirmação N' quando o texto não pode ser citado
+    sujeito = f"A afirmação {cit}" if cit.startswith('"') else cit[:1].upper() + cit[1:]
+    return f"{sujeito} não tem fonte do período descrito."
 
 
 def nivel_de(L: float) -> str:
@@ -543,7 +557,8 @@ def decidir(ev: Evidencias) -> Decisao:
     """Função pura: mesma entrada, mesma Decisao. Não faz I/O nem telemetria."""
     dec = Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="",
                   travas={"vago": ev.vago, "opiniao": ev.opiniao, "rumor": ev.rumor, "sem_fonte_confiavel": False,
-                          "so_fontes_de_outro_periodo": False, "juiz_disponivel": ev.juiz_disponivel},
+                          "so_fontes_de_outro_periodo": False, "parte_sem_checagem_atual": False,
+                          "juiz_disponivel": ev.juiz_disponivel},
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
@@ -632,6 +647,11 @@ def decidir(ev: Evidencias) -> Decisao:
     for a in fora:
         dec.por_afirmacao[a]["fora_da_conjuncao"] = "só evidência de outro período"
     L = _combinar_afirmacoes([por_af[a] for a in com_voto if a not in fora])
+    # D-b (09/10): a parte só com fonte de outro período não deixa o texto cravar baixa. Se alguma
+    # afirmação saiu por isso e o nível sairia baixa, o texto fica em média.
+    if fora and L <= -TAU:
+        L = math.copysign(TAU * 0.99, L)
+        dec.travas["parte_sem_checagem_atual"] = True
     L_sem = _combinar_afirmacoes([por_af_brutos[a] for a in por_af_brutos if n_brutos[a] > 0])
     dec.log_odds = round(L, 4)
     dec.log_odds_sem_desconto = round(L_sem, 4)
