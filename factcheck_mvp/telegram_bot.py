@@ -221,6 +221,8 @@ def _urls_nao_analisadas(rel) -> set:
 # RACIOCINIO_MAX_BOT chars (com "…"), o mesmo alvo (~240) que o prompt pede ao avaliador:
 # só corta resposta fora do contrato. O dado em Fonte é inteiro, e a web mostra inteiro.
 RACIOCINIO_MAX_BOT = 240
+# Teto de caracteres de uma mensagem do bot (folga sobre o limite de 4096 do Telegram).
+LIMITE_TELEGRAM = 3900
 
 
 def formatar(rel: RelatorioChecagem) -> str:
@@ -249,15 +251,15 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import direcoes_por_url, linha_raciocinio, postura_legivel
+        from .agregador import data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
-        try:
-            _dec = getattr(rel, "decisao", None) or {}
-            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
-        except Exception:
-            _descontadas = set()
+        # E4: fontes com desconto por data. `decisao` é Optional[dict] no schema e cada desconto é
+        # um dict (saída de asdict): não há exceção a engolir. Um erro aqui deve aparecer (o _checar
+        # loga e responde "Não consegui concluir"), e não virar um aviso de data silenciosamente faltando.
+        _dec = getattr(rel, "decisao", None) or {}
+        _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
             selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
@@ -276,15 +278,7 @@ def formatar(rel: RelatorioChecagem) -> str:
             # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
             _r = getattr(f, "relevancia_temporal", None)
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _bruta = getattr(f, "data_pub_bruta", None)
-                _pub = getattr(f, "data_pub", None)
-                _dtxt = ""
-                if _bruta:
-                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
-                elif _pub:
-                    _m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
                 if _dtxt:
                     linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
                 else:
@@ -319,7 +313,10 @@ def formatar(rel: RelatorioChecagem) -> str:
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]
     texto = "\n".join(linhas)
-    return texto[:3900].rsplit("\n", 1)[0]  # corta em quebra de linha, nunca no meio da URL
+    if len(texto) <= LIMITE_TELEGRAM:
+        return texto
+    # Acima do limite do Telegram: corta em quebra de linha, nunca no meio da URL.
+    return texto[:LIMITE_TELEGRAM].rsplit("\n", 1)[0]
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -66,8 +66,9 @@ class FonteEvidencia(BaseModel):
     trecho_corpo: Optional[str] = None
     corpo_lido: bool = False
     # Clareza lado-a-lado (check #1): data + quote + tipo p/ tabela
-    data_pub: Optional[str] = None
-    data_pub_bruta: Optional[str] = None
+    data_pub: Optional[str] = None  # normalizada (UTC−3): a mesma que a decisão usou
+    data_pub_bruta: Optional[str] = None  # como veio da fonte (auditoria; não é exibida)
+    data_pub_precisao: Optional[str] = None  # dia | ano (aplicabilidade.normalizar_data)
     relevancia_temporal: Optional[float] = None
     quote: Optional[str] = None
     tipo_conteudo: Optional[str] = None  # noticia|checagem|opiniao|satira

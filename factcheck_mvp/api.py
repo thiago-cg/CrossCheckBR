@@ -148,8 +148,27 @@ async def checar(entrada: EntradaConsulta, request: Request):
         raise HTTPException(status_code=502, detail="falha temporária, tente de novo em instantes")
 
 
+def _descontos_html(decisao: dict | None) -> str:
+    """E4 Task 6 (web): cada fonte com desconto por data, com os dias além da janela, r e bits.
+    Os bits ficam só aqui (o bot não os mostra: técnico demais). A URL vem escapada."""
+    itens = []
+    for x in (decisao or {}).get("descontos_temporais") or []:
+        url = str(x.get("url") or "")
+        if not url:
+            continue
+        bits = x.get("bits_descartados")
+        bits_txt = f"{float(bits):.2f}" if isinstance(bits, (int, float)) else "?"
+        itens.append(f"<li>{html.escape(url)} — {x.get('dias_alem_da_janela', '?')} dias além da janela de "
+                     f"{x.get('janela', '?')} · r={x.get('r', '?')} · {bits_txt} bit(s) descartado(s)</li>")
+    if not itens:
+        return ""
+    return ("<p><b>Fontes com desconto por data</b> (publicadas antes do período do texto):</p>"
+            f"<ul>{''.join(itens)}</ul>")
+
+
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
-    from .agregador import NOMES_ETAPAS, STATUS_ETAPA, direcoes_por_url, linha_raciocinio, postura_legivel
+    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
+                            linha_raciocinio, postura_legivel)
     from .confiabilidade import ROTULO
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
@@ -161,14 +180,11 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
         nao_lidas = _urls_nao_analisadas(rel)
         uteis = [f for f in rel.fontes if f.relevante is not False][:5]
         cor = {"contesta o que o texto afirma": "#b42318", "confirma o que o texto afirma": "#067647"}
-        try:
-            _dec = rel.decisao or {}
-            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
-        except Exception:
-            _descontadas = set()
+        # E4: mesma regra do bot (ver telegram_bot.formatar): `decisao` validado pelo schema, sem try.
+        _dec = rel.decisao or {}
+        _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
 
         def _cartao(f) -> str:
-            import re as _re
             post = postura_legivel(f, direcoes)
             if bool(getattr(f, "corpo_lido", False)) and f.url not in nao_lidas:
                 leitura = "📄 texto lido"
@@ -179,15 +195,7 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             _r = getattr(f, "relevancia_temporal", None)
             _linha_data = ""
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _bruta = getattr(f, "data_pub_bruta", None)
-                _pub = getattr(f, "data_pub", None)
-                _dtxt = ""
-                if _bruta:
-                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_bruta))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_bruta)[:40]
-                elif _pub:
-                    _m = _re.match(r"(\d{4})-(\d{2})-(\d{2})", str(_pub))
-                    _dtxt = f"{_m.group(3)}/{_m.group(2)}/{_m.group(1)}" if _m else str(_pub)[:40]
+                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
                 if _dtxt:
                     _linha_data = f"<br/>📅 publicada em {esc(_dtxt)} · anterior ao período do texto"
                 else:
@@ -220,7 +228,8 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                   f"<h3>O que as fontes dizem</h3>"
                   f"{fontes or '<p>Não encontramos fontes que tratem do assunto. Na dúvida, não compartilhe.</p>'}"
                   f"<h3>Para avaliar você mesmo</h3><ul>{guia}</ul>"
-                  f"<details><summary>Como chegamos aqui</summary><ul>{etapas}</ul></details>"
+                  f"<details><summary>Como chegamos aqui</summary><ul>{etapas}</ul>"
+                  f"{_descontos_html(rel.decisao)}</details>"
                   f"<details><summary>Limitações desta análise</summary><ul>{lims}</ul></details>")
     return ("<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>CrossCheckBR</title></head>"

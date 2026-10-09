@@ -103,10 +103,10 @@ def test_rodar_metricas_artefatos_baseline_e_gate(amb):
     assert "acerto" in m["intervalos_wilson"]
     d = out["dir"]
     assert (d / "metricas.json").exists() and (d / "casos.jsonl").exists()
-    md = (d / "relatorio.md").read_text()
+    md = (d / "relatorio.md").read_text(encoding="utf-8")
     assert "cli trace" in md and "ATENÇÃO" in md and "🛑" in md
     assert "sempre_alta" in md and "balanceada" in md
-    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text().splitlines()]
+    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text(encoding="utf-8").splitlines()]
     assert all(c["run_id"] and (amb / "runs" / c["run_id"] / "resultado.json").exists() for c in casos)
     ev.salvar_baseline(out["meta"], m, out["casos"], amb / "baseline.json")
 
@@ -213,6 +213,76 @@ def test_sem_e4_zera_desconto_e_recupera_modulo():
     assert abs(sem[0]["log_odds"]) > abs(base[0]["log_odds"])
 
 
+def _eventos_sem_evidencias(motivo_voto, veredito="FALSO", ignorado=None):
+    """Trace antigo (sem evento `evidencias`): só `fonte juiz` e `decisao`, como a reconstrução lê."""
+    votos = [] if motivo_voto is None else [
+        {"afirmacao": 0, "cluster": "lupa.test", "urls": ["https://lupa.test/x"], "motivo": motivo_voto}]
+    ignorados_l = [] if ignorado is None else [
+        {"url": "https://lupa.test/x", "veredito": veredito, "motivo": ignorado}]
+    return [
+        {"tipo": "fonte", "dados": {"url": "https://lupa.test/x", "estagio": "juiz", "classe": "REFUTA",
+                                     "afirmacao": 0, "veredito": veredito, "curada": True, "corpo_lido": True}},
+        {"tipo": "decisao", "dados": {"nivel": "alta", "travas": {"contagem": {"lidas": 1, "consultadas": 1}},
+                                       "decisao": {"votos": votos, "vereditos_ignorados": ignorados_l}}},
+    ]
+
+
+def test_reconstrucao_preserva_a_origem_do_selo_que_o_trace_registra():
+    from eval.decisao_gerar import evidencias_do_trace
+    it = evidencias_do_trace(_eventos_sem_evidencias("postura REFUTA; selo FALSO (indice)"))["itens"][0]
+    assert it["origem_veredito"] == "indice"
+    it = evidencias_do_trace(_eventos_sem_evidencias("selo FALSO (pagina)"))["itens"][0]
+    assert it["origem_veredito"] == "pagina"
+    ign = "selo extraído da página não vota (só o do índice)"
+    assert evidencias_do_trace(_eventos_sem_evidencias(None, ignorado=ign))["itens"][0]["origem_veredito"] == "pagina"
+
+
+def test_reconstrucao_sem_informacao_usa_pagina_so_quando_ha_selo():
+    """Sem registro da origem no trace, o default 'pagina' vale (documentado); sem selo, None."""
+    from eval.decisao_gerar import evidencias_do_trace
+    assert evidencias_do_trace(_eventos_sem_evidencias(None))["itens"][0]["origem_veredito"] == "pagina"
+    sem_selo = evidencias_do_trace(_eventos_sem_evidencias(None, veredito=None))["itens"][0]
+    assert sem_selo["origem_veredito"] is None
+
+
+def test_gerar_snapshot_conta_a_parte_os_reconstruidos(amb):
+    from eval.decisao import gerar_snapshot_de_resultado
+    res_dir = amb / "resultado_rec"
+    res_dir.mkdir()
+    runs = amb / "runs_rec"
+    (runs / "rid_rec").mkdir(parents=True)
+    linhas = [{"ts": "2026-10-09T00:00:00+00:00", "t_rel_ms": 1.0, "tipo": e["tipo"], "dados": e["dados"]}
+              for e in _eventos_sem_evidencias("postura REFUTA; selo FALSO (indice)")]
+    (runs / "rid_rec" / "trace.jsonl").write_text(
+        "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in linhas), encoding="utf-8")
+    (res_dir / "casos.jsonl").write_text(
+        json.dumps({"id": "rec", "rotulo": "falso", "esperado": ["alta"], "aceitavel": [], "tags": [],
+                    "run_id": "rid_rec"}) + "\n", encoding="utf-8")
+    n, pul, rec = gerar_snapshot_de_resultado(res_dir, amb / "snap_rec.jsonl", runs_dir=runs)
+    assert (n, pul, rec) == (1, 0, 1)
+    evd = json.loads((amb / "snap_rec.jsonl").read_text(encoding="utf-8"))["evidencias"]
+    assert "texto_usuario" not in evd and evd["itens"][0]["origem_veredito"] == "indice"
+
+
+def test_mensagem_do_gerar_snapshot_separa_os_reconstruidos(monkeypatch, capsys, tmp_path):
+    from eval import decisao as ed
+    monkeypatch.setattr(ed, "gerar_snapshot_de_resultado", lambda resultado, saida: (3, 1, 2))
+    assert ed.main(["--gerar-snapshot", "--resultado", str(tmp_path), "--saida", str(tmp_path / "s.jsonl")]) == 0
+    out = capsys.readouterr().out
+    assert "3 linha(s)" in out and "1 pulado(s) sem evento evidencias" in out and "2 reconstruída(s)" in out
+
+
+def test_e4_do_trace_marca_janela_do_texto_sem_try():
+    """`janela_temporal` só recebe texto (regex sobre str): a marca do texto sai direto."""
+    from eval.run import _e4_do_trace
+    eventos = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": "Bolsonaro recebeu alta do hospital hoje", "janela": None}],
+        "texto_usuario": "Bolsonaro recebeu alta do hospital hoje", "data_referencia": "2026-10-09"}}]
+    r = _e4_do_trace(eventos)
+    assert r["marcador"] is True and r["referencia_ausente"] is False
+    assert _e4_do_trace([{"tipo": "evidencias", "dados": {"afirmacoes": [], "texto_usuario": None}}])["marcador"] is False
+
+
 def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     from eval.decisao import gerar_snapshot_de_resultado
     res_dir = amb / "resultado"
@@ -226,8 +296,8 @@ def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     (res_dir / "casos.jsonl").write_text(
         json.dumps({"id": "e4-hoje", "rotulo": "falso", "esperado": ["alta"], "aceitavel": ["media"],
                     "tags": [], "run_id": "rid1"}) + "\n", encoding="utf-8")
-    n, pul = gerar_snapshot_de_resultado(res_dir, amb / "snap.jsonl", runs_dir=runs)
-    assert (n, pul) == (1, 0)
+    n, pul, rec = gerar_snapshot_de_resultado(res_dir, amb / "snap.jsonl", runs_dir=runs)
+    assert (n, pul, rec) == (1, 0, 0)  # com evento `evidencias`: nada reconstruído
     linha = json.loads((amb / "snap.jsonl").read_text(encoding="utf-8"))
     assert linha["id"] == "e4-hoje" and linha["evidencias"]["data_referencia"] == "2026-10-09"
 

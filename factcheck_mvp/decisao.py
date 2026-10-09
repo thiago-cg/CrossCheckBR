@@ -82,6 +82,9 @@ F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEG
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
 CLASSES_TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
+# Trecho do `motivo` de `decidir` quando o desconto temporal zera a evidência (indeterminada):
+# a justificativa e o why já trazem o aviso de data por esse motivo (ver `_motivo_avisa_data`).
+_MARCA_OUTRO_EPISODIO = "outro episódio"
 
 
 @dataclass
@@ -101,6 +104,8 @@ class ItemEvidencia:
     confiabilidade: Optional[str] = None   # confiabilidade.NIVEIS; None = calcula pela URL
     data_pub: Optional[str] = None         # YYYY-MM-DD da peça (E4: relevância temporal)
     prob_fake_pagina: Optional[float] = None  # T6/B1c: P(fake) da página (BERTimbau); None = sem modelo real
+    data_pub_bruta: Optional[str] = None      # E4: data como veio da fonte (só telemetria/auditoria; não decide)
+    data_pub_precisao: Optional[str] = None   # E4: dia|ano da data normalizada (telemetria; não decide)
 
     def nivel_confiabilidade(self) -> str:
         return self.confiabilidade or confiabilidade.classificar(self.url, self.curada)
@@ -169,6 +174,22 @@ class Decisao:
     def n_clusters(self, sinal: int) -> int:
         return len({(v.afirmacao, v.cluster) for v in self.votos if v.valor * sinal > 0})
 
+    def n_fontes_descontadas(self) -> int:
+        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
+        return len({x.get("url") for x in self.descontos_temporais if x.get("url")})
+
+    def _motivo_avisa_data(self) -> bool:
+        """Indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência): o bloco E4
+        da justificativa e o sufixo do why não repetem o aviso."""
+        return self.nivel == "indeterminada" and _MARCA_OUTRO_EPISODIO in self.motivo
+
+    def limitacao_datas(self) -> str:
+        """Limitação neutra sobre datas (o bot mostra as 3 primeiras; o pipeline a põe no início)."""
+        n = self.n_fontes_descontadas()
+        if n == 1:
+            return "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
+        return f"Datas: {n} fontes anteriores ao período do texto tiveram o peso reduzido."
+
     def _partes_em_conflito(self) -> str:
         """D2: em alta, uma afirmação contestada (L_a ≥ τ) e outra confirmada (L_a ≤ −τ) são
         citadas, cada uma pelo próprio texto. "" quando não se aplica."""
@@ -215,11 +236,16 @@ class Decisao:
                          if c.get("citacao_invalida") else "")
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
         # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
-        if self.travas.get("data_incompativel") and self.descontos_temporais:
-            n_dt = len(self.descontos_temporais)
-            partes.append(f"{n_dt} fonte(s) foram publicadas antes do período que o texto descreve "
-                          "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
-                          "de outro episódio.")
+        if self.travas.get("data_incompativel") and self.descontos_temporais and not self._motivo_avisa_data():
+            n_dt = self.n_fontes_descontadas()
+            if n_dt == 1:
+                partes.append("1 fonte foi publicada antes do período que o texto descreve "
+                              "(\"hoje\", \"ontem\"…); o peso dela foi reduzido porque pode tratar "
+                              "de outro episódio.")
+            else:
+                partes.append(f"{n_dt} fontes foram publicadas antes do período que o texto descreve "
+                              "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
+                              "de outro episódio.")
             if self.nivel != self.nivel_sem_desconto:
                 partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
@@ -238,7 +264,8 @@ class Decisao:
             if conflito:
                 base += " " + conflito
         # E4 Task 6: sufixo curto só quando o desconto mudou o nível (neutro, sobre datas).
-        if self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto:
+        if (self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto
+                and not self._motivo_avisa_data()):
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
         return base
 
@@ -255,7 +282,6 @@ class Decisao:
             "descontos": [f"{d.get('url', '')[:60]} +{d.get('dias_alem_da_janela')}d "
                           f"r={d.get('r')} −{d.get('bits_descartados')}b"
                           for d in self.descontos_temporais][:6],
-            "L": round(self.log_odds, 3), "p": round(self.prob, 3), "motivo": self.motivo,
             "votos": [f"af{v.afirmacao}:{v.cluster} {v.valor:+.2f} [{','.join(v.classes)}"
                       f"{'|' + ','.join(v.vereditos) if v.vereditos else ''}] {v.motivo}" for v in self.votos],
             "vereditos": [f"{v['veredito']}@{v['url'][:60]}" for v in self.vereditos_aplicados],
@@ -513,6 +539,7 @@ def decidir(ev: Evidencias) -> Decisao:
                 bits = (nats_antes - nats_depois) / math.log(2)
                 dec.descontos_temporais.append({
                     "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub,
+                    "data_pub_bruta": it.data_pub_bruta, "data_pub_precisao": it.data_pub_precisao,
                     "janela": medida[0], "dias_alem_da_janela": medida[1], "r": round(r, 3),
                     "direcao": direcao,
                     "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),

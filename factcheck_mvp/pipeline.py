@@ -550,7 +550,8 @@ class Pipeline:
                 veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
                 confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub"),
-                prob_fake_pagina=prob_fake))
+                prob_fake_pagina=prob_fake,
+                data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao")))
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(
                 texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
@@ -1047,14 +1048,14 @@ class Pipeline:
                               valor=v.motivo, confianca=None, direcao=v.direcao, peso=v.peso,
                               evidencias=v.urls[:3])
         # E4: uma fonte descontada por item de dec.descontos_temporais (decidir segue puro,
-        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao ficam None
-        # quando o desconto não as carrega (compat com traces antigos).
+        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao vêm do próprio
+        # desconto; ficam None só em traces anteriores a elas.
         for d in dec.descontos_temporais:
             telemetria.evento("fonte", url=d.get("url"), estagio="data", decisao="descontada",
                               motivo=f"{d.get('dias_alem_da_janela')} dias além da janela "
                                      f"de {d.get('janela')}",
                               afirmacao=d.get("afirmacao"), data_pub=d.get("data_pub"),
-                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("precisao"),
+                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("data_pub_precisao"),
                               r=d.get("r"), bits=d.get("bits_descartados"))
         telemetria.evento("decisao", nivel=dec.nivel, nivel_agregador=dec.nivel, score=dec.log_odds,
                           sinais=[f"af{v.afirmacao}:{v.cluster}:{v.valor:+.2f}" for v in dec.votos],
@@ -1104,7 +1105,7 @@ class Pipeline:
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
-                data_pub_bruta=p.get("data_pub_bruta"),
+                data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao"),
                 relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
@@ -1130,10 +1131,10 @@ class Pipeline:
         priorizar_data = bool(getattr(dec, "travas", {}).get("data_incompativel")
                               and getattr(dec, "descontos_temporais", None))
         if priorizar_data:
-            n_dt = len(dec.descontos_temporais or [])
-            lims.append(f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
+            # No início: o bot mostra só as 3 primeiras limitações (telegram_bot.formatar).
+            lims.insert(0, dec.limitacao_datas())
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
                                  fontes=fontes, etapas=etapas, limitacoes=lims,
-                                 perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,
+                                 perguntas_guia=perguntas_guia(), consulta=entrada,
                                  header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
                                  onde_encontrado=onde_encontrado)

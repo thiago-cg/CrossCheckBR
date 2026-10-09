@@ -74,6 +74,21 @@ def linha_raciocinio(raciocinio: Optional[str], limite: Optional[int] = None) ->
     return f"🧠 {ROTULO_RACIOCINIO} {texto}"
 
 
+_DATA_ISO_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
+
+
+def data_publicacao_legivel(data_pub: Optional[str], precisao: Optional[str] = None) -> str:
+    """Data de publicação para o usuário (bot e web), a partir da data NORMALIZADA (UTC−3, a
+    mesma que a decisão usou). Precisão "ano" (placeholder de ano do extrator ou "há N meses")
+    mostra só o ano; as demais, DD/MM/AAAA. Sem data ISO reconhecível devolve "": nunca o texto
+    bruto (um "há 3 dias" não vira "publicada em há 3 dias")."""
+    m = _DATA_ISO_RE.match(str(data_pub or "").strip())
+    if not m:
+        return ""
+    ano, mes, dia = m.groups()
+    return ano if precisao == "ano" else f"{dia}/{mes}/{ano}"
+
+
 def _agencias_checagem() -> frozenset:
     """Nomes normalizados das agências de checagem do catálogo (leitura fresca)."""
     nomes = set()
@@ -115,13 +130,10 @@ def verificar_neutralidade(texto: str) -> List[str]:
     return achadas
 
 
-def perguntas_guia(priorizar_data: bool = False) -> List[str]:
-    if not priorizar_data:
-        return list(_PERGUNTAS_GUIA)
-    # E4 Task 6: com desconto temporal, a pergunta de data vai para o topo.
-    data_q = next((q for q in _PERGUNTAS_GUIA if q.startswith("Compare a data")), None)
-    resto = [q for q in _PERGUNTAS_GUIA if q != data_q]
-    return ([data_q] if data_q else []) + resto
+def perguntas_guia() -> List[str]:
+    """Perguntas para o usuário avaliar sozinho. A de data ("Compare a data…") é sempre a
+    primeira: com desconto temporal ela já está no topo, então não há parâmetro para isso."""
+    return list(_PERGUNTAS_GUIA)
 
 
 def titulo_propensao(propensao: str) -> str:

@@ -152,6 +152,150 @@ def test_bot_raciocinio_longo_e_cortado_so_na_exibicao():
     assert rel.fontes[0].raciocinio == longo  # o dado em Fonte não muda
 
 
+def test_bot_nao_corta_a_ultima_linha_quando_o_texto_cabe():
+    """Bug: `texto[:3900].rsplit("\\n", 1)[0]` tirava SEMPRE a última linha (a última pergunta-guia).
+    O corte só existe acima de 3900 caracteres."""
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="alta", justificativa="Alta propensão de ser fake news.",
+        header="🔴 Alta propensão de ser fake news",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        perguntas_guia=["Pergunta um?", "Pergunta dois?", "Última pergunta-guia?"])
+    t = formatar(rel)
+    assert len(t) <= 3900
+    assert "• Última pergunta-guia?" in t
+    assert verificar_neutralidade(t) == []
+
+
+def test_limitacao_de_datas_nao_some_do_bot_com_tres_limitacoes():
+    """O bot mostra limitacoes[:3]; o aviso de datas era anexado no fim e sumia."""
+    from factcheck_mvp.decisao import Decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.telegram_bot import formatar
+    dec = Decisao(nivel="media", log_odds=0.5, prob=0.6, motivo="x",
+                  descontos_temporais=[{"url": "https://g1.globo.com/a", "afirmacao": 0}],
+                  travas={"data_incompativel": True}, nivel_sem_desconto="alta")
+    rel = Pipeline._relatorio(EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+                              dec, [], [], [], ["L1", "L2", "L3"], "web")
+    assert rel.limitacoes[0].startswith("Datas:")
+    assert "• Datas:" in formatar(rel)
+    assert verificar_neutralidade(formatar(rel)) == []
+
+
+# ------------------------------------------------------------------ data exibida: precisão e normalizada
+def _fonte_data(**kw):
+    base = dict(url="https://g1.globo.com/a", titulo="Título", portal_nome="g1", corpo_lido=True,
+                relevante=True, postura="SUSTENTA", relevancia_temporal=0.05)
+    return FonteEvidencia(**{**base, **kw})
+
+
+def _rel_com_fonte(f):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[f], decisao={"votos": [], "descontos_temporais": [{"url": f.url, "r": 0.05}]})
+
+
+def test_data_publicacao_legivel_respeita_a_precisao():
+    from factcheck_mvp.agregador import data_publicacao_legivel
+    assert data_publicacao_legivel("2021-12-31", "ano") == "2021"
+    assert data_publicacao_legivel("2026-10-06", "dia") == "06/10/2026"
+    assert data_publicacao_legivel("2026-07-18", None) == "18/07/2026"
+    assert data_publicacao_legivel(None, "dia") == ""
+    assert data_publicacao_legivel("há 3 dias", None) == ""  # nunca o texto bruto
+
+
+def test_bot_placeholder_de_ano_mostra_so_o_ano():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2021-12-31", data_pub_precisao="ano",
+                                            data_pub_bruta="2021-01-01")))
+    assert "📅 publicada em 2021 · anterior ao período do texto" in t
+    assert "01/01/2021" not in t
+    assert verificar_neutralidade(t) == []
+
+
+def test_bot_data_relativa_mostra_a_data_normalizada():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
+                                            data_pub_bruta="há 3 dias")))
+    assert "📅 publicada em 06/10/2026" in t and "há 3 dias" not in t
+
+
+def test_bot_iso_com_fuso_mostra_o_dia_brt_usado_na_decisao():
+    # 2026-07-19T02:00Z é 18/07 em BRT (UTC−3): a decisão usou 18/07 e é essa data que se mostra.
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-07-18", data_pub_precisao="dia",
+                                            data_pub_bruta="2026-07-19T02:00:00+00:00")))
+    assert "📅 publicada em 18/07/2026" in t and "19/07" not in t
+
+
+def test_web_data_respeita_a_precisao_e_a_normalizada():
+    from factcheck_mvp.api import _render_html
+    h = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2021-12-31", data_pub_precisao="ano",
+                                                              data_pub_bruta="2021-01-01"))))
+    assert "📅 publicada em 2021 · anterior ao período do texto" in h and "01/01/2021" not in h
+    h2 = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
+                                                               data_pub_bruta="há 3 dias"))))
+    assert "📅 publicada em 06/10/2026" in h2 and "há 3 dias" not in h2
+
+
+def test_fontes_leva_a_precisao_da_data_da_peca():
+    from factcheck_mvp import decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.schemas import Afirmacao
+    peca = {"url": "https://g1.globo.com/a", "titulo": "T", "veiculo": "g1", "corpo": "texto", "corpo_lido": True,
+            "data_pub": "2021-12-31", "data_pub_precisao": "ano", "data_pub_bruta": "2021-01-01"}
+    julg = {(0, 0): {"classe": "REFUTA", "citacao": "x", "citacao_verificada": True, "motor": "llm-juiz:x"}}
+    dec = decisao.Decisao(nivel="media", log_odds=0.0, prob=0.5, motivo="x")
+    f = Pipeline._fontes(None, [Afirmacao(texto="Governo vai confiscar a poupança")], [peca], julg, dec)[0]
+    assert (f.data_pub, f.data_pub_precisao, f.data_pub_bruta) == ("2021-12-31", "ano", "2021-01-01")
+
+
+def test_bot_e_web_sem_decisao_renderizam_sem_descontos():
+    """Relatório sem `decisao` (snapshot antigo): sem descontos, sem aviso de data e sem erro."""
+    from factcheck_mvp.api import _render_html
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[_fonte("https://a.test/1", "REFUTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        decisao=None)
+    assert "📅" not in formatar(rel)
+    assert "Fontes com desconto por data" not in _render_html("x", rel)
+
+
+def test_perguntas_guia_traz_a_de_data_primeiro_sem_parametro_inutil():
+    """A pergunta de data já é a primeira da lista; o antigo `priorizar_data` não mudava nada."""
+    import inspect
+    from factcheck_mvp.agregador import perguntas_guia
+    assert perguntas_guia()[0].startswith("Compare a data")
+    assert list(inspect.signature(perguntas_guia).parameters) == []
+
+
+def test_web_lista_descontos_por_data_em_como_chegamos_aqui_sem_bits_no_bot():
+    """Task 6: a web mostra cada desconto (url escapada, dias além da janela, r e bits) no
+    <details> 'Como chegamos aqui'; os bits ficam FORA do bot (técnico demais)."""
+    from factcheck_mvp.api import _render_html
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[_fonte("https://a.test/<x>", "SUSTENTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        etapas=[EtapaRecibo(nome="juiz", status="ok")],
+        decisao={"votos": [], "descontos_temporais": [
+            {"url": "https://a.test/<x>", "dias_alem_da_janela": 1905, "janela": 2, "r": 0.05,
+             "bits_descartados": 0.876}]})
+    h = _render_html("x", rel)
+    inicio = h.index("Como chegamos aqui")
+    bloco = h[inicio:h.index("</details>", inicio)]
+    assert "https://a.test/&lt;x&gt;" in bloco and "<script>" not in h
+    assert "1905 dias além da janela de 2" in bloco and "r=0.05" in bloco and "0.88 bit" in bloco
+    assert verificar_neutralidade(_visivel(h)) == []
+    t = formatar(rel)
+    assert "bit" not in t.lower()
+    assert verificar_neutralidade(t) == []
+
+
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     from factcheck_mvp.telegram_bot import formatar
     rac = "A página afirma que o café cura o câncer, citando um estudo de dois anos. " * 4  # > cap

@@ -308,6 +308,16 @@ def test_e4_direcao_e_bits_medidos_antes_do_desconto(monkeypatch):
     assert x["bits_descartados"] == pytest.approx(decisao.W_VEREDITO / math.log(2), rel=1e-3)
 
 
+def test_e4_desconto_carrega_data_bruta_e_precisao(monkeypatch):
+    """A telemetria `fonte estagio=data` lê a bruta e a precisão do item descontado (antes: None)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-12-31",
+                       data_pub_bruta="2021-01-01", data_pub_precisao="ano")
+    x = decidir(_ev_hoje([it])).descontos_temporais[0]
+    assert (x["data_pub"], x["data_pub_bruta"], x["data_pub_precisao"]) == ("2021-12-31", "2021-01-01", "ano")
+
+
 def test_e4_tudo_descontado_motivo_fala_de_periodo(monkeypatch):
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
     itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
@@ -316,6 +326,21 @@ def test_e4_tudo_descontado_motivo_fala_de_periodo(monkeypatch):
     d = decidir(_ev_hoje(itens))
     assert d.nivel == "indeterminada"
     assert "outro episódio" in d.motivo and "se anulam" not in d.motivo
+
+
+def test_e4_aviso_nao_se_repete_quando_o_desconto_leva_a_indeterminada(monkeypatch):
+    """O motivo já diz 'outro episódio' e 'recirculando'; a justificativa e o why não repetem."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-01-01")
+             for d in ("g1.globo.com", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "indeterminada" and "outro episódio" in d.motivo
+    j = d.justificativa()
+    assert j.count("outro episódio") == 1 and j.count("recirculando") == 1
+    assert "Datas anteriores" not in d.why_1linha()
+    assert d.why_1linha().count("outro episódio") == 1
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
 
 
 def test_e4_motivo_so_quando_o_desconto_muda_o_nivel(monkeypatch):
@@ -507,6 +532,34 @@ def test_e4_aviso_chega_ao_usuario_e_e_neutro(monkeypatch):
     texto = d.header() + " " + d.why_1linha() + " " + d.justificativa()
     assert "outro episódio" in d.justificativa() and "notícia antiga recirculando" in texto
     assert verificar_neutralidade(texto) == []
+
+
+def _decisao_com_descontos(urls_por_afirmacao, nivel="media", nivel_sem="alta"):
+    """Decisao montada à mão (só o que o texto usa): descontos por (url, afirmação)."""
+    return decisao.Decisao(
+        nivel=nivel, log_odds=0.5, prob=0.6, motivo="evidência fraca ou dividida",
+        descontos_temporais=[{"url": u, "afirmacao": a} for u, a in urls_por_afirmacao],
+        travas={"data_incompativel": True}, nivel_sem_desconto=nivel_sem)
+
+
+def test_e4_plural_concorda_e_conta_url_unica_na_justificativa():
+    # A mesma URL em duas afirmações é UMA fonte: "1 fonte foi publicada ... o peso dela".
+    uma = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://g1.globo.com/a", 1)])
+    j = uma.justificativa()
+    assert "1 fonte foi publicada antes do período" in j and "o peso dela foi reduzido" in j
+    assert "fontes foram" not in j and "delas" not in j
+    duas = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)])
+    j2 = duas.justificativa()
+    assert "2 fontes foram publicadas antes do período" in j2 and "o peso delas foi reduzido" in j2
+    assert verificar_neutralidade(j) == [] and verificar_neutralidade(j2) == []
+
+
+def test_e4_limitacao_de_datas_concorda_e_conta_url_unica():
+    assert _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://g1.globo.com/a", 1)]).limitacao_datas() \
+        == "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
+    lim = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)]).limitacao_datas()
+    assert lim == "Datas: 2 fontes anteriores ao período do texto tiveram o peso reduzido."
+    assert verificar_neutralidade(lim) == []
 
 
 def test_e4_bot_mostra_data_quando_descontada_e_neutro():
