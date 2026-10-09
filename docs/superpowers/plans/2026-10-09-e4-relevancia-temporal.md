@@ -19,7 +19,7 @@ E4 só remove informação de fonte de outro episódio (formulação de 09/10, G
 (`Decisao.descontos_temporais`, `travas['data_incompativel']`); motivo "podem tratar de outro episódio —
 verifique se não é notícia antiga recirculando" quando o nível fica `media` por isso. E3 aprovado e já no código.
 
-## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`; atualizado no follow-up `feat/fase-eb-followup` @ `c7a8868`)
+## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`; atualizado no follow-up `feat/fase-eb-followup` @ `c7a8868`; code review final em `62c6156`)
 
 | Task | Estado | Evidência |
 |---|---|---|
@@ -35,6 +35,7 @@ verifique se não é notícia antiga recirculando" quando o nível fica `media` 
 | 8 | Steps 1–2 ✅ (Step 2 com ressalva); Steps 3–7 ⬜ (record e holdout: aprovação e cassetes) | regressão Bolsonaro nas duas direções (`0ebcd57`); a3-dev no HEAD difere do estado de partida só por T6/T7 (ver Step 2); `ITERACOES.md` atualizado (dev, nível 0); `PROXIMOS_PASSOS.md` (E4 e §5.2) atualizado |
 
 - Suite no HEAD `c7a8868` (09/10, follow-up): **688 passed, 0 failed, 0 xfail** (`python3 -m pytest tests -q`, com e sem `PYTHONUTF8`). Antes, no `main` `56c4b33`: 467 passed.
+- Suite no HEAD `62c6156` (code review final, 09/10): **889 passed, 0 failed** (com e sem `PYTHONUTF8=1`). As regras finais estão em Global Constraints e Review Focus.
 - Incidentes revertidos (comportamento fora deste plano, introduzido 2x, revertido 2x — R6 no ledger):
   peso `f_fake`, filtro "selo de página não vota", testes `test_t6_*`, reescrita do teste pinado do selo.
   Árvore limpa confirmada por grep no commit.
@@ -57,7 +58,7 @@ verifique se não é notícia antiga recirculando" quando o nível fica `media` 
   por fonte descontada. Consequência aceita: quando uma fonte antiga de sinal oposto perde peso, o nível pode
   subir (ou descer) se o resultado vier de fontes atuais. Testes em `tests/test_decisao.py`
   (`test_e4_guarda_*`: sinais opostos em clusters distintos e no mesmo cluster; só fontes descontadas). Contraexemplo
-  conhecido (xfail estrito): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
+  conhecido (era xfail estrito; hoje teste normal): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
   somam ≥ τ e viram alta sem voto do período. **Corrigido em 09/10** pela trava `so_fontes_de_outro_periodo` (ver Review Focus).
 - Todo fallback novo → `telemetria.fallback(onde, motivo)`; todo I/O novo (inclusive relógio) → `replay.*`.
 - Sem rede live; **sem eval `--modo record`** neste plano sem aprovação explícita (Task 8 só *pede*; custo
@@ -168,6 +169,11 @@ O teste existente só cobre a direção SUSTENTA→"não baixa"; falta a direç�
   desligado (nunca "data de hoje" silenciosa).
 - Gate E1 e decisão usam a **mesma** janela, referência e data normalizada.
 - Neutralidade: o aviso não contém nada de `agregador.EXPRESSOES_PROIBIDAS` ("notícia falsa", "é falso"…).
+- Parte sem checagem atual (D-b, 09/10): afirmação que sai da conjunção por ter só fonte de outro período limita o texto a média quando o nível sairia baixa (`travas["parte_sem_checagem_atual"]`, L = −0,99τ). A alta pelas partes contestadas atuais se mantém.
+- Paridade gate × decisão: o gate E1 e `decidir` recebem o mesmo texto, a mesma referência e a mesma data normalizada, e medem com `marcas_da_afirmacao` (janela e marco) e `medida_da_afirmacao` (marco antes da janela). `AfirmacaoDecisao.calculada` marca que a medida veio do pipeline.
+- Confiabilidade: `sem_fonte_confiavel` só conta fonte atual (dentro da janela). Fonte confiável de outro período não destrava a trava.
+- Selo de página (T6) não vota na decisão nem no gate, e também não encerra a busca do agente (`pipeline.py:955`). Em live, pode gastar mais SerpAPI: acompanhar no record.
+- Postura com fator BERT abaixo de 5% do peso não vota (`FRACAO_MIN_VOTO`; vai para `posturas_fracas` no trace). Descontinuidade conhecida: prob_fake 0,94 dá média (L=+0,06); 0,96 some a postura e as confirmações decidem (baixa).
 
 ---
 

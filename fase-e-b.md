@@ -85,7 +85,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - novo teste: página com prob_fake 0,9 e REFUTA pesa ≤ 0,1 de uma com prob_fake 0;
     - teste: selo de página sem índice não aparece em `vereditos_aplicados`.
 
-- [x] **T7. B2: combinação por conjunção** (D2 decidida: alta; `decisao.decidir`, bloco "combinação entre afirmações"). ✅ FEITO (commits `f0e0959` e `7b955ca`). `p_texto = 1 − Π(1 − σ(L_a))`; afirmação sem voto fica fora do produto; afirmação só com evidência descontada (|L| < τ) fica fora da conjunção (decisão de 09/10); votos atuais que se anulam entram com 0,5; soma de partes fracas → alta aceita, acompanhar no record. No nível 0: `cr_lula_acabar_bets_que_criou` baixa (GRAVE) → média (partes: "Lula quer acabar com as bets" L=−2,60 e "Lula criou as bets" L=+0,60; conjunto L=+0,709).
+- [x] **T7. B2: combinação por conjunção** (D2 decidida: alta; `decisao.decidir` e `_combinar_afirmacoes`). ✅ FEITO (commits `f0e0959` e `7b955ca`; regra final no code review de 09/10). Regra final: `p_texto = 1 − Π(1 − σ(L_a))` **só sobre as partes contestadas** (L_a ≥ 0; partes divididas com L_a = 0 entram com σ = 0,5). Partes só confirmadas (L_a < 0) não somam, então confirmações nunca dão alta; se nenhuma parte é contestada, L = max(L_a). Afirmação sem voto fica fora do produto. Com 2+ afirmações com voto, afirmação só com fonte de outro período e |L_a| < τ fica fora da conjunção (`fora_da_conjuncao`). Travas sobre o resultado: `so_fontes_de_outro_periodo` (nenhum extremo só por fonte descontada; não tira afirmação com voto atual) e `parte_sem_checagem_atual` (se a parte excluída deixaria o nível baixa, o texto fica em média, L = −0,99τ). Consequências aceitas: soma de partes fracas contestadas dá alta (acompanhar no record); duas partes divididas dão L = τ e alta. No nível 0: `cr_lula_acabar_bets_que_criou` baixa (GRAVE) → média: "Lula quer acabar com as bets" (L=−2,60) não soma; "Lula criou as bets" (L=+0,60) decide; conjunto L=+0,60 (era +0,709 antes da regra final).
   - Trocar a regra de máximo por `p_texto = 1 − Π(1 − σ(L_a))` e `L = logit(p_texto)`.
   - Afirmação sem voto entra com p = 0,5? **Não.** Ela fica fora do produto: ausência de evidência não é evidência.
   - Escrever os 2 testes antes de implementar:
@@ -93,7 +93,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - (b) parte falsa abaixo de τ (p≈0,70) com parte verdadeira (p≈0,10) → **não** baixa (caso `cr_lula_acabar_bets_que_criou`).
   - → Verify: os dois testes passam, e `test_mutacao_*` continua passando.
 
-- [ ] **T8. B5 e B6 (decisão e independência).** ✅ FEITO (commit `6453b3f` + fix `54c6d67` plural `imagens`; review + re-review clean; delta `eval.decisao` zero por construção).
+- [x] **T8. B5 e B6 (decisão e independência).** ✅ FEITO (commit `6453b3f` + fix `54c6d67` plural `imagens`; review + re-review clean; delta `eval.decisao` zero por construção).
   - B5: a trava VAGO (`pipeline.py:54`, `VAGO_RE`) só dispara quando o sujeito é genérico (economia, país, governo).
   - B6: em `corroboracao.py` / `catalogo.py`:
     - a assinatura de agência não casa com crédito de foto ("Folhapress");
@@ -120,11 +120,12 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
 ## Status 09/10 (follow-up, branch `feat/fase-eb-followup`)
 - ✅ Commitados e revisados (spec ✅): T0, T1, T2, T3(+fix), T4(+fix), T5, T8(+fix).
 - ➕ Extra emergencial commitado (`d06ebce`): `replay.hoje()` (relógio via cassete, spec E4-Task-3 verbatim) — sem ele o stack T0–T5 não era autocontido (32 falhas `AttributeError`); E4-Task-3 deve rebasar/estender a partir daqui.
-- ✅ Concluídos no follow-up: T6 (`6a4533c`), T7 (`f0e0959`, fix `7b955ca`) e o raciocínio do avaliador no bot e na web (`17f385b`). Suíte: 688 passed, 0 failed.
-- ⏳ Pendente: T9-record e holdout (aguardando aprovação e cassetes).
+- ✅ Concluídos no follow-up: T6 (`6a4533c`), T7 (`f0e0959`, fix `7b955ca`) e o raciocínio do avaliador no bot e na web (`17f385b`). Suíte em 09/10, antes do code review final: 688 passed, 0 failed.
+- ✅ Code review final (09/10, HEAD `62c6156`): regra final da T7 e travas acima. Suíte: **889 passed, 0 failed**, com e sem `PYTHONUTF8=1`. Detalhes e pendências no adendo de `eval/ITERACOES.md`.
+- ⏳ Pendente: T9-record e holdout (aguardando aprovação e cassetes). Status final: T0–T8 feitos; T9 parcial (nível 0 dev feito; record e holdout pendentes).
 
 ## Done When
-- [x] pytest verde (688 passed, 0 failed, 0 xfail, com e sem `PYTHONUTF8`), e nenhum erro grave novo no eval de decisão (nível 0, a3-dev: erro grave 2 → 0; T6 −1 e T7 −1).
+- [x] pytest verde (889 passed, 0 failed, 0 xfail, com e sem `PYTHONUTF8`, code review final em `62c6156`), e nenhum erro grave novo no eval de decisão (nível 0, a3-dev: erro grave 2 → 0; T6 −1 e T7 −1).
 - [x] `cr_jn_soltura_vorcaro` e `cr_lula_acabar_bets_que_criou` deixam de ser erro grave **no nível 0** ✅ (vorcaro via T6, bets via T7). Confirmação no record: pendente (aprovação e cassetes).
 - [x] Bot e web mostram: onde foi encontrado (T2); selo atribuído (T3); fontes não analisadas integralmente (T1). Raciocínio do avaliador no bot/web: ✅ (`17f385b`).
 - [ ] `eval/ITERACOES.md` tem números de dev e de holdout. ⏳ dev ✅ (entrada 09/10, nível 0); holdout pendente (aprovação e cassetes).

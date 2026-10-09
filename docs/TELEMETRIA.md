@@ -66,10 +66,11 @@ n_fallbacks, fallbacks_por_onde, descartes_por_motivo, n_erros, dur_ms, nivel}`.
 | `fonte` | `url`, `estagio` (deep-crawl\|descoberta-site\|relatorio\|**data**), `decisao` (mantida\|descartada\|**descontada**), `motivo` (+ `tipo_fonte`, `corpo_lido`, `confianca` no estágio relatorio; no estágio `data`: `afirmacao`, `data_pub`, `data_pub_bruta`, `precisao`, `r`, `bits`) | aprofundar, descoberta_site, `Pipeline.executar`, `Pipeline._emitir_decisao` (estágio `data`, 1 por fonte com desconto temporal) |
 | `fonte` (`estagio=aplicabilidade`) | 1 por par (peça da base julgada, afirmação) na fase base: `url`, `afirmacao` (índice), `classe`, `corpo_lido`, `veredito`, `decisao` (aplicavel\|inaplicavel), `motivo` (de `e_aplicavel`: corpo não lido, juiz não trata do fato, sem citação verificada, sem selo com direção, data incompatível, aplicável). E4: `janela` (dias do marcador relativo; None = sem), `marco` (`[data_evento ISO, folga]` da data explícita do fato; None = sem), `excedente` (dias além da janela ou do marco; None = não mede), `referencia` (YYYY-MM-DD do "hoje" da checagem; None = ausente) | `Pipeline._fase_base` |
 | `bert_pagina` | `url`, `prob_fake` (média dos blocos de 192 tokens; só páginas com `corpo_lido`) | `Pipeline._ler` (B1b) |
+| `evidencias` | `afirmacoes[]`: `texto`, `nucleo`, `polaridade`, `janela` (dias do marcador; None = sem), `marco` (`[data_evento ISO, folga]`; None = sem), `calculada` (True = janela e marco vieram de `aplicabilidade.marcas_da_afirmacao`, a mesma medida do gate E1: então None quer dizer "sem marcador de fato" e a decisão não recalcula pelo texto; False = snapshot antigo, caminho legado). `itens[]`: `url`, `afirmacao`, `cluster`, `classe`, `motor`, `citacao_verificada`, `curada`, `corpo_lido`, `veredito`, `origem_veredito`, `veiculo`, `confiabilidade`, `data_pub` (normalizada), `data_pub_bruta`, `data_pub_precisao`, `prob_fake_pagina` (BERT; None = sem modelo real). Também `vago`, `opiniao`, `rumor`, `juiz_disponivel`, `n_lidas`, `n_consultadas`, `texto_usuario`, `data_referencia` (YYYY-MM-DD; None = E4 desligado). É o insumo de `eval.decisao --gerar-snapshot`. | `Pipeline._executar`, antes de `decidir` (também no caminho sem afirmação, com `afirmacoes=[]`) |
 | `fallback` | `onde`, `motivo` (+ extras) | ver tabela abaixo |
 | `sinal` | `motor`, `rotulo`, `valor`, `confianca`, `direcao` (via `agregador._direcao`, `None` se não existir), `peso` (`agregador.PESOS`), `evidencias` | pipeline, antes de `agregar` |
 | `decisao` | `nivel` (final), `nivel_agregador`, `score`, `sinais` (lista `motor:rotulo`), `why`, `travas` (ver abaixo), `decisao` (`Decisao.to_dict()`, ver abaixo) | pipeline (fim, e no retorno "sem afirmação") |
-| | `travas` é o `decisao.resumo_trace()`: inclui `L`, `p`, `motivo`, `votos`, `vereditos`, `vereditos_ignorados`, `conflitos`, `contagem`, `L_sem_desconto`, `nivel_sem_desconto` (contrafactual sem desconto temporal, E4) e `descontos` (≤6, `"<url[:60]> +<dias>d r=<r> −<bits>b"`) | |
+| | `travas` é o `decisao.resumo_trace()`: inclui `L`, `p`, `motivo`, `votos`, `vereditos`, `vereditos_ignorados`, `conflitos`, `contagem`, `L_sem_desconto`, `nivel_sem_desconto` (contrafactual sem desconto temporal, E4) e `descontos` (≤6, `"<url[:60]> +<dias>d r=<r> −<bits>b"`) e `posturas_fracas` (≤6, `"af<i> <classe>@<url[:60]> pf=<prob_fake>"`: postura com fator BERT abaixo de 5% do peso, `FRACAO_MIN_VOTO`; não vota) | |
 | `erro` | `onde`, `erro` | pipeline (exceção), replay (gravar cassete), eval |
 | `span_inicio` / `span_fim` | `nome`, extras; no fim `dur_ms`, `ok`, `erro` | quem usar `span` |
 
@@ -77,10 +78,13 @@ Travas do evento `decisao` (`travas` = `resumo_trace()`, com estas chaves de `De
 
 - `vago`, `opiniao`, `rumor`: entrada do pipeline (afirmação vaga, opinião/sátira, relato de segunda mão).
 - `juiz_disponivel`: o juiz LLM respondeu. Sem ele, os votos vêm de fallback léxico.
-- `sem_fonte_confiavel`: o |L| foi cortado para 0,99τ porque nenhum voto confiável (curado, institucional
-  ou muito acessado) estava no mesmo sentido.
+- `sem_fonte_confiavel`: o |L| foi cortado para 0,99τ porque nenhum voto confiável **atual** (curado,
+  institucional ou muito acessado; dentro da janela) estava no mesmo sentido.
 - `so_fontes_de_outro_periodo` (E4): o |L| foi cortado porque só fontes de outro período (descontadas)
   votaram na direção. Só age no caminho com desconto.
+- `parte_sem_checagem_atual` (D-b, 09/10): alguma afirmação saiu da conjunção por ter só fonte de outro
+  período (`fora_da_conjuncao` em `por_afirmacao`) e o nível sairia baixa: o |L| foi cortado para −0,99τ e
+  o texto fica em média. A alta pelas partes atuais não é afetada.
 - `data_incompativel`: há fontes com desconto temporal (`descontos_temporais` não vazio).
 
 `finalidade` de LLM: explícita (`llm_post(finalidade=...)` ou `with telemetria.finalidade(...)`) ou
@@ -110,6 +114,22 @@ default; `motivo` = o aviso, p.ex. `E4_JANELA_HOJE='0' inválido (esperado intei
 início de cada execução).
 
 **Regra:** todo fallback novo deve chamar `telemetria.fallback(onde, motivo)`.
+
+### Parâmetros do E4
+
+Lidos de `factcheck_mvp/config.py`: inteiro > 0 pelo ambiente; valor inválido vira o padrão e emite `fallback onde=config` no início da execução. A janela é quantos dias a fonte pode estar defasada em relação à referência do marcador sem ser descontada.
+
+| variável | padrão | marcador do texto |
+|---|---|---|
+| `E4_JANELA_HOJE` | 2 | hoje, agora, acaba(ram) de, há pouco, há instantes, esta/nesta manhã/tarde/noite/madrugada. Também é a **folga** do marco (data explícita do fato) |
+| `E4_JANELA_ONTEM` | 3 | ontem |
+| `E4_JANELA_ANTEONTEM` | 4 | anteontem |
+| `E4_JANELA_SEMANA` | 8 | esta/nesta semana, este/nesse fim de semana, dia da semana com determinante ("nesta segunda"), "na última <dia>" |
+| `E4_JANELA_SEMANA_PASSADA` | 15 | semana passada, na última semana |
+| `E4_JANELA_MES` | 32 | neste/nesse/este/esse mês; "agora em <mês>" também conta como mês |
+| `E4_MARCO_MAX_DIAS` | 60 | limite do ano inferido de data sem ano ("dia 8", "08/10"): se o evento está a mais de 60 dias da referência, a data não ancora o marco. Ano explícito não tem esse limite |
+
+Não são marcador: "hoje em dia", "até agora", "nos dias de hoje" e "há pouco mais de dez anos" (quantidade). Os valores usados vão em `decisao.parametros.e4.janelas`.
 
 ### Leitura
 

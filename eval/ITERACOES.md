@@ -283,3 +283,50 @@ Branch `feat/fase-eb-followup` @ `c7a8868` (base `main` @ `56c4b33`). Sem rede, 
 | dev | nível 0 (a3-dev, final) | 0,1449 | 0,3333 | 0 | 0,6522 |
 | dev | record/replay da subamostra | pendente (aprovação + cassetes) | | | |
 | holdout | nível 4 | pendente (aprovação + cassetes) | | | |
+
+### Adendo: code review final (09/10)
+
+Base: `feat/fase-eb-followup` @ `62c6156`, 39 commits depois de `0c9267c` (o commit que registrou esta entrada). Entre `c7a8868` e `0c9267c` só mudaram docs, então o código medido aqui é o mesmo da entrada. Sem rede, sem record, sem holdout e sem `eval.run`. `eval/cassettes/`, `runs/` e `eval/resultados/` não existem nesta máquina.
+
+**Decisões da usuária (pós-review, 09/10)**
+
+1. **Conjunção (T7):** só partes com L_a ≥ 0 (contestadas, e divididas com L_a = 0) entram em `p = 1 − Π(1 − σ(L_a))`. Se nenhuma tem L_a ≥ 0, L = max(L_a). Motivo: pela fórmula antiga, 5 partes com 1 SUSTENTA curada cada davam alta (L = +1,33). Agora dão média (L = −1,00).
+2. **Parte só de outro período:** afirmação que só tem fonte fora da janela sai da conjunção. Se por isso o nível sairia baixa, o texto fica em média (trava `parte_sem_checagem_atual`, L = −0,99τ). A alta pelas partes contestadas atuais se mantém.
+3. **Postura quase toda descontada pelo BERT:** postura cujo fator (1 − prob_fake) fica abaixo de 5% do peso sem o modelo não vota (`FRACAO_MIN_VOTO = 0,05`, ou seja prob_fake > 0,95). Vai para `posturas_fracas` no trace.
+
+**Correções depois da entrada**
+
+- Trava `so_fontes_de_outro_periodo`: nunca extremo sustentado só por fonte descontada. Não tira afirmação que tem voto atual (C1).
+- `sem_fonte_confiavel` só conta fonte atual, isto é, dentro da janela.
+- Paridade gate × decisão: o gate E1 e `decidir` recebem o mesmo texto, a mesma referência e a mesma data normalizada, e medem com `marcas_da_afirmacao` (janela e marco) e `medida_da_afirmacao` (marco antes da janela). `AfirmacaoDecisao.calculada` marca que a medida veio do pipeline (pipeline.py:591 e 639-649).
+- Gate E1 não aceita selo de página (T6, `_selo_vota`). Consequência: selo de página também não encerra a busca do agente (pipeline.py:955). Em live, a busca pode gastar mais SerpAPI.
+- Task 4b endurecida: intervalos no início, frações ("8/10"), datas recorrentes ("todo dia 5"), comemorativas, verbo no futuro, D > referência e 2+ datas distintas não ancoram o marco.
+- Data explícita vence o marcador relativo: o marco vem antes da janela.
+- Normalização de datas: meia-noite local, formatos PT/EN/RFC, relativas medidas no fim do intervalo.
+- Relógio sem default escondido: sem `data_referencia` na entrada e sem relógio gravado, o E4 fica desligado (pipeline.py:305-311). Nunca usa o dia de hoje em silêncio.
+- Neutralidade: raciocínio com expressão proibida é omitido (`linha_raciocinio`, fallback `raciocinio`). A varredura normaliza NFKC e espaços, tira caracteres de formatação e compara também sem acento.
+- Web só cria link `http(s)`; outro esquema vira texto escapado (`api._link_html`).
+- Bot mede a mensagem em UTF-16, como o Telegram (`_len_telegram`).
+- Link usa a data da própria página; sem ela, a do encaminhamento; sem as duas, o E4 fica desligado (`entrada_de_link`, `ref_fallback`).
+- Os bugs "Lidas 0" e avaliador julgando cada par 2× já estavam corrigidos antes desta entrada (já registrados acima: `b74c4a4`, `c86b6f8`).
+
+**Números confirmados (HEAD `62c6156`)**
+
+- pytest: **889 passed, 0 failed**, com e sem `PYTHONUTF8=1` (`-p no:cacheprovider`).
+- `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl` (n=69): acerto 0,1449 · acerto+parcial 0,3333 · erro grave 0 · indeterminada 0,6522 · níveis {indeterminada 45, média 17, alta 5, baixa 2}. Reproduz 40/69 vs `validos.json`.
+- Caso a caso contra `0c9267c` (mesmo snapshot, mesmos 69 casos): só `cr_lula_acabar_bets_que_criou` muda, média L=+0,7089 → média L=+0,6000. Nenhum nível muda e nenhum erro grave aparece.
+- Cenários conferidos com `decidir` (fora do repo): REFUTA curada com prob_fake 0,94 → média (L=+0,06); com 0,96 → baixa (L=−2,00); 5 SUSTENTA curadas → média (L=−1,00); duas partes divididas → L=τ → alta.
+
+**Pendências (não validadas ou follow-ups)**
+
+- Record da subamostra (~60 buscas SerpAPI) e holdout (~60): aguardam aprovação e cassetes.
+- Descontinuidade D-a + D-c: REFUTA curada com prob_fake 0,94 dá média (+0,06); com 0,96 a postura some (fração abaixo de 5%) e as confirmações decidem (baixa). Conhecida, sem decisão.
+- Duas partes divididas (L_a = 0 cada) dão L = τ e alta. Documentado em teste; mantido pela decisão de 09/10.
+- Motivo impreciso: com a única postura descartada pelo BERT, `decidir` diz "as fontes com postura se anulam…" (ramo final do motivo).
+- Artigo do selo ("da"/"do") por heurística do primeiro nome (`_artigo_da_agencia`). A neutralidade não depende dele.
+- `decisao._citar_afirmacao` checa expressão proibida por substring crua em `texto.lower()`, sem normalizar acento: texto do usuário sem acento pode escapar da checagem.
+- `/checar --json` devolve o raciocínio bruto do avaliador. `linha_raciocinio` só age no bot e na web.
+- Reforçar o prompt do juiz para não usar "é falso" no raciocínio. Muda o prompt e invalida os cassetes LLM: fazer junto com o próximo record.
+- `pipeline` chama `motivo_data_ilegivel` sem âncora em 3 pontos (pipeline.py:278, 374, 737): uma relativa com âncora válida sai com o motivo "sem âncora".
+- `pipeline.py:22` importa `datetime` e `timezone` sem uso.
+- O docstring de `eval/decisao.py` diz "confere 69/69"; o número real é 40/69 (`validos.json`).
