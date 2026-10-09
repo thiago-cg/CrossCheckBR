@@ -930,6 +930,63 @@ def test_t7_citacao_com_expressao_proibida_vira_numero_e_o_texto_segue_neutro():
     assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
 
 
+# ------------------------------------------------------------------ C1/I1 (revisão): fonte atual decide, não a antiga
+def test_c1_parte_cortada_com_voto_atual_de_sinal_oposto_fica_na_conjuncao(monkeypatch):
+    """Repro do revisor (C1): A "A ponte caiu hoje" tem 1 REFUTA curada atual (bbc) e 5 SUSTENTA curadas de
+    2026-10-05 (r = 0,5 no stub). Os votos antigos (−3,1) fazem a trava so_fontes cortar L_a para −0,99τ. A
+    afirmação tem voto atual, então continua no produto (antes saía e dava baixa, "0 fontes contestam").
+    B "A obra custou 2 bilhões" tem 2 SUSTENTA curadas atuais. O resultado esperado é média, não baixa."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.5)
+    a = [_it("https://bbc.com/a", "REFUTA", cluster="bbc", af=0)]
+    a += [_it_datada(f"https://s{i}.com/a", "SUSTENTA", "2026-10-05", af=0, cluster=f"s{i}") for i in range(5)]
+    b = [_it(f"https://{dom}/b", "SUSTENTA", cluster=dom, af=1) for dom in ("g1.globo.com", "estadao.com.br")]
+    d = decidir(_ev_afs_janela(a + b, textos=("A ponte caiu hoje", "A obra custou 2 bilhões"), janelas=(2, None)))
+    assert d.nivel == "media" and d.log_odds == pytest.approx(-0.99 * decisao.TAU, abs=1e-4)
+    assert d.travas["so_fontes_de_outro_periodo"]
+    assert "fora_da_conjuncao" not in d.por_afirmacao[0]
+    assert d.por_afirmacao[0]["L"] == pytest.approx(-0.99 * decisao.TAU, abs=1e-4)
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {d.justificativa()}") == []
+
+
+def _pl(dom, classe="REFUTA", af=0):
+    """Rede social / plataforma (peso 0,45), sem curadoria: vota, mas não destrava a trava de confiabilidade."""
+    return _it_nivel(f"https://{dom}/x", classe, confiabilidade.PLATAFORMA, af=af, cluster=dom)
+
+
+def test_i1_curada_antiga_nao_destrava_a_trava_de_confiabilidade(monkeypatch):
+    """Repro do revisor (I1): 3 REFUTA de plataforma atuais (0,45 cada) e 1 REFUTA curada de 2021 (r ≈ 0,001).
+    Antes a curada antiga destravava a trava (alta). Agora só a fonte atual conta: média, com a trava. A frase
+    neutra diz que a confirmação confiável é de outro período."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    plataformas = [_pl(f"rede{i}.com") for i in range(3)]
+    velha = [_it_datada("https://g1.globo.com/v", "REFUTA", "2021-07-18", cluster="g1")]
+    d = decidir(_ev_hoje(plataformas + velha, texto="A ponte caiu hoje"))
+    assert d.nivel == "media" and d.travas["sem_fonte_confiavel"]
+    assert d.descontos_temporais[0]["confiabilidade"] == confiabilidade.CURADA
+    j = d.justificativa()
+    assert "redes sociais, sites pouco acessados ou de outro período" in j
+    assert "ou de outro período" in d.motivo
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+def test_i1_sem_a_curada_antiga_o_texto_so_fala_de_redes(monkeypatch):
+    """Controle: só as 3 plataformas atuais. A frase diz redes e sites pouco acessados, sem 'de outro período'."""
+    plataformas = [_pl(f"rede{i}.com") for i in range(3)]
+    d = decidir(_ev_hoje(plataformas, texto="A ponte caiu hoje"))
+    assert d.nivel == "media" and d.travas["sem_fonte_confiavel"]
+    j = d.justificativa()
+    assert "redes sociais ou sites pouco acessados, então" in j and "outro período" not in j
+    assert "outro período" not in d.motivo
+
+
+def test_i1_fonte_confiavel_atual_ainda_destrava(monkeypatch):
+    """A confirmação confiável ATUAL continua a destravar: 3 plataformas (1,35) + 1 curada atual (1,0) → alta."""
+    plataformas = [_pl(f"rede{i}.com") for i in range(3)]
+    atual = [_it("https://g1.globo.com/a", "REFUTA", cluster="g1")]
+    d = decidir(_ev_hoje(plataformas + atual, texto="A ponte caiu hoje"))
+    assert d.nivel == "alta" and not d.travas["sem_fonte_confiavel"]
+
+
 # ------------------------------------------------------------------ D-a (09/10): só partes contestadas somam
 def test_t7_cinco_confirmadas_com_uma_fonte_cada_nao_dao_alta():
     """Caso do revisor: 5 afirmações, cada uma confirmada por 1 curada, nenhuma contestada. Antes o produto dava
