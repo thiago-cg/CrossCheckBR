@@ -291,6 +291,7 @@ def test_base_aplicavel_pula_web(amb, monkeypatch):
     assert chamadas["n"] == 0
     assert any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
     assert rel.propensao == "alta"
+    assert rel.onde_encontrado == "base"
 
 def test_base_inaplicavel_chama_web(amb, monkeypatch):
     monkeypatch.setenv("INDICE_CHECAGENS", "1")
@@ -310,6 +311,7 @@ def test_base_inaplicavel_chama_web(amb, monkeypatch):
     # Guarda anti-vácuo: a base precisa ter devolvido a checagem (senão o gate nem é exercitado)
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+    assert rel.onde_encontrado == "web"
 
 def test_crawl_antes_do_filtro_lexical(amb, monkeypatch):
     """Crawl-primeiro: overlap baixo no título/snippet não exclui do crawl nem do juiz.
@@ -466,3 +468,25 @@ def test_checagem_antiga_para_fato_de_hoje_nao_pula_web(amb, monkeypatch):
     # Guarda anti-vácuo: a base precisa ter devolvido a checagem antiga (o gate barra pela data)
     assert any(e.nome == "base-checagem" and e.status == "ok" for e in rel.etapas)
     assert not any(e.nome == "descoberta" and e.status == "pulada" and "checagem aplicável" in e.detalhe for e in rel.etapas)
+
+
+def test_pipeline_usa_data_referencia_da_entrada(amb, monkeypatch):
+    # espiona decisao.decidir; EntradaConsulta(..., data_referencia="2026-01-15")
+    # → ev.data_referencia == "2026-01-15" (não a data de hoje)
+    from factcheck_mvp import decisao as _dec
+    vistos = []
+    _orig = _dec.decidir
+
+    def _espiar(ev):
+        vistos.append(ev)
+        return _orig(ev)
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+    rel = asyncio.run(pipe.executar(
+        EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                        data_referencia="2026-01-15"), usar_llm=False))
+    assert vistos and vistos[-1].data_referencia == "2026-01-15"
+    rec = [e for e in rel.etapas if e.nome == "recebimento"][0]
+    assert "2026-01-15" in rec.detalhe and "origem: entrada" in rec.detalhe

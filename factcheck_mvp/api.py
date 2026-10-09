@@ -183,8 +183,11 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
                          f"{esc(e.detalhe)}</li>" for e in rel.etapas)
         lims = "".join(f"<li>{esc(l)}</li>" for l in rel.limitacoes[:5])
         guia = "".join(f"<li>{esc(p)}</li>" for p in rel.perguntas_guia)
+        aviso = ("<p><i>Não encontrado na base de checagens; resultado de outras fontes</i></p>"
+                 if rel.onde_encontrado == "web" else "")
         corpo += (f"<h2>{esc(rel.header or rel.propensao)}</h2>"
                   f"<p><b>{esc(rel.why_1linha or '')}</b></p>"
+                  f"{aviso}"
                   f"<p>{esc(rel.justificativa)}</p>"
                   f"<h3>O que as fontes dizem</h3>"
                   f"{fontes or '<p>Não encontramos fontes que tratem do assunto. Na dúvida, não compartilhe.</p>'}"

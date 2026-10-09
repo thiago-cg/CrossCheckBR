@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 TipoEntrada = Literal["texto", "titulo", "link"]
 Propensao = Literal["baixa", "media", "alta", "indeterminada"]
@@ -24,6 +24,16 @@ class EntradaConsulta(BaseModel):
     tipo: TipoEntrada
     conteudo: str = Field(..., min_length=3, max_length=20000)
     idioma: str = "pt-BR"
+    # E4: "hoje" do texto (YYYY-MM-DD); None = desconhecida (relógio via replay.*).
+    data_referencia: Optional[str] = None
+
+    @field_validator("data_referencia")
+    @classmethod
+    def _validar_data_referencia(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        datetime.strptime(v[:10], "%Y-%m-%d")
+        return v[:10]
 
 
 class Afirmacao(BaseModel):
@@ -76,6 +86,8 @@ class FonteEvidencia(BaseModel):
     # Confiabilidade (confiabilidade.py): curada | institucional | alto_trafego | plataforma | baixo_trafego
     confiabilidade: Optional[str] = None
     afirmacao: Optional[str] = None  # afirmação (texto do usuário) a que a fonte foi julgada
+    # B1a: porquê da classe dado pelo avaliador (direção). Limite ~240 chars só no prompt; sem corte.
+    raciocinio: Optional[str] = None
 
 
 class SinalAnalise(BaseModel):
@@ -110,6 +122,8 @@ class RelatorioChecagem(BaseModel):
     consulta: EntradaConsulta
     gerado_em: str = Field(default_factory=agora_iso)
     versao: str = "mvp-0.2.0"
+    # E2: onde o veredito foi encontrado (base de checagens vs outras fontes).
+    onde_encontrado: Literal["base", "web"] = "web"
     # Clareza em segundos (check #1): header + why sempre preenchidos pelo pipeline
     header: str = ""
     why_1linha: str = ""

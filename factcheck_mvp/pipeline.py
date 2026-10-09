@@ -22,7 +22,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 import re
 import unicodedata
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from . import (afirmacoes, aplicabilidade, avaliador, confiabilidade, config, corroboracao, decisao, juiz_llm,
                padroes_llm, replay, selos, telemetria)
@@ -267,6 +267,12 @@ class Pipeline:
 
         # 1. Recebimento + marcas de rumor/opinião/vago
         texto_base = entrada.conteudo.strip()
+        # E4: data de referência explícita (entrada) ou relógio gravado (replay.*).
+        ref = entrada.data_referencia or replay.hoje(contexto=texto_base)
+        origem_ref = "entrada" if entrada.data_referencia else ("relogio" if ref else "ausente")
+        janela_ref = aplicabilidade.janela_temporal(texto_base)
+        marcador_ref = (f"presente (janela {janela_ref}d)" if janela_ref is not None
+                        else "ausente")
         eh_rumor = bool(RUMOR_RE.search(texto_base))
         eh_opiniao = bool(OPINIAO_SATIRA_RE.search(texto_base[:500]))
         eh_vago = (bool(VAGO_RE.search(texto_base[:500]))
@@ -279,7 +285,10 @@ class Pipeline:
         if eh_vago:
             limitacoes.append("Afirmação vaga (comparativo sem indicador nem período: ex PIB, inflação, desemprego + datas): "
                               "diga qual métrica e qual período que eu checo de novo.")
-        etapa("recebimento", "ok", f"Entrada do tipo {entrada.tipo} ({len(texto_base)} caracteres).")
+        etapa("recebimento", "ok",
+              f"Entrada do tipo {entrada.tipo} ({len(texto_base)} caracteres). "
+              f"marcador temporal: {marcador_ref}; referência {ref or 'ausente'} "
+              f"(origem: {origem_ref}).")
         await avisar("Recebi. Extraindo as afirmações verificáveis…")
 
         # 2. Afirmações (JSON, polaridade preservada; fallback determinístico marcado)
@@ -301,7 +310,7 @@ class Pipeline:
             dec.motivo = "nenhuma afirmação factual encontrada no texto"
             self._emitir_decisao(dec)
             return self._relatorio(entrada, dec, [], [], etapas,
-                                   limitacoes + ["Nenhuma afirmação factual encontrada."])
+                                    limitacoes + ["Nenhuma afirmação factual encontrada."], "web")
         await avisar(f"Buscando fontes sobre {len(afs)} afirmação(ões)…")
 
         # 3. Atalho opcional: índice de checagens (ClaimReview/RSS) — só a base (E1)
@@ -523,7 +532,7 @@ class Pipeline:
                         for a in afs],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
             n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
-            data_referencia=datetime.now(timezone.utc).date().isoformat())
+            data_referencia=ref)
         telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
         self._emitir_decisao(dec)
@@ -531,7 +540,8 @@ class Pipeline:
 
         fontes = self._fontes(afs, pecas, julg, dec)
         sinais = self._sinais(dec) + sinais_estilo
-        return self._relatorio(entrada, dec, sinais, fontes, etapas, limitacoes)
+        return self._relatorio(entrada, dec, sinais, fontes, etapas, limitacoes,
+                               "base" if pulou_web else "web")
 
     # ------------------------------------------------------------------ seleção / juiz
     async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
@@ -693,7 +703,7 @@ class Pipeline:
         """Julga 1× por par (peça, afirmação) via `avaliador.avaliar` (manchete+corpo).
 
         `julg[(pi, ai)] = {"classe": posicao, "citacao", "citacao_score",
-        "citacao_verificada", "pagina_diz", "motor", "erro", "rebaixado", ...}`.
+        "citacao_verificada", "pagina_diz", "raciocinio", "motor", "erro", "rebaixado", ...}`.
         `rebaixado` deriva da citação (`citacao_verificada is False`, como no juiz
         em lote). `_overlap` segue só como ordenação em `_selecionar`, nunca como
         gate. Timeout/cap (teto `JUIZ_TIMEOUT_TOTAL_S`): o parcial já avaliado é
@@ -721,6 +731,7 @@ class Pipeline:
                 "citacao_score": a.get("citacao_score"),
                 "citacao_verificada": a.get("citacao_verificada"),
                 "pagina_diz": a.get("pagina_diz") or "",
+                "raciocinio": a.get("raciocinio") or "",
                 "motor": a.get("motor") or "", "erro": a.get("erro"),
                 "rebaixado": (a.get("rebaixado") if "rebaixado" in a
                               else a.get("citacao_verificada") is False),
@@ -995,6 +1006,7 @@ class Pipeline:
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
                 postura=classe, citacao=r.get("citacao") or None, citacao_verificada=r.get("citacao_verificada"),
+                raciocinio=r.get("raciocinio") or None,
                 motor_juiz=r.get("motor"), cluster=p.get("cluster"), curada=bool(p.get("curada")),
                 confiabilidade=p.get("confiabilidade"),
                 afirmacao=afs[ai].texto if ai is not None else None)))
@@ -1008,8 +1020,10 @@ class Pipeline:
         return [f for *_, f in fontes][: teto_exib]
 
     @staticmethod
-    def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes) -> RelatorioChecagem:
+    def _relatorio(entrada, dec, sinais, fontes, etapas, limitacoes,
+                   onde_encontrado: Literal["base", "web"] = "web") -> RelatorioChecagem:
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
                                  fontes=fontes, etapas=etapas, limitacoes=limitacoes,
                                  perguntas_guia=perguntas_guia(), consulta=entrada,
-                                 header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict())
+                                 header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
+                                 onde_encontrado=onde_encontrado)
