@@ -535,13 +535,19 @@ class Pipeline:
         itens = []
         for (pi, ai), r in julg.items():
             p = pecas[pi]
+            # T6/B1c: P(fake) da página (credibilidade do BERTimbau). O mock é placeholder: devolve 0,5
+            # sem sinal, o que cortaria a postura pela metade; por isso não entra no nível (o valor
+            # segue no trace, evento bert_pagina).
+            bert = p.get("bert") or {}
+            prob_fake = None if bert.get("mock", True) else bert.get("prob_fake")
             itens.append(decisao.ItemEvidencia(
                 url=p["url"], afirmacao=ai, cluster=p.get("cluster") or p["url"], classe=r.get("classe"),
                 motor=r.get("motor") or "", citacao_verificada=r.get("citacao_verificada"),
                 curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
-                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub")))
+                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub"),
+                prob_fake_pagina=prob_fake))
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(
                 texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
@@ -712,7 +718,8 @@ class Pipeline:
                 continue
             p["bert"] = {"prob_fake": r.get("prob_fake"),
                          "modelo": r.get("modelo") or getattr(self.detector, "nome",
-                                                              type(self.detector).__name__)}
+                                                              type(self.detector).__name__),
+                         "mock": bool(r.get("mock", True))}
             telemetria.evento("bert_pagina", url=p.get("url"), prob_fake=p["bert"]["prob_fake"])
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
         for p in pecas:

@@ -12,11 +12,12 @@ JUIZ = "llm-juiz:llm-local"
 
 
 def _it(url, classe, cluster=None, curada=True, corpo=True, veredito=None, motor=JUIZ, af=0,
-        citacao=True, veiculo="", origem=None):
+        citacao=True, veiculo="", origem=None, pf=None):
     return ItemEvidencia(url=url, afirmacao=af, cluster=cluster or url, classe=classe, motor=motor,
                          citacao_verificada=(citacao if (classe != "NAO_TRATA" or citacao is False) else None), curada=curada,
                          corpo_lido=corpo, veredito=veredito,
-                         origem_veredito=origem or ("pagina" if veredito else None), veiculo=veiculo)
+                         origem_veredito=origem or ("pagina" if veredito else None), veiculo=veiculo,
+                         prob_fake_pagina=pf)
 
 
 def _ev(itens, pol="afirma", **kw):
@@ -397,3 +398,70 @@ def test_e4_bot_mostra_data_quando_descontada_e_neutro():
     assert "📅" in saida
     assert verificar_neutralidade(saida) == []
     assert len(saida) <= 3900
+
+
+# ------------------------------------------------------------------ T6 (B1c): BERTimbau × avaliador
+def test_t6_pagina_que_bert_acha_fake_quase_nao_vota():
+    """D1: o BERTimbau mede a CREDIBILIDADE da página; a direção vem do avaliador.
+    Peso da postura = W_POSTURA·f_fonte·(1 − prob_fake_pagina): com prob_fake 0,9 a mesma
+    REFUTA pesa no máximo 0,1 da de prob_fake 0."""
+    limpa = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=0.0)]))
+    fake = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=0.9)]))
+    assert limpa.votos[0].direcao == fake.votos[0].direcao == 1
+    assert 0 < abs(fake.votos[0].valor) <= 0.1 * abs(limpa.votos[0].valor) + 1e-9
+    assert abs(fake.log_odds) <= 0.1 * abs(limpa.log_odds) + 1e-9
+
+
+def test_t6_prob_fake_limitada_entre_0_e_1():
+    """Fora de [0, 1] é limitada: 1,7 vira 1 (a postura não vota); −0,5 vira 0 (fator 1)."""
+    assert decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=1.7)])).votos == []
+    assert decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=-0.5)])).log_odds == 1.0
+
+
+def test_t6_sem_bert_identico_ao_comportamento_anterior():
+    """Regressão: prob_fake_pagina None (snapshot antigo, sem BERT) dá fator 1,0 e o mesmo
+    log_odds de antes; prob_fake 0,0 dá o mesmo valor. Fonte curada: W_POSTURA·1,0 = 1,0."""
+    sem = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=None)]))
+    zero = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA", pf=0.0)]))
+    assert sem.log_odds == zero.log_odds == 1.0
+    assert sem.votos[0].valor == zero.votos[0].valor == 1.0
+
+
+def test_t6_selo_de_pagina_sem_indice_nao_vota():
+    """Selo ClaimReview extraído da PÁGINA (template/JSON-LD do portal) não entra em
+    vereditos_aplicados: vai para vereditos_ignorados, não gera conflito e a postura segue
+    votando sozinha."""
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", origem="pagina")
+    d = decidir(_ev([it]))
+    assert not d.vereditos_aplicados and not d.conflitos
+    assert [v["veredito"] for v in d.vereditos_ignorados] == ["FALSO"]
+    assert "não vota" in d.vereditos_ignorados[0]["motivo"]
+    assert [v.motivo for v in d.votos] == ["postura REFUTA"] and d.log_odds == 1.0
+
+
+def test_t6_selo_de_pagina_contra_postura_nao_gera_conflito():
+    it = _it("https://aosfatos.org/x", "SUSTENTA", veredito="FALSO", origem="pagina")
+    d = decidir(_ev([it]))
+    assert not d.conflitos and not d.vereditos_aplicados
+    assert d.log_odds == -1.0
+
+
+def test_t6_selo_de_indice_continua_votando():
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", origem="indice")
+    d = decidir(_ev([it]))
+    assert d.nivel == "alta"
+    assert [v["veredito"] for v in d.vereditos_aplicados] == ["FALSO"]
+    assert not d.vereditos_ignorados
+
+
+def test_t6_origem_ausente_vota_como_antes():
+    """origem_veredito None não é 'página': mantém o comportamento anterior (o selo vota)."""
+    it = ItemEvidencia(url="https://lupa.uol.com.br/x", cluster="lupa", classe="REFUTA", motor=JUIZ,
+                       curada=True, corpo_lido=True, veredito="FALSO", origem_veredito=None)
+    d = decidir(_ev([it]))
+    assert d.nivel == "alta" and d.vereditos_aplicados
+
+
+def test_t6_formula_registrada_em_parametros():
+    d = decidir(_ev([_it("https://g1.globo.com/a", "REFUTA")]))
+    assert d.parametros["postura"] == "W_POSTURA·f_fonte·(1−prob_fake_pagina)"

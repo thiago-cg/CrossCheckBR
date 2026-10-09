@@ -203,15 +203,28 @@ def test_mesma_url_no_indice_e_na_web_conta_uma_vez(amb, monkeypatch):
     assert rel.decisao["votos"][0]["peso"] <= 1.5 and rel.propensao == "alta", (rel.decisao, [e.detalhe for e in rel.etapas])
 
 
-def test_selo_verdadeiro_do_fato_ou_fake_da_baixa(amb):
+def test_selo_verdadeiro_do_fato_ou_fake_da_baixa(amb, monkeypatch):
+    """Direção pelo enum (VERDADEIRO → baixa), nunca pelo nome do portal ('Fato ou Fake').
+    T6: o selo extraído da própria página não vota; o selo que vota vem do ÍNDICE (origem "indice")."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
     url = "https://g1.globo.com/fato-ou-fake/noticia/2024/05/10/e-fato-que-ponte.ghtml"
     frase = "Circula nas redes a informação sobre a inauguração da ponte, verificada pelo Fato ou Fake."
     r, corpo = _pag(url, "Ponte Salvador-Itaparica foi inaugurada", frase)
-    amb[url] = (corpo, {"selo_original": "#FATO", "veredito": "VERDADEIRO",
-                        "afirmacao_checada": "Ponte Salvador-Itaparica foi inaugurada", "agencia": "g1-fato-ou-fake"})
-    rel = _rodar("Ponte Salvador-Itaparica foi inaugurada", [r])
+    amb[url] = corpo
+    idx = Indice.de_checagens([{"url": url, "titulo": "Ponte Salvador-Itaparica foi inaugurada",
+                                "afirmacao_checada": "Ponte Salvador-Itaparica foi inaugurada",
+                                "selo_original": "#FATO", "veredito": "VERDADEIRO",
+                                "agencia": "g1-fato-ou-fake", "trecho": frase}]
+                               # Distratores p/ o BM25 ter IDF (índice de 1 doc só nunca casa).
+                               + [{"url": f"https://lupa.uol.com.br/z{i}", "titulo": t, "afirmacao_checada": t,
+                                   "selo_original": "Falso", "veredito": "FALSO", "agencia": "lupa", "trecho": t}
+                                  for i, t in enumerate(["Vacina altera o DNA humano", "Urnas foram fraudadas em 2022",
+                                                         "Limão em jejum cura diabetes", "Governo vai confiscar poupança",
+                                                         "Água gelada causa gripe"])])
+    rel = _rodar("Ponte Salvador-Itaparica foi inaugurada", [r], indice=idx)
     assert rel.propensao == "baixa", rel.justificativa
     assert rel.decisao["vereditos_aplicados"][0]["veredito"] == "VERDADEIRO"
+    assert rel.decisao["vereditos_aplicados"][0]["url"] == url
 
 
 def test_quatro_dominios_com_corpo_de_agencia_um_cluster(amb):
@@ -525,3 +538,62 @@ def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
     assert peca["data_pub"] == "2025-08-11"
     assert peca["data_pub_precisao"] == "dia"
     assert peca["data_pub_bruta"] == "2025-08-11T09:00:00-03:00"
+
+
+class _BertStub(MockDetector):
+    """Detector com cara de modelo real (mock=False): credibilidade fixa de 0,8."""
+    nome = "bertimbau:stub"
+
+    def analisar_pagina(self, titulo, corpo):
+        return {"prob_fake": 0.8, "modelo": self.nome, "mock": False}
+
+
+def _itens_decididos(monkeypatch, resultados, detector):
+    """Roda o pipeline com avaliador falso e devolve os ItemEvidencia que chegam a `decidir`."""
+    from factcheck_mvp import avaliador as _aval
+    from factcheck_mvp import decisao as _dec
+
+    vistos = {}
+    orig_decidir = _dec.decidir
+
+    def _espiar(ev):
+        vistos["itens"] = list(ev.itens)
+        return orig_decidir(ev)
+
+    def fake_avaliar(nucleo, peca):
+        return {"posicao": "REFUTA", "citacao": "É falso que café cura câncer",
+                "citacao_score": 1.0, "citacao_verificada": True,
+                "pagina_diz": "A página diz que é falso que café cura câncer.",
+                "motor": "fake-avaliador", "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp(resultados), detector=detector)
+    asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    return {it.url: it for it in vistos["itens"]}
+
+
+def test_t6_prob_fake_pagina_chega_ao_item_da_pagina_lida(amb, monkeypatch):
+    """T6/B1c, wiring: `ItemEvidencia.prob_fake_pagina` vem de `p["bert"]["prob_fake"]` (T5) da
+    página lida, quando o detector é modelo real. A só-título não foi lida: fica com None."""
+    r1, c1 = _pag("https://g1.globo.com/saude/2024/01/cafe-cancer-bert-a/", "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    r2, _c2 = _pag("https://www.bbc.com/portuguese/articles/cafe-bert-b", "O que a ciência diz sobre café",
+                   "Pesquisadores desmentem que café cura câncer em revisão ampla.")
+    resultados = _prep(amb, [(r1, c1)]) + [r2]  # r2 fora de `amb`: o crawl falha (sem corpo)
+    por_url = _itens_decididos(monkeypatch, resultados, _BertStub())
+    assert set(por_url) == {r1["link"], r2["link"]}
+    assert por_url[r1["link"]].corpo_lido is True and por_url[r2["link"]].corpo_lido is False
+    assert por_url[r1["link"]].prob_fake_pagina == pytest.approx(0.8)
+    assert por_url[r2["link"]].prob_fake_pagina is None
+
+
+def test_t6_mock_placeholder_nao_entra_na_decisao(amb, monkeypatch):
+    """O mock (placeholder: 0,5 sem sinal, o que meia a postura) segue no trace, mas não entra no
+    nível: a página lida chega ao juiz com prob_fake_pagina None (peso de antes do T6)."""
+    r1, c1 = _pag("https://g1.globo.com/saude/2024/01/cafe-cancer-mock-a/", "Café cura câncer? Checagem",
+                  "É falso que café cura câncer, segundo o INCA.")
+    por_url = _itens_decididos(monkeypatch, _prep(amb, [(r1, c1)]), MockDetector())
+    assert por_url[r1["link"]].corpo_lido is True
+    assert por_url[r1["link"]].prob_fake_pagina is None
