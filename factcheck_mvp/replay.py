@@ -41,9 +41,11 @@ import contextvars
 import hashlib
 import json as _json
 import os
+import re
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -711,40 +713,55 @@ def llm_post(url: str, payload: Dict[str, Any], headers: Optional[Dict[str, str]
 # Relógio determinístico (E4 — data de referência do texto)
 
 RELOGIO_URL = "relogio://hoje"
+_DATA_ISO_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def _hoje_brt_iso() -> str:
     """Data atual em UTC−3 (BRT, sem zoneinfo: UTC menos 3 h) como YYYY-MM-DD."""
-    from datetime import datetime, timedelta, timezone
     return (datetime.now(timezone.utc) - timedelta(hours=3)).date().isoformat()
+
+
+def _data_do_cassete(k: str) -> tuple[Optional[str], bool]:
+    """(YYYY-MM-DD gravado ou None, cassete existe). Chave ausente ou data ilegível -> None."""
+    try:
+        corpo = _ler(k, RELOGIO_URL).json()
+    except ReplayMiss:
+        return None, False  # sem arquivo (ou arquivo que o replay não consegue ler)
+    except ValueError:
+        return None, True   # arquivo existe mas o corpo não é JSON
+    dado = corpo.get("data") if isinstance(corpo, dict) else None
+    if isinstance(dado, str) and _DATA_ISO_RE.fullmatch(dado):
+        try:
+            datetime.strptime(dado, "%Y-%m-%d")  # rejeita 2026-02-30
+            return dado, True
+        except ValueError:
+            pass
+    return None, True
 
 
 def hoje(contexto: str) -> Optional[str]:
     """Data de referência ("hoje" do texto) como YYYY-MM-DD.
 
-    live → data atual UTC−3. record → idem e grava o cassete
-    chave("GET", "relogio://hoje", contexto) = {"data": ...} (reusa o cassete
-    existente, como todo record). replay → lê o cassete; miss → None +
-    fallback("relogio", "data de referência não gravada") — nunca levanta
-    ReplayMiss (o caso roda, só sem E4).
+    live → data atual UTC−3. record → cassete válido é reusado; sem cassete válido mede
+    ao vivo e grava chave("GET", "relogio://hoje", contexto) = {"data": ...} (um cassete
+    ruim é refeito: record grava o que falta). replay → lê o cassete; ausente →
+    None + fallback("relogio", "data de referência não gravada"); presente sem data
+    válida → None + fallback("relogio", "cassete sem data"). Nunca levanta ReplayMiss
+    (o caso roda, só sem E4) e nunca devolve a string "None".
     """
-    k = chave("GET", RELOGIO_URL, contexto)
     m = modo_atual()
-    if m == "replay":
-        try:
-            return str(_ler(k, RELOGIO_URL).json().get("data"))
-        except Exception:
-            telemetria.fallback("relogio", "data de referência não gravada")
-            return None
-    if m == "record":
-        try:
-            return str(_ler(k, RELOGIO_URL).json().get("data"))
-        except Exception:
-            pass  # sem cassete: mede ao vivo e grava abaixo
-        data = _hoje_brt_iso()
-        resp = Resposta(200, {"content-type": "application/json"},
-                        _json.dumps({"data": data}, ensure_ascii=False).encode("utf-8"),
-                        RELOGIO_URL, cache="live")
-        _gravar(k, "GET", RELOGIO_URL, contexto, resp, 0.0)
+    if m == "live":
+        return _hoje_brt_iso()
+    k = chave("GET", RELOGIO_URL, contexto)
+    data, existe = _data_do_cassete(k)
+    if data is not None:
         return data
-    return _hoje_brt_iso()
+    if m == "replay":
+        telemetria.fallback("relogio", "cassete sem data" if existe else "data de referência não gravada")
+        return None
+    data = _hoje_brt_iso()  # record sem cassete válido: mede e grava
+    resp = Resposta(200, {"content-type": "application/json"},
+                    _json.dumps({"data": data}, ensure_ascii=False).encode("utf-8"),
+                    RELOGIO_URL, cache="live")
+    _gravar(k, "GET", RELOGIO_URL, contexto, resp, 0.0)
+    return data
