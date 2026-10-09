@@ -426,10 +426,10 @@ def test_e4_data_explicita_da_afirmacao_nao_desconta_por_hoje(monkeypatch):
 _RECENTE, _ANTIGA = "2026-10-08", "2021-07-18"  # "ontem" e 2021 em relação a 2026-10-09
 
 
-def _it_e4(url, cluster, classe, data, veredito=None):
+def _it_e4(url, cluster, classe, data, veredito=None, af=0):
     return ItemEvidencia(url=url, cluster=cluster, classe=classe, motor=JUIZ, citacao_verificada=True,
                          curada=True, corpo_lido=True, data_pub=data, veredito=veredito,
-                         origem_veredito="indice" if veredito else None)
+                         origem_veredito="indice" if veredito else None, afirmacao=af)
 
 
 def _voto_nao_descontado_na_direcao(d):
@@ -471,15 +471,84 @@ def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_nem_baixa(monkeypatch, s
     assert d.nivel == "media" and d.travas["data_incompativel"]
 
 
-@pytest.mark.xfail(strict=True, reason="contraexemplo à guarda, decisão pendente da usuária: fontes "
-                   "descontadas independentes podem somar até τ (14 posturas ou 7 selos FALSO do índice, "
-                   "a ~38 dias da janela, r=0,05) e virar alta sem nenhum voto do período")
+# Contraexemplo que a guarda não cobria (14 posturas ou 7 selos FALSO descontados, r=0,05, somavam ≥ τ e
+# viravam alta sem voto do período): a trava so_fontes_de_outro_periodo (decisão de 09/10) corta para média.
 @pytest.mark.parametrize("veredito,n", [(None, 14), ("FALSO", 7)])
 def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_com_muitas_fontes(monkeypatch, veredito, n):
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     itens = [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA, veredito=veredito) for i in range(n)]
     d = decidir(_ev_hoje(itens))
     assert d.nivel == "media"
+
+
+# ------------------------------------------------------------------ trava so_fontes_de_outro_periodo
+def test_e4_trava_nao_atua_com_fonte_do_periodo_na_mesma_direcao(monkeypatch):
+    """Trava (a): uma fonte atual REFUTA + 14 posturas antigas (r=0,05, somam ≈1,15). O voto do período
+    sustenta a direção de alta; a trava não atua e o nível pode chegar a alta."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4("https://bbc.com/a", "bbc", "REFUTA", _RECENTE)]
+    itens += [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA) for i in range(14)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "alta" and not d.travas["so_fontes_de_outro_periodo"]
+    assert _voto_nao_descontado_na_direcao(d)
+
+
+def test_e4_trava_antigas_fortes_contra_atual_oposta_nao_viram_alta(monkeypatch):
+    """Trava (b): 30 posturas antigas REFUTA (r=0,05, somam ≈2,47) e 1 fonte atual SUSTENTA (−1,0). A soma
+    passa de τ, mas nenhum voto de alta tem fonte do período: a trava corta para 0,99τ e o nível é média
+    (sem o desconto seria alta). O aviso de data aparece uma vez só."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA) for i in range(30)]
+    itens.append(_it_e4("https://bbc.com/a", "bbc", "SUSTENTA", _RECENTE))
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel_sem_desconto == "alta"
+    assert d.nivel == "media" and d.travas["so_fontes_de_outro_periodo"]
+    assert d.log_odds == pytest.approx(0.99 * decisao.TAU, abs=1e-4)  # L é gravado com 4 casas
+    assert not _voto_nao_descontado_na_direcao(d)
+    assert "outro episódio" in d.motivo
+    j = d.justificativa()
+    assert j.count("outro episódio") == 1 and j.count("recirculando") == 1
+    assert d.why_1linha().count("Datas anteriores") == 1
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+def test_e4_trava_sem_marcador_temporal_nao_muda_nada():
+    """Trava (c), regressão: sem marcador temporal nenhuma fonte é descontada; 14 posturas REFUTA de fontes
+    atuais seguem dando alta, sem a trava e sem aviso de data."""
+    itens = [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA) for i in range(14)]
+    d = decidir(Evidencias(afirmacoes=[AfirmacaoDecisao(texto="A ponte caiu", nucleo="ponte caiu")],
+                           itens=itens, data_referencia="2026-10-09"))
+    assert not d.descontos_temporais and not d.travas["so_fontes_de_outro_periodo"]
+    assert d.travas["data_incompativel"] is False
+    assert d.nivel == "alta" and d.log_odds == pytest.approx(14.0)
+
+
+def test_e4_trava_corta_afirmacao_so_descontada_e_a_tira_da_conjuncao(monkeypatch):
+    """Trava + conjunção: A confirmada por fontes atuais (L=−3) e B só com 14 posturas antigas (r=0,05,
+    L_b≈+1,15 → cortado para 0,99τ). B sai do produto: o texto fica baixa. Sem a trava, B sustentaria alta."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    a = [_it_e4(f"https://{dom}/a", dom, "SUSTENTA", _RECENTE, af=0)
+         for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_e4(f"https://s{i}.com/b", f"c{i}", "REFUTA", _ANTIGA, af=1) for i in range(14)]
+    d = decidir(_ev_afs_janela(a + b, textos=("A obra custou 2 bilhões", "A ponte caiu hoje"), janelas=(None, 2)))
+    assert d.por_afirmacao[1]["L"] == pytest.approx(0.99 * decisao.TAU, abs=1e-4)
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert d.travas["so_fontes_de_outro_periodo"]
+    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
+
+
+def test_e4_trava_e_sem_fonte_confiavel_juntas_registram_as_duas_flags(monkeypatch):
+    """Ordem das travas: sem_fonte_confiavel e so_fontes leem o MESMO L_a bruto e cortam para o MESMO 0,99τ.
+    Com as duas condições valendo (4 selos FALSO de sites de baixo tráfego, r=0,5), as duas flags ficam
+    registradas, o nível é média e o motivo segue a precedência de sem_fonte_confiavel (redes/sites)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.5)
+    itens = [ItemEvidencia(url=f"https://blog{i}.example/a", cluster=f"c{i}", classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=False, corpo_lido=True, data_pub=_ANTIGA,
+                           veredito="FALSO", origem_veredito="indice") for i in range(4)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "media" and d.log_odds == pytest.approx(0.99 * decisao.TAU, abs=1e-4)
+    assert d.travas["sem_fonte_confiavel"] and d.travas["so_fontes_de_outro_periodo"]
+    assert "redes sociais" in d.motivo
 
 
 def test_e4_parametros_registram_as_janelas_efetivas_da_config(monkeypatch):
@@ -843,17 +912,19 @@ def test_t7_votos_atuais_que_se_anulam_continuam_no_produto():
     assert d.log_odds == pytest.approx(_conj_ref([-3.0, 0.0]), abs=1e-4)
 
 
-def test_t7_so_descontada_mas_forte_continua_no_produto(monkeypatch):
-    """Se a evidência só-descontada passa de τ, ela continua no produto (comportamento por afirmação):
-    B tem 3 fontes de 2021 com r=0,9 (stub), L_b≈+2,8 ≥ τ."""
+def test_t7_so_descontada_forte_e_cortada_e_sai_da_conjuncao(monkeypatch):
+    """Regra decidida (09/10, guarda do sinal: E4 nunca sustenta extremo só com fonte descontada). Antes da
+    trava, B (3 fontes de 2021, r=0,9 no stub, L_b≈+2,8 ≥ τ) entrava na conjunção e A (confirmada, −3)
+    virava alta (L≈+2,85). Agora a trava so_fontes corta B para 0,99τ e ela sai do produto: fica baixa."""
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.9)
     a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
     b = [_it_datada(f"https://{dom}/b", "REFUTA", "2021-07-18", af=1)
          for dom in ("uol.com.br", "folha.uol.com.br", "lupa.uol.com.br")]
     d = decidir(_ev_afs_janela(a + b))
-    assert d.por_afirmacao[1]["L"] >= decisao.TAU
-    assert "fora_da_conjuncao" not in d.por_afirmacao[1]
-    assert d.log_odds == pytest.approx(_conj_ref([-3.0, d.por_afirmacao[1]["L"]]), abs=1e-3)
+    assert d.por_afirmacao[1]["L"] == pytest.approx(0.99 * decisao.TAU, abs=1e-4)
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert d.travas["so_fontes_de_outro_periodo"]
+    assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
 
 
 def test_t7_uma_afirmacao_so_descontada_nao_muda(monkeypatch):
@@ -888,3 +959,36 @@ def test_t7_duas_so_descontadas_fracas_nao_informam(monkeypatch):
     assert {x["afirmacao"] for x in d.descontos_temporais} == {0, 1}
     assert all(p["fora_da_conjuncao"] == "só evidência de outro período" for p in d.por_afirmacao)
     assert d.log_odds == 0 and d.nivel == "media"
+
+
+# ------------------------------------------------------------------ contagem do texto (só o que pesou)
+def test_t7_contagem_do_texto_so_conta_afirmacoes_que_entram_no_resultado(monkeypatch):
+    """A afirmação excluída da conjunção (só evidência de outro período) mantém os votos no trace (`votos`),
+    mas 'N fonte(s) contestam/confirmam' do texto conta só as afirmações que pesaram."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert any(v.afirmacao == 1 for v in d.votos)  # trace: o voto de B continua registrado
+    assert d.n_clusters(+1) == 0 and d.n_clusters(-1) == 3  # texto: só A pesou
+    assert "0 fonte(s) independente(s) contestam o que o texto afirma e 3 o confirmam" in d.justificativa()
+    assert "0 fonte(s) independente(s) contestam e 3 confirmam" in d.why_1linha()
+
+
+def test_t7_selos_considerados_nao_listam_afirmacao_excluida(monkeypatch):
+    """Selo de checagem de afirmação excluída (só de outro período) não entra em 'selos de checagem
+    considerados'; o selo da afirmação que pesa continua listado. O trace guarda os dois."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    ia = ItemEvidencia(url="https://g1.globo.com/a", afirmacao=0, cluster="g1", classe="SUSTENTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, veredito="VERDADEIRO",
+                       origem_veredito="indice", veiculo="Agencia A")
+    ib = ItemEvidencia(url="https://bbc.com/b", afirmacao=1, cluster="bbc", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18",
+                       veredito="FALSO", origem_veredito="indice", veiculo="Agencia B")
+    d = decidir(_ev_afs_janela([ia, ib]))
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert {v["afirmacao"] for v in d.vereditos_aplicados} == {0, 1}  # trace guarda os dois selos
+    j = d.justificativa()
+    assert "selos de checagem considerados: VERDADEIRO (Agencia A)" in j
+    assert "Agencia B" not in j
