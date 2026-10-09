@@ -137,7 +137,9 @@ def janela_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int,
     2019"), o "hoje" é do ato de dizer, não do fato, e a janela é None (quem mede é o marco). Com 1
     afirmação, o texto conta também. Ano igual ao da referência NÃO desliga o marcador: "hoje, em
     2026, ..." ainda fala do dia de hoje; o ano só desliga quando aponta outro tempo. Limitação
-    conhecida: "Hoje, 2026 começa com..." (ano como sujeito de um fato de janeiro) mantém a janela.
+    conhecida: "Hoje, 2026 começa com..." não conta como data (M-3: ano sem preposição): a janela fica.
+    Prazo na mesma frase ("hoje ... o prazo vence dia 20") também é data explícita e derruba o "hoje"
+    (M-6 do revisor): escolha conservadora, mantida de propósito.
     """
     datada = _data_explicita_fora(af_texto, referencia)
     if n_afirmacoes == 1:
