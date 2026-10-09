@@ -156,3 +156,107 @@ def test_dias_excedentes_da_janela_mede_com_janela_explicita():
     assert aplicabilidade.dias_excedentes_da_janela(None, "2026-10-01", "2026-10-09") is None
     assert aplicabilidade.dias_excedentes_da_janela(2, "2026-10-01", None) is None
     assert aplicabilidade.dias_excedentes_da_janela(2, None, "2026-10-09") is None
+
+
+# --- E4 revisão (itens 1-3, 7): normalizar_data — meia-noite UTC, totalidade, formatos comuns ---
+@pytest.mark.parametrize("valor,esperado", [
+    ("1970-01-01T00:00:00Z", None),                          # sentinela com hora 00:00 UTC
+    ("2000-01-01T00:00:00+00:00", None),                     # idem, offset explícito
+    ("2026-01-01T00:00:00+00:00", ("2026-12-31", "ano")),    # -01-01 à data LITERAL = placeholder de ano
+    ("2022-09-06T00:00:00.000+00:00", ("2022-09-06", "dia")),  # meia-noite UTC = só data: não recua p/ 05/09 BRT
+    ("2022-09-06T00:00:00Z", ("2022-09-06", "dia")),
+    ("2024-02-23T00:00:00-03:00", ("2024-02-23", "dia")),    # meia-noite já em BRT: nada a converter
+])
+def test_normalizar_data_meia_noite_utc_e_so_data(valor, esperado):
+    assert aplicabilidade.normalizar_data(valor, None) == esperado
+
+
+@pytest.mark.parametrize("valor,ancora", [
+    ("0001-01-01T00:00:00+05:00", None),          # converter p/ BRT estoura o calendário
+    ("há 999999999 dias", "2026-10-09"),          # N absurdo
+    ("há 99999999999999999999 dias", "2026-10-09"),
+    ("há 100000 anos", "2026-10-09"),             # cap de N / ano mínimo
+    ("2026-02-30", None),                         # dia inexistente
+    ("2026-13-01T10:00:00Z", None),
+    ("31/02/2026", None),
+    ("0000-01-01", None),
+    ("há 3 dias", "2026-13-40"),                  # âncora inválida
+    ("ontem à tarde", None),
+])
+def test_normalizar_data_nunca_levanta(valor, ancora):
+    assert aplicabilidade.normalizar_data(valor, ancora) is None  # sem exceção
+
+
+@pytest.mark.parametrize("valor,ancora,esperado", [
+    ("Tue, 06 Sep 2022 00:00:00 GMT", None, ("2022-09-06", "dia")),      # RFC 2822 (ingestor.py:_data_iso)
+    ("Tue, 06 Sep 2022 22:30:00 -0300", None, ("2022-09-06", "dia")),
+    ("06 Sep 2022", None, ("2022-09-06", "dia")),
+    ("Mar 3, 2024", None, ("2024-03-03", "dia")),
+    ("31/12/2025 10:00", None, ("2025-12-31", "dia")),
+    ("26 de jan. de 2012 às 10:00", None, ("2012-01-26", "dia")),
+    ("1º de março de 2020", None, ("2020-03-01", "dia")),
+    ("há um dia", "2026-10-09", ("2026-10-08", "dia")),
+    ("há uma semana", "2026-10-09", ("2026-10-02", "dia")),
+    ("2021-05", None, ("2021-05-31", "ano")),                             # mês: fim do mês, precisão ano
+    ("2026-09-28 20:40:30 UTC", None, ("2026-09-28", "dia")),             # 17:40 BRT
+])
+def test_normalizar_data_formatos_comuns(valor, ancora, esperado):
+    assert aplicabilidade.normalizar_data(valor, ancora) == esperado
+
+
+def test_motivo_do_fallback_separa_relativa_sem_ancora_de_formato_ilegivel():
+    assert aplicabilidade.motivo_data_ilegivel("há 3 dias") == "sem âncora"
+    assert aplicabilidade.motivo_data_ilegivel("2 dias atrás") == "sem âncora"
+    assert aplicabilidade.motivo_data_ilegivel("ontem à tarde") == "formato não reconhecido"
+
+
+@pytest.mark.parametrize("valor,esperado", [
+    ("2025-08-12T09:00:00-03:00", "2025-08-12"),
+    ("2021", None),                 # só ano não serve de "hoje" da página
+    ("2000-01-01", None),           # sentinela
+    (None, None),
+    ("ontem", None),
+])
+def test_referencia_de_pagina_so_com_dia(valor, esperado):
+    assert aplicabilidade.referencia_de_pagina(valor) == esperado
+
+
+# --- E4 revisão (item 8): marcador literal e consistência com janela_temporal ---
+@pytest.mark.parametrize("texto,marcador", [
+    ("Bolsonaro recebeu alta do hospital hoje", "hoje"),
+    ("O ministro caiu esta manhã", "esta manha"),
+    ("Nesta segunda-feira o STF decidiu", "nesta segunda-feira"),
+    ("Na semana passada o dólar bateu R$ 7", "semana passada"),
+    ("Anteontem houve um terremoto em Natal", "anteontem"),
+    ("Agora em outubro a conta subiu", "agora em outubro"),
+    ("Hoje em dia ninguém lê jornal", None),
+    ("Café cura câncer", None),
+])
+def test_marcador_temporal_devolve_o_literal_que_define_a_janela(texto, marcador):
+    assert aplicabilidade.marcador_temporal(texto) == marcador
+    assert (aplicabilidade.janela_temporal(texto) is None) == (marcador is None)
+
+
+def test_marcador_temporal_acompanha_janela_temporal_em_todos_os_casos():
+    frases = ["Hoje em dia ninguém lê jornal", "Até hoje a obra não terminou", "O ministro caiu esta manhã",
+              "Há pouco o presidente renunciou", "Anteontem houve um terremoto em Natal",
+              "Nesta segunda-feira o STF decidiu", "Neste domingo houve apagão em SP",
+              "Na semana passada o dólar bateu R$ 7", "Bolsonaro recebeu alta do hospital hoje",
+              "A partir de agora o Pix será taxado", "Agora em setembro cai a chuva"]
+    for f in frases:
+        m = aplicabilidade.marcador_temporal(f)
+        assert (m is None) == (aplicabilidade.janela_temporal(f) is None), f
+
+
+def test_normalizar_data_total_em_entrada_aleatoria_determinista():
+    """Totalidade (E4 revisão): 3000 strings aleatórias com pedaços de data (seed fixa) nunca levantam."""
+    import random
+    rnd = random.Random(20261009)
+    pedacos = ["2026", "2021", "0001", "9999", "-", "/", ".", " ", "T", "t", ":", "10", "00", "59", "30",
+               "+", "Z", "UTC", "h", "há", "ha", "dia", "dias", "ano", "anos", "mes", "semana", "um", "uma",
+               "de", "jan.", "Sep", "Mar", ",", "atras", "ago", "99999999", "x", "ºº"]
+    for _ in range(3000):
+        valor = "".join(rnd.choice(pedacos) for _ in range(rnd.randint(1, 7)))
+        ancora = rnd.choice([None, "2026-10-09", "2026-09-28 20:40:30 UTC", "lixo", "0001-01-01T00:00:00+05:00"])
+        resultado = aplicabilidade.normalizar_data(valor, ancora)  # não pode levantar
+        assert resultado is None or (isinstance(resultado, tuple) and resultado[1] in ("dia", "ano"))
