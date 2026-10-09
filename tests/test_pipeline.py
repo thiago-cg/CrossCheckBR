@@ -876,10 +876,6 @@ def _entrada_bolsonaro_hoje() -> EntradaConsulta:
                            data_referencia="2026-10-09")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG (achado E4 Task 8): a fase base já lê o corpo da peça, mas o n_lidas da passada seguinte "
-    "(_ler, em _executar) só conta as lidas agora; a justificativa sai com 'Lidas 0 página(s)' e "
-    "contagem.lidas fica 0 embora corpo_lido seja True."))
 def test_lidas_conta_pagina_lida_pela_fase_base(amb, monkeypatch):
     from factcheck_mvp import avaliador as _aval
 
@@ -899,9 +895,6 @@ def test_lidas_conta_pagina_lida_pela_fase_base(amb, monkeypatch):
     assert rel.decisao["contagem"]["lidas"] == 1, rel.justificativa
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG (achado E4 Task 8, custo): com o gate sem pular a web, _fase_base julga a peça da base e o "
-    "passo 8 julga de novo: o avaliador roda 2x por par (peça, afirmação); _julgar documenta 1x por par."))
 def test_avaliador_uma_vez_por_par_com_base_sem_pular_web(amb, monkeypatch):
     from factcheck_mvp import avaliador as _aval
 
@@ -921,6 +914,42 @@ def test_avaliador_uma_vez_por_par_com_base_sem_pular_web(amb, monkeypatch):
                                serpapi=FakeSerp([]), detector=MockDetector()).executar(_entrada_bolsonaro_hoje()))
     assert not any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)  # guarda: web não pulada
     assert chamadas.count(url) == 1, chamadas
+
+
+def test_cache_do_julgamento_so_reaproveita_entrada_igual(monkeypatch):
+    """`_julgar` com cache: par já julgado não volta ao avaliador enquanto a entrada for a mesma.
+    Falha do LLM não entra no cache (é avaliada de novo); se a fusão mudou um dado que o avaliador
+    lê (aqui, a data), o par é julgado de novo com a entrada nova."""
+    from factcheck_mvp import avaliador as _aval
+
+    chamadas = []
+
+    def fake_avaliar(nucleo, peca):
+        chamadas.append(peca.get("data_pub"))
+        if len(chamadas) == 1:
+            return {"posicao": None, "citacao": "", "citacao_score": None, "citacao_verificada": None,
+                    "pagina_diz": "", "motor": "fake-avaliador", "erro": "timeout", "corpo_lido": True}
+        return {"posicao": "REFUTA", "citacao": "É falso que X", "citacao_score": 1.0,
+                "citacao_verificada": True, "pagina_diz": "", "motor": "fake-avaliador",
+                "erro": None, "corpo_lido": True}
+
+    monkeypatch.setattr(_aval, "avaliar", fake_avaliar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+    afs = [Afirmacao(texto="X aconteceu", nucleo="X aconteceu", polaridade="afirma", consulta="x")]
+    peca = {"url": "https://exemplo.com.br/x", "titulo": "X", "corpo": "X aconteceu. " * 20, "corpo_lido": True}
+    cache = {}
+
+    def julgar():
+        return asyncio.run(pipe._julgar(afs, [peca], [(0, 0)], True, cache=cache))[0][(0, 0)]
+
+    assert julgar()["classe"] is None         # 1ª: falha do LLM, não entra no cache
+    assert julgar()["classe"] == "REFUTA"     # 2ª: julga de verdade e entra no cache
+    assert julgar()["classe"] == "REFUTA"     # 3ª: mesma entrada, reaproveitado
+    assert len(chamadas) == 2, chamadas
+    peca["data_pub"] = "2026-01-01"           # a entrada do avaliador mudou
+    assert julgar()["classe"] == "REFUTA"
+    assert chamadas == [None, None, "2026-01-01"], chamadas
 
 
 # --- E4 revisão (itens 4, 7, 8, 9): fonte real da data, rótulo do fallback, recebimento e link sem data ---
