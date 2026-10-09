@@ -1,8 +1,12 @@
 """API e web leem o link como o bot: texto da página ou pedido do texto (sem checar só a URL)."""
+import asyncio
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from factcheck_mvp import api
 from factcheck_mvp.schemas import EntradaConsulta, RelatorioChecagem
+from factcheck_mvp.telegram_bot import LinkLido
 
 URL = "https://www.aosfatos.org/noticias/exemplo/"
 
@@ -21,7 +25,7 @@ class _PipeFalso:
 def _cliente(monkeypatch, texto_pagina):
     pipe = _PipeFalso()
     monkeypatch.setattr(api, "pipeline", lambda: pipe)
-    monkeypatch.setattr(api, "_texto_link", lambda url, catalogo: texto_pagina)
+    monkeypatch.setattr(api, "_texto_link", lambda url, catalogo: LinkLido(texto_pagina, None) if texto_pagina else None)
     monkeypatch.setattr(api, "_rate_ok", lambda request: True)
     return TestClient(api.app), pipe
 
@@ -56,10 +60,17 @@ def test_texto_comum_nao_passa_pela_leitura(monkeypatch):
 
 # --- E4 revisão (item 9, A5): entrada por link usa a data da própria página; sem data, E4 desligado ---
 def _pagina(texto, data_pub):
-    from factcheck_mvp.telegram_bot import TextoLido
-    lido = TextoLido(texto)
-    lido.data_pub = data_pub
-    return lido
+    return LinkLido(texto, data_pub)
+
+
+def test_linklido_nao_e_str_e_leva_a_data_como_campo():
+    """M3: a data é campo do objeto (antes era atributo de um str, que str.strip() e o fatiamento perdiam)."""
+    from dataclasses import fields, is_dataclass
+    from factcheck_mvp.telegram_bot import entrada_de_link
+    lido = LinkLido(texto="Título\n\nCorpo.", data_pub="2021-07-18T10:00:00-03:00")
+    assert not isinstance(lido, str) and is_dataclass(lido)
+    assert [f.name for f in fields(lido)] == ["texto", "data_pub"]
+    assert entrada_de_link(URL, lido).data_referencia == "2021-07-18"
 
 
 def _cliente_com_pagina(monkeypatch, texto, data_pub):
@@ -134,7 +145,7 @@ def test_texto_link_guarda_a_data_publicada_do_json_ld(monkeypatch):
                          '<body><p>' + "Texto da matéria checada. " * 20 + '</p></body></html>')
     monkeypatch.setattr(_curl, "Session", _SessaoFalsa)
     lido = tb._texto_link(URL, _CatalogoAceitaTudo())
-    assert lido and "Texto da matéria" in lido
+    assert lido and "Texto da matéria" in lido.texto
     assert lido.data_pub == "2021-07-18T10:00:00-03:00"
 
 
@@ -165,3 +176,82 @@ def test_data_da_pagina_sem_json_ld_vem_dos_metadados():
     assert extracao.data_publicacao_pagina(html, URL) == "2021-07-18"
     assert extracao.data_publicacao_pagina("<html><body><p>nada</p></body></html>", URL) is None
     assert extracao.data_publicacao_pagina("", URL) is None
+
+
+# ------------------------------------------------------------------ bot: leitura do link (M2 e M4)
+class _Aviso:
+    chat_id, message_id = 1, 2
+
+    def __init__(self):
+        self.textos = []
+
+    async def edit_text(self, texto, **_):
+        self.textos.append(texto)
+
+
+class _Mensagem:
+    def __init__(self, texto, data_encaminhada=None):
+        self.text = texto
+        self.forward_origin = SimpleNamespace(date=data_encaminhada) if data_encaminhada else None
+        self.aviso = _Aviso()
+
+    async def reply_text(self, texto, **_):
+        self.aviso.textos.append(texto)
+        return self.aviso
+
+
+class _PipeBot:
+    catalogo = object()
+
+    def __init__(self):
+        self.recebidas = []
+
+    async def executar(self, entrada, progresso=None):
+        self.recebidas.append(entrada)
+        return RelatorioChecagem(propensao="indeterminada", justificativa="j", consulta=entrada)
+
+
+def _checar_no_bot(monkeypatch, leitor, mensagem):
+    """Roda `telegram_bot._checar` de verdade, com a leitura do link trocada por `leitor`."""
+    from factcheck_mvp import telegram_bot as tb
+    pipe = _PipeBot()
+    monkeypatch.setattr(tb, "_texto_link", leitor)
+    update = SimpleNamespace(message=mensagem, effective_user=SimpleNamespace(id=1))
+    context = SimpleNamespace(application=SimpleNamespace(bot_data={"pipeline": pipe}))
+    asyncio.run(tb._checar(update, context))
+    return pipe
+
+
+def test_checar_le_o_link_fora_da_thread_do_loop(monkeypatch):
+    """M2: a leitura do link é bloqueante (curl_cffi). Tem que rodar numa thread, sem travar o loop."""
+    import threading
+    onde = {}
+
+    def _leitor(url, catalogo, timeout=15):
+        onde["leitura"] = threading.get_ident()
+        return LinkLido("Corpo da página.", None)
+
+    _checar_no_bot(monkeypatch, _leitor, _Mensagem(URL))
+    assert onde["leitura"] != threading.get_ident()
+
+
+def test_checar_link_encaminhado_sem_data_na_pagina_usa_a_data_do_encaminhamento(monkeypatch):
+    """M4: página sem data útil: o "hoje" do link encaminhado é o dia (BRT) da mensagem original."""
+    from datetime import datetime, timezone
+    pipe = _checar_no_bot(monkeypatch, lambda url, catalogo, timeout=15: LinkLido("Corpo sem data.", None),
+                          _Mensagem(URL, data_encaminhada=datetime(2026, 10, 9, 2, 30, tzinfo=timezone.utc)))
+    e = pipe.recebidas[0]
+    assert e.data_referencia == "2026-10-08" and e.sem_referencia_temporal is False
+
+
+def test_checar_link_encaminhado_com_data_na_pagina_prevalece(monkeypatch):
+    from datetime import datetime, timezone
+    pipe = _checar_no_bot(monkeypatch, lambda url, catalogo, timeout=15: LinkLido("Corpo.", "2021-07-18T10:00:00-03:00"),
+                          _Mensagem(URL, data_encaminhada=datetime(2026, 10, 9, 2, 30, tzinfo=timezone.utc)))
+    assert pipe.recebidas[0].data_referencia == "2021-07-18"
+
+
+def test_checar_link_sem_data_nem_encaminhamento_desliga_o_e4(monkeypatch):
+    pipe = _checar_no_bot(monkeypatch, lambda url, catalogo, timeout=15: LinkLido("Corpo.", "2021"),
+                          _Mensagem(URL))
+    assert pipe.recebidas[0].data_referencia is None and pipe.recebidas[0].sem_referencia_temporal is True

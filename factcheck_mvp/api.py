@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -168,9 +169,23 @@ def _descontos_html(decisao: dict | None) -> str:
             f"<ul>{''.join(itens)}</ul>")
 
 
+def _link_html(url: str) -> str:
+    """I3: âncora clicável só para http(s). Outro esquema (javascript:, data:, vbscript:…) ou URL
+    malformada vira texto escapado: o navegador não executa nada vindo da fonte."""
+    from .agregador import texto_de_linha
+    u = texto_de_linha(url)
+    try:
+        esquema = urlparse(u).scheme.lower()
+    except ValueError:
+        esquema = ""
+    if esquema in ("http", "https"):
+        return f"<a href=\"{html.escape(u)}\" target='_blank' rel='noopener'>{html.escape(u[:80])}</a>"
+    return html.escape(u[:80])
+
+
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
-    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
-                            linha_raciocinio, postura_legivel)
+    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_exibida, direcoes_por_url,
+                            linha_raciocinio, postura_legivel, texto_de_linha)
     from .confiabilidade import ROTULO
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
@@ -197,25 +212,29 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             _r = getattr(f, "relevancia_temporal", None)
             _linha_data = ""
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
+                # M5: data relativa da página ("há 3 dias") sai aproximada, não como data exata.
+                _dtxt = data_publicacao_exibida(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None),
+                                                getattr(f, "data_pub_bruta", None))
                 if _dtxt:
-                    _linha_data = f"<br/>📅 publicada em {esc(_dtxt)} · anterior ao período do texto"
+                    _linha_data = f"<br/>📅 {esc(_dtxt)} · anterior ao período do texto"
                 else:
                     _linha_data = "<br/>📅 anterior ao período do texto"
             # B1a: porquê do avaliador, atribuído e escapado; só quando há raciocínio.
             _rac = linha_raciocinio(getattr(f, "raciocinio", None))
             _html_rac = f"<span style='color:#444'>{esc(_rac)}</span><br/>" if _rac else ""
+            # I1: título e citação de página entram achatados (uma linha), antes do escape.
+            _cit = texto_de_linha(f.quote)[:300]
             return (f"<div style='border:1px solid #ccc;border-radius:6px;padding:8px;margin:6px 0'>"
-                    f"<b>{esc(f.portal_nome or 'web')}</b> "
+                    f"<b>{esc(texto_de_linha(f.portal_nome) or 'web')}</b> "
                     f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
-                    f"{' · selo da agência: ' + esc(f.veredito) if f.veredito else ''}"
+                    f"{' · selo da agência: ' + esc(texto_de_linha(f.veredito)) if f.veredito else ''}"
                     f" · {leitura}"
                     f"{' · ' + esc(ROTULO[f.confiabilidade]) if f.confiabilidade in ROTULO else ''}<br/>"
-                    f"{esc(f.titulo[:200])}<br/>"
-                    f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
+                    f"{esc(texto_de_linha(f.titulo)[:200])}<br/>"
+                    f"{'<i>“' + esc(_cit) + '”</i><br/>' if _cit else ''}"
                     f"{_html_rac}"
                     f"{_linha_data}"
-                    f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")
+                    f"{_link_html(f.url)}</div>")
         fontes = "".join(_cartao(f) for f in uteis)
         etapas = "".join(f"<li>{STATUS_ETAPA.get(e.status, '')} <b>{esc(NOMES_ETAPAS.get(e.nome, e.nome))}</b>: "
                          f"{esc(e.detalhe)}</li>" for e in rel.etapas)

@@ -203,6 +203,14 @@ def test_resumo_trace_nao_tem_chave_repetida():
     retorno = next(n for n in ast.walk(arvore) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict))
     chaves = [k.value for k in retorno.value.keys if isinstance(k, ast.Constant)]
     assert len(chaves) == len(set(chaves)), sorted({c for c in chaves if chaves.count(c) > 1})
+    # M7: em runtime, `**self.travas` sobrescreve em silêncio uma chave literal de mesmo nome (a fonte
+    # não acusa). Com as travas que `decidir` de fato produz, o resumo precisa ter as literais e as
+    # travas todas, sem perda.
+    from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, decidir
+    d = decidir(Evidencias(afirmacoes=[AfirmacaoDecisao(texto="Governo vai confiscar a poupança")]))
+    r = d.resumo_trace()
+    assert not (set(chaves) & set(d.travas)), sorted(set(chaves) & set(d.travas))
+    assert len(r) == len(set(chaves)) + len(d.travas)
 
 
 def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):

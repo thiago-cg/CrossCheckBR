@@ -330,3 +330,50 @@ def test_metricas_e4_agrega_por_caso():
                 "referencia_ausente": True}},
     ])["e4"] == {"casos_com_marcador": 1, "casos_com_desconto": 1, "casos_nivel_mudou": 1,
                  "bits_descartados_total": 1.5, "referencia_ausente": 1}
+
+
+# ------------------------------------------------------------------ I4: selo em conflito ou aplicado
+_AF_I4 = "Governo vai confiscar a poupança"
+
+
+def _ev_original_i4(veredito, origem):
+    from factcheck_mvp import decisao
+    return decisao.Evidencias(
+        afirmacoes=[decisao.AfirmacaoDecisao(texto=_AF_I4, nucleo=_AF_I4)],
+        itens=[decisao.ItemEvidencia(url="https://lupa.test/x", afirmacao=0, cluster="lupa.test",
+                                     classe="REFUTA", motor="llm-juiz:x", citacao_verificada=True,
+                                     curada=True, corpo_lido=True, veredito=veredito, origem_veredito=origem,
+                                     veiculo="Lupa")],
+        juiz_disponivel=True, n_lidas=1, n_consultadas=1)
+
+
+def _trace_como_o_pipeline_emite(dec, veredito):
+    """Trace de uma execução real: etapa afirmações, fonte juiz e decisao (travas + to_dict)."""
+    return [
+        {"tipo": "etapa", "dados": {"nome": "afirmacoes",
+                                    "detalhe": f"[afirma] '{_AF_I4}' (núcleo '{_AF_I4}')"}},
+        {"tipo": "fonte", "dados": {"url": "https://lupa.test/x", "estagio": "juiz", "classe": "REFUTA",
+                                     "afirmacao": 0, "veredito": veredito, "curada": True, "corpo_lido": True}},
+        {"tipo": "decisao", "dados": {"nivel": dec.nivel, "travas": dec.resumo_trace(), "decisao": dec.to_dict()}},
+    ]
+
+
+@pytest.mark.parametrize("veredito, origem", [("VERDADEIRO", "indice"), ("VERDADEIRO", None), ("FALSO", "indice")])
+def test_reconstrucao_reproduz_a_decisao_com_selo_em_conflito(veredito, origem):
+    """I4 (repro do revisor): REFUTA + selo VERDADEIRO do índice se anulam (indeterminada). A
+    reconstrução do trace tinha que reproduzir isso, e não lia o selo como de página (media)."""
+    from factcheck_mvp import decisao
+    from eval.decisao import evidencias_de_dict
+    from eval.decisao_gerar import evidencias_do_trace
+    orig = decisao.decidir(_ev_original_i4(veredito, origem))
+    evd = evidencias_do_trace(_trace_como_o_pipeline_emite(orig, veredito))
+    rec = decisao.decidir(evidencias_de_dict({**evd, "texto_usuario": "", "data_referencia": None}))
+    assert (rec.nivel, round(rec.log_odds, 6)) == (orig.nivel, round(orig.log_odds, 6))
+
+
+def test_origem_do_trace_reconhece_selo_que_entrou_em_conflito():
+    from eval.decisao_gerar import origem_do_trace
+    from factcheck_mvp import decisao
+    orig = decisao.decidir(_ev_original_i4("VERDADEIRO", "indice"))
+    assert orig.conflitos and not any("VERDADEIRO" in v.motivo for v in orig.votos)  # o voto some no conflito
+    assert origem_do_trace(_trace_como_o_pipeline_emite(orig, "VERDADEIRO"), "https://lupa.test/x", "VERDADEIRO") == "indice"

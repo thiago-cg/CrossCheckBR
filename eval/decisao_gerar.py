@@ -48,9 +48,14 @@ def afirmacoes_do_trace(eventos: List[Dict[str, Any]]) -> List[Dict[str, str]]:
 def origem_do_trace(eventos: List[Dict[str, Any]], url: str, veredito: str) -> Optional[str]:
     """Origem ('pagina' | 'indice') do selo que o PRÓPRIO trace registra, ou None se não registra.
 
-    Fica no evento `decisao` (todo trace tem): o voto que usou o selo traz `selo <VEREDITO>
-    (<origem>)` no motivo; o selo ignorado por ser de página traz 'selo extraído da página'
-    em `vereditos_ignorados`. Selo que não votou nem foi ignorado por origem não deixa rastro."""
+    Fica no evento `decisao` (todo trace tem), em três rastros, nesta ordem:
+    (1) o voto que usou o selo traz `selo <VEREDITO> (<origem>)` no motivo;
+    (2) `conflitos` e `vereditos_aplicados` listam selo que ENTROU na decisão, e só selo que não é de
+        página entra (página não vota, T6). Se o motivo do voto não o mostra (o conflito anulou o voto,
+        ou o voto ficou com a postura), a origem é 'indice': trace não guarda a origem, e 'indice' e
+        'desconhecida' votam igual;
+    (3) `vereditos_ignorados` com 'extraído da página' → 'pagina'.
+    Selo que não votou nem foi ignorado por origem não deixa rastro (devolve None)."""
     dec = next(((e.get("dados") or {}).get("decisao") for e in eventos if e.get("tipo") == "decisao"),
                None) or {}
     for voto in dec.get("votos") or []:
@@ -59,6 +64,9 @@ def origem_do_trace(eventos: List[Dict[str, Any]], url: str, veredito: str) -> O
         for m in SELO_ORIGEM_RE.finditer(voto.get("motivo") or ""):
             if m.group("veredito") == veredito and m.group("origem") != "?":
                 return m.group("origem")
+    for x in (dec.get("conflitos") or []) + (dec.get("vereditos_aplicados") or []):
+        if x.get("url") == url and x.get("veredito") == veredito:
+            return "indice"
     for x in dec.get("vereditos_ignorados") or []:
         if (x.get("url") == url and x.get("veredito") == veredito
                 and "extraído da página" in (x.get("motivo") or "")):

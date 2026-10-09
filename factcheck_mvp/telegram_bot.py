@@ -6,8 +6,10 @@ Sem fotos/vídeos: mídia recebe orientação, não silêncio (RF03).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -171,18 +173,21 @@ RUMOR_MSG = ("Entendi — relato sem fonte nem certeza. Vou checar o núcleo fac
              "como rumor de segunda-mão (se souber onde/quando ouviu, me diga).")
 
 
-class TextoLido(str):
-    """Texto de uma página lida (é um str, como antes) + `data_pub`: data de publicação
-    BRUTA da página (ISO ou texto como veio) ou None. Daqui sai a referência do E4 de um link (A5)."""
+@dataclass(frozen=True)
+class LinkLido:
+    """Página de um link já lida: `texto` (título + parágrafos) e `data_pub`, a data de publicação
+    BRUTA da página (ISO ou texto como veio) ou None. Daqui sai a referência temporal do E4 (A5)."""
 
+    texto: str
     data_pub: str | None = None
 
 
-def entrada_de_link(url: str, pagina: str) -> EntradaConsulta:
+def entrada_de_link(url: str, pagina: LinkLido, ref_fallback: str | None = None) -> EntradaConsulta:
     """Entrada do texto de um link já lido (api e bot). O "hoje" da matéria é a data da própria
-    página; página sem data útil (ou só ano/placeholder) = E4 desligado, nunca a data de hoje."""
-    ref = referencia_de_pagina(getattr(pagina, "data_pub", None))
-    return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina}"[:20000],
+    página. Sem data útil (ou só ano/placeholder), vale `ref_fallback` (M4: a data do encaminhamento,
+    se o link foi encaminhado). Sem nenhum dos dois, E4 desligado, nunca a data de hoje."""
+    ref = referencia_de_pagina(pagina.data_pub) or ref_fallback
+    return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina.texto}"[:20000],
                            data_referencia=ref, sem_referencia_temporal=ref is None)
 
 
@@ -198,7 +203,7 @@ def referencia_do_encaminhamento(data_origem: datetime | None) -> str | None:
     return (data_origem.astimezone(timezone.utc) - timedelta(hours=3)).date().isoformat()
 
 
-def _texto_link(url: str, catalogo, timeout: int = 15) -> TextoLido | None:
+def _texto_link(url: str, catalogo, timeout: int = 15) -> LinkLido | None:
     """Baixa link SOMENTE de domínio do catálogo (allow-list anti-SSRF).
 
     Teto de 1,5 MB, timeout curto, e a URL final (após redirects) precisa
@@ -231,9 +236,7 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> TextoLido | None:
         return None
     if texto is None:
         return None
-    lido = TextoLido(texto)
-    lido.data_pub = extracao.data_publicacao_pagina(html, final)
-    return lido
+    return LinkLido(texto=texto, data_pub=extracao.data_publicacao_pagina(html, final))
 
 
 def _urls_nao_analisadas(rel) -> set:
@@ -286,7 +289,8 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel
+        from .agregador import (data_publicacao_exibida, direcoes_por_url, linha_raciocinio, postura_legivel,
+                                texto_de_linha)
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
@@ -297,25 +301,30 @@ def formatar(rel: RelatorioChecagem) -> str:
         _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
-            selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
+            # I1: nome, selo, título, citação e URL vindos da página entram achatados (uma linha cada).
+            selo = f" [selo da agência: {texto_de_linha(f.veredito)}]" if f.veredito else ""
             if getattr(f, "corpo_lido", False) and f.url not in nao_lidas:
                 corpo = "📄 texto lido"
             else:
                 # E3: só título/snippet não foi analisada integralmente (não vota).
                 corpo = "📰 só manchete — não analisada integralmente"
             nivel = ROTULO.get(getattr(f, "confiabilidade", None) or "")
-            linhas.append(f"{i}. {f.portal_nome or 'web'} {postura_legivel(f, direcoes)}{selo} "
-                          f"({corpo}{' · ' + nivel if nivel else ''}): {f.titulo[:90]}")
-            if getattr(f, "quote", None):
-                linhas.append(f"   “{f.quote[:140]}”")
-            if f.url:
-                linhas.append(f"   {f.url}")
+            linhas.append(f"{i}. {texto_de_linha(f.portal_nome) or 'web'} {postura_legivel(f, direcoes)}{selo} "
+                          f"({corpo}{' · ' + nivel if nivel else ''}): {texto_de_linha(f.titulo)[:90]}")
+            citacao = texto_de_linha(getattr(f, "quote", None))[:140]
+            if citacao:
+                linhas.append(f"   “{citacao}”")
+            url = texto_de_linha(f.url)
+            if url:
+                linhas.append(f"   {url}")
             # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
             _r = getattr(f, "relevancia_temporal", None)
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
+                # M5: data relativa da página ("há 3 dias") sai aproximada, não como data exata.
+                _dtxt = data_publicacao_exibida(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None),
+                                                getattr(f, "data_pub_bruta", None))
                 if _dtxt:
-                    linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
+                    linhas.append(f"   📅 {_dtxt} · anterior ao período do texto")
                 else:
                     linhas.append("   📅 anterior ao período do texto")
             # B1a: porquê do avaliador, atribuído; só quando há raciocínio.
@@ -347,11 +356,26 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]
-    texto = "\n".join(linhas)
-    if len(texto) <= LIMITE_TELEGRAM:
+    return _cortar_telegram("\n".join(linhas))
+
+
+def _len_telegram(texto: str) -> int:
+    """Tamanho como o Telegram conta: UTF-16 (emoji e símbolo fora do BMP valem 2 unidades)."""
+    return len(texto.encode("utf-16-le")) // 2
+
+
+def _cortar_telegram(texto: str, limite: int = LIMITE_TELEGRAM) -> str:
+    """Até `limite` unidades UTF-16. Acima disso, corta em quebra de linha (nunca no meio da URL)."""
+    if _len_telegram(texto) <= limite:
         return texto
-    # Acima do limite do Telegram: corta em quebra de linha, nunca no meio da URL.
-    return texto[:LIMITE_TELEGRAM].rsplit("\n", 1)[0]
+    lo, hi = 0, len(texto)  # maior prefixo (em código de ponto) que ainda cabe
+    while lo < hi:
+        meio = (lo + hi + 1) // 2
+        if _len_telegram(texto[:meio]) <= limite:
+            lo = meio
+        else:
+            hi = meio - 1
+    return texto[:lo].rsplit("\n", 1)[0]
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -387,19 +411,20 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
     try:
+        # Encaminhada: o "hoje" é o dia (BRT) em que a mensagem original foi enviada.
+        origem = getattr(update.message, "forward_origin", None)
+        ref_enc = referencia_do_encaminhamento(getattr(origem, "date", None))
         if entrada.tipo == "link":
-            texto_extra = _texto_link(entrada.conteudo, pipe.catalogo) or ""
-            if not texto_extra:
+            # M2: a leitura é bloqueante (curl_cffi); fora da thread do loop, o bot segue respondendo.
+            lido = await asyncio.to_thread(_texto_link, entrada.conteudo, pipe.catalogo)
+            if not lido:
                 # Plano B: sem o conteúdo, a checagem seria só sobre o endereço.
                 await aviso.edit_text(LINK_SEM_TEXTO_MSG)
                 return
-            entrada = entrada_de_link(entrada.conteudo, texto_extra)
-        else:
-            # Encaminhada: o "hoje" do texto é o dia em que a mensagem original foi enviada.
-            origem = getattr(update.message, "forward_origin", None)
-            ref_enc = referencia_do_encaminhamento(getattr(origem, "date", None))
-            if ref_enc:
-                entrada = EntradaConsulta(tipo=entrada.tipo, conteudo=entrada.conteudo, data_referencia=ref_enc)
+            # M4: página sem data útil usa a data do encaminhamento (antes, o E4 ficava desligado).
+            entrada = entrada_de_link(entrada.conteudo, lido, ref_fallback=ref_enc)
+        elif ref_enc:
+            entrada = EntradaConsulta(tipo=entrada.tipo, conteudo=entrada.conteudo, data_referencia=ref_enc)
         # Aviso de rumor de 2ª mão (usa a mesma regex do pipeline, sem drift)
         try:
             from .pipeline import RUMOR_RE as _RR

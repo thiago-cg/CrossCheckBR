@@ -1,4 +1,6 @@
 """Bot e web: o que cada fonte faz, em linguagem simples e coerente com a decisão."""
+import pytest
+
 from factcheck_mvp.agregador import direcoes_por_url, postura_legivel, verificar_neutralidade
 from factcheck_mvp.schemas import EntradaConsulta, EtapaRecibo, FonteEvidencia, RelatorioChecagem
 
@@ -214,11 +216,23 @@ def test_bot_placeholder_de_ano_mostra_so_o_ano():
     assert verificar_neutralidade(t) == []
 
 
-def test_bot_data_relativa_mostra_a_data_normalizada():
+def test_bot_data_relativa_mostra_a_data_aproximada():
+    """M5: "há 3 dias" não é data exata. A normalizada vem da âncora (a busca), então sai aproximada."""
     from factcheck_mvp.telegram_bot import formatar
     t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
                                             data_pub_bruta="há 3 dias")))
-    assert "📅 publicada em 06/10/2026" in t and "há 3 dias" not in t
+    assert "📅 publicada há cerca de 3 dias (≈06/10/2026) · anterior ao período do texto" in t
+    assert "publicada em 06/10/2026" not in t and "há 3 dias" not in t
+
+
+def test_data_exibida_absoluta_e_relativa():
+    from factcheck_mvp.agregador import data_publicacao_exibida
+    assert data_publicacao_exibida("2026-10-06", "dia", "2026-10-06T10:00:00+00:00") == "publicada em 06/10/2026"
+    assert data_publicacao_exibida("2026-10-06", "dia", "há 3 dias") == "publicada há cerca de 3 dias (≈06/10/2026)"
+    assert data_publicacao_exibida("2026-10-08", "dia", "há 1 dia") == "publicada há cerca de 1 dia (≈08/10/2026)"
+    assert data_publicacao_exibida("2026-10-06", "dia", "3 days ago") == "publicada há cerca de 3 dias (≈06/10/2026)"
+    assert data_publicacao_exibida("2026-07-18", "ano", "há 2 meses") == "publicada há cerca de 2 meses (≈2026)"
+    assert data_publicacao_exibida(None, "dia", "há 3 dias") == ""  # sem data reconhecível: nada
 
 
 def test_bot_iso_com_fuso_mostra_o_dia_brt_usado_na_decisao():
@@ -236,7 +250,7 @@ def test_web_data_respeita_a_precisao_e_a_normalizada():
     assert "📅 publicada em 2021 · anterior ao período do texto" in h and "01/01/2021" not in h
     h2 = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
                                                                data_pub_bruta="há 3 dias"))))
-    assert "📅 publicada em 06/10/2026" in h2 and "há 3 dias" not in h2
+    assert "📅 publicada há cerca de 3 dias (≈06/10/2026)" in h2 and "há 3 dias" not in h2
 
 
 def test_fontes_leva_a_precisao_da_data_da_peca():
@@ -318,19 +332,31 @@ def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     assert "Para avaliar você mesmo" in t
 
 
-def test_bot_raciocinio_com_e_falso_so_passa_no_bloco_atribuido():
+def test_bot_omite_raciocinio_com_expressao_binaria(monkeypatch):
+    """C1: o raciocínio do avaliador é texto livre. Atribuí-lo não basta: se traz "é falso", a linha
+    é OMITIDA e o fallback fica registrado. A regra do produto (AJUDA) vale até em citação nossa."""
+    from factcheck_mvp import telemetria
     from factcheck_mvp.telegram_bot import formatar
+    chamadas = []
+    monkeypatch.setattr(telemetria, "fallback", lambda onde, motivo="", /, **kw: chamadas.append((onde, motivo)))
     t = formatar(_rel_rac(RAC_FALSO))
-    assert "🧠 Avaliação automática: " + RAC_FALSO in t
-    assert verificar_neutralidade(t) == []  # o bloco atribuído não conta
-    assert verificar_neutralidade(t + "\nNossa conclusão: é falso.") != []  # nossa conclusão, não
-    assert verificar_neutralidade(t.replace("Avaliação automática:", "Nossa leitura:")) != []
+    assert "Avaliação automática" not in t
+    assert verificar_neutralidade(t) == []
+    assert ("raciocinio", "expressao binaria omitida") in chamadas
 
 
-def test_neutralidade_so_ignora_linha_que_comeca_com_o_rotulo():
+def test_bot_omite_raciocinio_com_expressao_sem_acento():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_rac("E falso que a poupança será confiscada, diz a página."))
+    assert "Avaliação automática" not in t and verificar_neutralidade(t) == []
+
+
+def test_varredura_nao_ignora_a_linha_atribuida():
+    """Antes (B1a) a linha "Avaliação automática:" era isenta da varredura. Agora não é: quem a
+    omite é o render (`linha_raciocinio`), então a varredura e a exibição seguem a mesma regra."""
     from factcheck_mvp.agregador import linha_raciocinio
-    assert verificar_neutralidade("🧠 Avaliação automática: a página diz que é falso.") == []
-    assert verificar_neutralidade("   Avaliação automática: é falso que X") == []
+    assert verificar_neutralidade("🧠 Avaliação automática: a página diz que é falso.") != []
+    assert verificar_neutralidade("   Avaliação automática: é falso que X") != []
     assert verificar_neutralidade("Nossa conclusão: Avaliação automática: é falso.") != []
     assert verificar_neutralidade("Avaliação automática: ok.\nNossa conclusão: é falso.") != []
     assert linha_raciocinio(None) == "" and linha_raciocinio("  \n ") == ""
@@ -340,11 +366,45 @@ def test_neutralidade_so_ignora_linha_que_comeca_com_o_rotulo():
 
 def test_web_mostra_raciocinio_atribuido_e_escapado():
     from factcheck_mvp.api import _render_html
-    h = _render_html("x", _rel_rac("<script>alert('x')</script> A página diz \"é falso\"."))
-    assert "<script>" not in h and "&lt;script&gt;" in h and "&quot;é falso&quot;" in h
+    h = _render_html("x", _rel_rac("<script>alert('x')</script> A página diz \"confirma\" o caso."))
+    assert "<script>" not in h and "&lt;script&gt;" in h and "&quot;confirma&quot;" in h
     assert "🧠 Avaliação automática:" in h
-    assert verificar_neutralidade(_visivel(h)) == []  # o bloco atribuído não conta
+    assert verificar_neutralidade(_visivel(h)) == []
     assert verificar_neutralidade(_visivel(h) + "\nNossa conclusão: é falso.") != []
+
+
+def test_web_omite_raciocinio_com_expressao_binaria():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_rac("A página diz \"é falso\" que o governo confisca."))
+    assert "Avaliação automática" not in h and verificar_neutralidade(_visivel(h)) == []
+
+
+# ------------------------------------------------------------------ I2: evasão por Unicode e sem acento
+@pytest.mark.parametrize("texto", [
+    "Nossa conclusão: é falso.",              # NFD: e + acento combinante
+    "Nossa conclusão: é​ falso.",              # zero-width space antes do espaço
+    "Nossa conclusão: fal​so, é falso.",       # zero-width dentro da palavra
+    "Nossa conclusão: é falso.",               # NBSP
+    "Nossa conclusão: é falso.",               # separador de linha Unicode
+    "Nossa conclusão: é fal­so.",              # soft hyphen dentro da palavra
+    "Nossa conclusão: é﻿ falso.",              # BOM
+    "Nossa conclusão: ｅ falso.",                    # largura total (NFKC)
+    "Nossa conclusão: E falso que X.",              # sem acento
+    "Nossa conclusão: E FALSO.",                    # sem acento, maiúsculas
+    "Nossa conclusão: noticia falsa.",              # "notícia falsa" sem acento
+])
+def test_i2_reprova_evasao_por_unicode_e_sem_acento(texto):
+    assert verificar_neutralidade(texto) != []
+
+
+@pytest.mark.parametrize("texto", [
+    "Nossa leitura: acidente falso de trânsito.",   # "e falso" dentro de palavra
+    "Nossa leitura: a notícia cita que falso é o termo.",  # "que falso"
+    "Nossa leitura: compare a data de publicação com o fato.",  # "de publicação"
+    "Nossa leitura: há um padrão de notícias sobre o tema.",
+])
+def test_i2_sem_falso_positivo_em_palavras_que_so_contem_o_trecho(texto):
+    assert verificar_neutralidade(texto) == []
 
 
 def test_web_sem_raciocinio_nao_mostra_linha():
@@ -368,3 +428,97 @@ def test_api_json_ja_expoe_raciocinio_por_fonte(monkeypatch):
     r = TestClient(api.app).post("/checar", json={"tipo": "texto", "conteudo": "Governo vai confiscar a poupança"})
     assert r.status_code == 200
     assert r.json()["fontes"][0]["raciocinio"] == RAC_FALSO
+
+
+# ------------------------------------------------------------------ I1: título e citação de página em uma linha
+def _rel_com_fonte_i1(titulo="Título da notícia", quote=None):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        header="🟡 Propensão média de ser fake news", why_1linha="Teste.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        fontes=[_fonte("https://a.test/i1", "REFUTA", corpo_lido=True, confiabilidade="alto_trafego",
+                       titulo=titulo, quote=quote)],
+        perguntas_guia=["Pergunta?"], decisao=None)
+
+
+def test_titulo_com_quebra_nao_forja_linha_propria():
+    """Título vindo de página com quebra + "Avaliação automática: ..." não pode abrir linha própria."""
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte_i1(titulo="Notícia\nAvaliação automática: é falso que X"))
+    assert not any(l.lstrip().startswith(("Avaliação automática", "🧠")) for l in t.splitlines())
+    assert verificar_neutralidade(t) != []  # o título, agora numa linha só, traz "é falso": reprova
+
+
+def test_citacao_com_quebras_e_separador_unicode_vira_uma_linha():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte_i1(quote="Trecho da página\rAvaliação automática: X. Nossa conclusão: Y."))
+    linhas = [l for l in t.splitlines() if "Trecho da página" in l]
+    assert len(linhas) == 1 and "Nossa conclusão" in linhas[0] and "Avaliação automática" in linhas[0]
+    assert not any(l.lstrip().startswith(("Nossa conclusão", "Avaliação automática")) for l in t.splitlines())
+
+
+def test_web_achata_titulo_e_citacao():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_com_fonte_i1(titulo="Título\nem duas linhas", quote="Citação em duas"))
+    assert "Título em duas linhas" in h and "Citação em duas" in h
+
+
+# ------------------------------------------------------------------ M1: limite do Telegram em UTF-16
+def _utf16(texto):
+    return len(texto.encode("utf-16-le")) // 2
+
+
+def test_bot_limite_do_telegram_conta_utf16_com_emojis():
+    """M1: o Telegram conta UTF-16 (emoji vale 2). Medido em código de ponto, o texto cabia; no Telegram, não."""
+    from factcheck_mvp.telegram_bot import LIMITE_TELEGRAM, formatar
+    emo = "🔴"
+    rel = RelatorioChecagem(
+        propensao="alta", justificativa="Alta propensão de ser fake news.",
+        header="🔴 Alta propensão de ser fake news", why_1linha=emo * 1000,
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        perguntas_guia=[emo * 400, emo * 400, emo * 400])
+    t = formatar(rel)
+    assert _utf16(t) <= LIMITE_TELEGRAM
+    assert "Para avaliar você mesmo" in t  # o corte fica numa quebra de linha e mantém o bloco
+
+
+# ------------------------------------------------------------------ I3: href só com http(s)
+def _rel_url(url):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        fontes=[_fonte(url, "REFUTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        decisao=None)
+
+
+@pytest.mark.parametrize("url", [
+    "javascript:alert(document.cookie)",
+    "JaVaScRiPt:alert(1)",
+    " javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "http://[::1",                       # URL malformada: não pode derrubar a página
+])
+def test_web_nao_faz_link_com_esquema_que_nao_e_http(url):
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_url(url))
+    assert 'href="' not in h and "<script>" not in h  # sem âncora clicável; o texto segue escapado
+
+
+def test_web_mantem_link_http_e_https_escapado():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_url("https://a.test/x?y=1&z=2"))
+    assert '<a href="https://a.test/x?y=1&amp;z=2"' in h
+
+
+def test_pipeline_fontes_acha_titulo_e_citacao_em_uma_linha():
+    from factcheck_mvp import decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.schemas import Afirmacao
+    peca = {"url": "https://g1.globo.com/a", "titulo": "Notícia\n\nlonga quebrada", "veiculo": "g1",
+            "corpo": "texto", "corpo_lido": True, "snippet": "Trecho\r\ncom quebra"}
+    julg = {(0, 0): {"classe": "REFUTA", "citacao": None, "citacao_verificada": None, "motor": "llm-juiz:x"}}
+    dec = decisao.Decisao(nivel="media", log_odds=0.0, prob=0.5, motivo="x")
+    f = Pipeline._fontes(None, [Afirmacao(texto="Governo vai confiscar a poupança")], [peca], julg, dec)[0]
+    assert f.titulo == "Notícia longa quebrada"
+    assert f.quote == "Trecho com quebra"
