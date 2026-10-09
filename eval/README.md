@@ -132,6 +132,18 @@ LLM (teto `AGENTE_MAX_BUSCAS` por caso). No trace: `cli trace <run_id> --eventos
 | `bits_descartados_total` | soma dos `bits_descartados` (força da evidência removida por ser de outro episódio) |
 | `referencia_ausente` | casos sem `data_referencia` (E4 sem âncora: não mede) |
 
+Fallbacks do E4 no trace (contrato completo em `docs/TELEMETRIA.md`, §1):
+
+| `onde` | motivo | efeito |
+|---|---|---|
+| `relogio` | `data de referência não gravada` · `cassete sem data` | E4 desligado no caso (`referencia_ausente`) |
+| `data_pub` | `formato não reconhecido` · `sem âncora` (data relativa sem âncora) | a fonte fica sem data e sem desconto temporal |
+| `config` | aviso de `E4_*` inválido (não é inteiro > 0) | usa o default, com rastro |
+
+O evento `fonte` com `estagio=aplicabilidade` (1 por par peça × afirmação na fase base) traz `janela`,
+`marco`, `excedente` e `referencia`. `_e4_do_trace` lê `janela` e `marco` por afirmação do evento
+`evidencias`, o mesmo critério do `marcador` de `eval.decisao`.
+
 A/B honesto sem flag no código de produto — a perna controle zera `texto_usuario`/`janela`
 antes do `decidir` (o E4 desliga por construção, pois `dias_excedentes` não mede sem marcador):
 

@@ -64,6 +64,7 @@ n_fallbacks, fallbacks_por_onde, descartes_por_motivo, n_erros, dur_ms, nivel}`.
 | `llm` | `motor` (llm-local\|openrouter\|openrouter-decisions), `modelo`, `finalidade`, `latencia_ms`, `prompt_sha`, `n_chars_prompt`, `saida` (truncada), `erro`, `cache` (live\|hit\|miss), `status` | `replay.llm_post` |
 | `http` | `metodo`, `url` (redigida), `status`, `bytes`, `latencia_ms`, `cache` (live\|hit\|miss), `erro`, `truncado`, `gravado` | todo wrapper do `replay` |
 | `fonte` | `url`, `estagio` (deep-crawl\|descoberta-site\|relatorio\|**data**), `decisao` (mantida\|descartada\|**descontada**), `motivo` (+ `tipo_fonte`, `corpo_lido`, `confianca` no estágio relatorio; no estágio `data`: `afirmacao`, `data_pub`, `data_pub_bruta`, `precisao`, `r`, `bits`) | aprofundar, descoberta_site, `Pipeline.executar`, `Pipeline._emitir_decisao` (estágio `data`, 1 por fonte com desconto temporal) |
+| `fonte` (`estagio=aplicabilidade`) | 1 por par (peça da base julgada, afirmação) na fase base: `url`, `afirmacao` (índice), `classe`, `corpo_lido`, `veredito`, `decisao` (aplicavel\|inaplicavel), `motivo` (de `e_aplicavel`: corpo não lido, juiz não trata do fato, sem citação verificada, sem selo com direção, data incompatível, aplicável). E4: `janela` (dias do marcador relativo; None = sem), `marco` (`[data_evento ISO, folga]` da data explícita do fato; None = sem), `excedente` (dias além da janela ou do marco; None = não mede), `referencia` (YYYY-MM-DD do "hoje" da checagem; None = ausente) | `Pipeline._fase_base` |
 | `fallback` | `onde`, `motivo` (+ extras) | ver tabela abaixo |
 | `sinal` | `motor`, `rotulo`, `valor`, `confianca`, `direcao` (via `agregador._direcao`, `None` se não existir), `peso` (`agregador.PESOS`), `evidencias` | pipeline, antes de `agregar` |
 | `decisao` | `nivel` (final), `nivel_agregador`, `score`, `sinais` (lista `motor:rotulo`), `why`, `travas{opiniao, vago, rumor, tem_veredito, tem_corpo, n_corpo}` | pipeline (fim, e no retorno "sem afirmação") |
@@ -85,8 +86,14 @@ modelo que falhou; teto diário), `juiz` (item julgado por fallback léxico; tim
 `agente` (onda passou de `AGENTE_TIMEOUT_S`, parcial preservado; falha nas ondas extras),
 `agente.reformular` (LLM de reformulação falhou → consulta determinística), `deep-crawl`, `aprofundar`,
 `descoberta-catalogo`, `descoberta-site`, `descoberta-site.jev`.
-`relogio` (E4: data de referência não gravada no cassete em replay → E4 desligado neste caso),
-`data_pub` (E4: `data_pub` não-vazia em formato não reconhecido, com `valor` = bruta[:40]).
+`relogio` (E4, em replay: sem data de referência → E4 desligado neste caso; `motivo` = `data de referência
+não gravada` (não há cassete `relogio://hoje`) ou `cassete sem data` (o cassete não tem data válida)),
+`data_pub` (E4: `data_pub` não-vazia que `normalizar_data` não lê → a fonte fica sem data e sem desconto
+temporal; `valor` = bruta[:40]; `motivo` = `formato não reconhecido`, ou `sem âncora` quando a data é
+relativa, p.ex. "há 3 dias", e não há data para ancorá-la),
+`config` (E4: `E4_*` (janelas e `E4_MARCO_MAX_DIAS`) inválido no ambiente, não inteiro > 0 → usa o
+default; `motivo` = o aviso, p.ex. `E4_JANELA_HOJE='0' inválido (esperado inteiro > 0); usando 2`; emitido no
+início de cada execução).
 
 **Regra:** todo fallback novo deve chamar `telemetria.fallback(onde, motivo)`.
 
