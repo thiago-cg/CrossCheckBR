@@ -1,4 +1,6 @@
 """Bot e web: o que cada fonte faz, em linguagem simples e coerente com a decisão."""
+import pytest
+
 from factcheck_mvp.agregador import direcoes_por_url, postura_legivel, verificar_neutralidade
 from factcheck_mvp.schemas import EntradaConsulta, EtapaRecibo, FonteEvidencia, RelatorioChecagem
 
@@ -318,19 +320,31 @@ def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     assert "Para avaliar você mesmo" in t
 
 
-def test_bot_raciocinio_com_e_falso_so_passa_no_bloco_atribuido():
+def test_bot_omite_raciocinio_com_expressao_binaria(monkeypatch):
+    """C1: o raciocínio do avaliador é texto livre. Atribuí-lo não basta: se traz "é falso", a linha
+    é OMITIDA e o fallback fica registrado. A regra do produto (AJUDA) vale até em citação nossa."""
+    from factcheck_mvp import telemetria
     from factcheck_mvp.telegram_bot import formatar
+    chamadas = []
+    monkeypatch.setattr(telemetria, "fallback", lambda onde, motivo="", /, **kw: chamadas.append((onde, motivo)))
     t = formatar(_rel_rac(RAC_FALSO))
-    assert "🧠 Avaliação automática: " + RAC_FALSO in t
-    assert verificar_neutralidade(t) == []  # o bloco atribuído não conta
-    assert verificar_neutralidade(t + "\nNossa conclusão: é falso.") != []  # nossa conclusão, não
-    assert verificar_neutralidade(t.replace("Avaliação automática:", "Nossa leitura:")) != []
+    assert "Avaliação automática" not in t
+    assert verificar_neutralidade(t) == []
+    assert ("raciocinio", "expressao binaria omitida") in chamadas
 
 
-def test_neutralidade_so_ignora_linha_que_comeca_com_o_rotulo():
+def test_bot_omite_raciocinio_com_expressao_sem_acento():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_rac("E falso que a poupança será confiscada, diz a página."))
+    assert "Avaliação automática" not in t and verificar_neutralidade(t) == []
+
+
+def test_varredura_nao_ignora_a_linha_atribuida():
+    """Antes (B1a) a linha "Avaliação automática:" era isenta da varredura. Agora não é: quem a
+    omite é o render (`linha_raciocinio`), então a varredura e a exibição seguem a mesma regra."""
     from factcheck_mvp.agregador import linha_raciocinio
-    assert verificar_neutralidade("🧠 Avaliação automática: a página diz que é falso.") == []
-    assert verificar_neutralidade("   Avaliação automática: é falso que X") == []
+    assert verificar_neutralidade("🧠 Avaliação automática: a página diz que é falso.") != []
+    assert verificar_neutralidade("   Avaliação automática: é falso que X") != []
     assert verificar_neutralidade("Nossa conclusão: Avaliação automática: é falso.") != []
     assert verificar_neutralidade("Avaliação automática: ok.\nNossa conclusão: é falso.") != []
     assert linha_raciocinio(None) == "" and linha_raciocinio("  \n ") == ""
@@ -340,11 +354,45 @@ def test_neutralidade_so_ignora_linha_que_comeca_com_o_rotulo():
 
 def test_web_mostra_raciocinio_atribuido_e_escapado():
     from factcheck_mvp.api import _render_html
-    h = _render_html("x", _rel_rac("<script>alert('x')</script> A página diz \"é falso\"."))
-    assert "<script>" not in h and "&lt;script&gt;" in h and "&quot;é falso&quot;" in h
+    h = _render_html("x", _rel_rac("<script>alert('x')</script> A página diz \"confirma\" o caso."))
+    assert "<script>" not in h and "&lt;script&gt;" in h and "&quot;confirma&quot;" in h
     assert "🧠 Avaliação automática:" in h
-    assert verificar_neutralidade(_visivel(h)) == []  # o bloco atribuído não conta
+    assert verificar_neutralidade(_visivel(h)) == []
     assert verificar_neutralidade(_visivel(h) + "\nNossa conclusão: é falso.") != []
+
+
+def test_web_omite_raciocinio_com_expressao_binaria():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_rac("A página diz \"é falso\" que o governo confisca."))
+    assert "Avaliação automática" not in h and verificar_neutralidade(_visivel(h)) == []
+
+
+# ------------------------------------------------------------------ I2: evasão por Unicode e sem acento
+@pytest.mark.parametrize("texto", [
+    "Nossa conclusão: é falso.",              # NFD: e + acento combinante
+    "Nossa conclusão: é​ falso.",              # zero-width space antes do espaço
+    "Nossa conclusão: fal​so, é falso.",       # zero-width dentro da palavra
+    "Nossa conclusão: é falso.",               # NBSP
+    "Nossa conclusão: é falso.",               # separador de linha Unicode
+    "Nossa conclusão: é fal­so.",              # soft hyphen dentro da palavra
+    "Nossa conclusão: é﻿ falso.",              # BOM
+    "Nossa conclusão: ｅ falso.",                    # largura total (NFKC)
+    "Nossa conclusão: E falso que X.",              # sem acento
+    "Nossa conclusão: E FALSO.",                    # sem acento, maiúsculas
+    "Nossa conclusão: noticia falsa.",              # "notícia falsa" sem acento
+])
+def test_i2_reprova_evasao_por_unicode_e_sem_acento(texto):
+    assert verificar_neutralidade(texto) != []
+
+
+@pytest.mark.parametrize("texto", [
+    "Nossa leitura: acidente falso de trânsito.",   # "e falso" dentro de palavra
+    "Nossa leitura: a notícia cita que falso é o termo.",  # "que falso"
+    "Nossa leitura: compare a data de publicação com o fato.",  # "de publicação"
+    "Nossa leitura: há um padrão de notícias sobre o tema.",
+])
+def test_i2_sem_falso_positivo_em_palavras_que_so_contem_o_trecho(texto):
+    assert verificar_neutralidade(texto) == []
 
 
 def test_web_sem_raciocinio_nao_mostra_linha():

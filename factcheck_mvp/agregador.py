@@ -9,7 +9,10 @@ direção de selo por substring) foi removido.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional
+
+from . import telemetria
 
 # Qualquer conclusão binária é proibida na saída (RF12). Varredura em testes.
 FRASES_BINARIAS = (
@@ -52,22 +55,68 @@ def formatar_selo(agencia: str, selo: str, artigo: str = "da") -> str:
     return f"Selo {artigo} {(agencia or '').strip()}: {(selo or '').strip()}"
 
 
-# B1a (render): raciocínio do avaliador por fonte. É texto livre do LLM, então sai SEMPRE
-# atribuído ao avaliador automático, numa linha só. A varredura ignora só essa linha (como o
-# selo atribuído da T3): o rótulo precisa abrir a linha. Fora dela, a regra vale por inteiro.
+# B1a/C1: raciocínio do avaliador por fonte. É texto livre do LLM, então sai SEMPRE atribuído ao
+# avaliador automático, numa linha só. A varredura NÃO isenta essa linha: quem a protege é o render.
+# Se o raciocínio traz expressão proibida (ou selo em formato atribuído), a linha é OMITIDA
+# (`linha_raciocinio`): bot e web seguem a mesma regra que a varredura.
 ROTULO_RACIOCINIO = "Avaliação automática:"
-_RACIOCINIO_ATRIBUIDO_RE = re.compile(
-    r"^[ \t]*(?:🧠[ \t]*)?" + re.escape(ROTULO_RACIOCINIO) + r"[^\n]*", re.MULTILINE
-)
+
+
+def texto_de_linha(texto: Any) -> str:
+    """Achata em UMA linha: quebras (\\n, \\r, U+2028/2029, NEL) e espaços repetidos viram um espaço.
+    Título, citação e raciocínio vindos de página entram assim, para não forjar linha própria."""
+    return " ".join(str(texto or "").split())
+
+
+def _normalizar_texto(texto: str) -> str:
+    """Forma comparável pela varredura (I2): NFKC; qualquer espaço (NBSP, U+2028/2029, quebras)
+    vira espaço; formatação e controle (zero-width, soft hyphen, BOM, bidi) somem; espaços se
+    colapsam; minúsculas. Os acentos são mantidos (ver `_sem_acento`)."""
+    s = unicodedata.normalize("NFKC", texto or "")
+    s = re.sub(r"\s", " ", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) not in ("Cf", "Cc"))
+    return re.sub(r"\s+", " ", s).strip().casefold()
+
+
+def _sem_acento(texto: str) -> str:
+    """Sem diacríticos: decompõe (NFD) e descarta as marcas combinantes."""
+    return "".join(ch for ch in unicodedata.normalize("NFD", texto) if unicodedata.category(ch) != "Mn")
+
+
+def _padrao_sem_acento(expressao: str) -> "re.Pattern[str]":
+    """Expressão como palavras inteiras, sem acento: "e falso" casa "é falso" e "E falso", mas não
+    "acidente falso" nem "que falso"."""
+    palavras = [re.escape(_sem_acento(_normalizar_texto(p))) for p in expressao.split()]
+    return re.compile(r"(?<!\w)" + r"\s+".join(palavras) + r"(?!\w)")
+
+
+_PADROES_SEM_ACENTO = {e: _padrao_sem_acento(e) for e in EXPRESSOES_PROIBIDAS}
+
+
+def _expressoes_achadas(base: str) -> List[str]:
+    """Expressões de EXPRESSOES_PROIBIDAS em `base` (já normalizado). Com acento: como trecho (como
+    antes). Sem acento: como palavras inteiras. Vale a união: nenhuma das duas formas escapa."""
+    sem = _sem_acento(base)
+    return [e for e in EXPRESSOES_PROIBIDAS
+            if _normalizar_texto(e) in base or _PADROES_SEM_ACENTO[e].search(sem)]
 
 
 def linha_raciocinio(raciocinio: Optional[str], limite: Optional[int] = None) -> str:
-    """Linha atribuída: "🧠 Avaliação automática: <raciocinio>" ("" se vazio).
+    """Linha atribuída: "🧠 Avaliação automática: <raciocinio>" ("" se vazio ou omitido).
 
-    Quebras de linha viram espaço, para a linha continuar sendo uma só. `limite` corta
-    só a EXIBIÇÃO, com "…"; o dado em `Fonte` nunca muda."""
-    texto = " ".join((raciocinio or "").split())
+    C1: se o raciocínio (normalizado, I2) traz expressão proibida ou selo em formato atribuído, a
+    linha é OMITIDA e registra-se `telemetria.fallback("raciocinio", ...)`. Quebras viram espaço,
+    para a linha continuar sendo uma só. `limite` corta só a EXIBIÇÃO, com "…"; o dado em `Fonte`
+    nunca muda."""
+    texto = texto_de_linha(raciocinio)
     if not texto:
+        return ""
+    base = _normalizar_texto(texto)
+    achadas = _expressoes_achadas(base)
+    if achadas or _SELO_ATRIBUIDO_RE.search(base):
+        binaria = any(e in FRASES_BINARIAS for e in achadas)
+        telemetria.fallback("raciocinio", "expressao binaria omitida" if binaria
+                            else "expressao proibida omitida")
         return ""
     if limite and len(texto) > limite:
         texto = texto[: limite - 1].rstrip() + "…"
@@ -108,13 +157,12 @@ def _agencias_checagem() -> frozenset:
 def verificar_neutralidade(texto: str) -> List[str]:
     """Retorna expressões proibidas encontradas (vazio = neutro).
 
-    E5: o selo atribuído ("Selo da Lupa: FALSO", com agência do catálogo) é
-    citação, não veredito nosso — é ignorado. Selo em outro formato (agência
-    não cadastrada) é sinalizado com o trecho correspondente.
-    B1a: a linha do raciocínio atribuído ao avaliador automático (`linha_raciocinio`)
-    também é citação e é ignorada; só ela, e só quando o rótulo abre a linha.
+    E5: o selo atribuído ("Selo da Lupa: FALSO", com agência do catálogo) é citação, não veredito
+    nosso, e é ignorado. Selo em outro formato (agência não cadastrada) é sinalizado com o trecho.
+    C1: a linha do raciocínio NÃO é isenta; `linha_raciocinio` a omite quando traz expressão proibida.
+    I2: o texto é normalizado (Unicode e sem acento) antes da busca (`_normalizar_texto`).
     """
-    base = _RACIOCINIO_ATRIBUIDO_RE.sub(" ", texto or "")
+    base = _normalizar_texto(texto)
     registradas = _agencias_checagem()
 
     def _corta(m: re.Match) -> str:
@@ -124,10 +172,9 @@ def verificar_neutralidade(texto: str) -> List[str]:
         return m.group(0)
 
     resto = _SELO_ATRIBUIDO_RE.sub(_corta, base)
-    achadas = [e for e in EXPRESSOES_PROIBIDAS if e in resto.lower()]
-    for m in _SELO_ATRIBUIDO_RE.finditer(resto):
-        achadas.append(m.group(0).strip())
-    return achadas
+    achadas = _expressoes_achadas(resto)
+    achadas += [m.group(0).strip() for m in _SELO_ATRIBUIDO_RE.finditer(resto)]
+    return list(dict.fromkeys(achadas))
 
 
 def perguntas_guia() -> List[str]:
