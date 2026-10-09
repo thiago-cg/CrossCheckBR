@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-from factcheck_mvp import afirmacoes, config, llm
+from factcheck_mvp import afirmacoes, config, corroboracao, llm, replay
 from factcheck_mvp import pipeline as pl
 from factcheck_mvp.aprofundar import CorpoLido
 from factcheck_mvp.catalogo import Catalogo
@@ -1069,3 +1069,173 @@ def test_link_sem_data_desliga_o_e4_e_nao_consulta_o_relogio(amb, monkeypatch):
     assert _recebimento(rel).endswith(
         "marcador temporal: hoje (janela 2d); referência ausente (origem: ausente (link sem data)).")
     assert rel.decisao["descontos_temporais"] == []
+
+
+# --- Revisão I1/I2/I3, M2/M3: fusão e data por tier, gate com selo de página, leituras e recibos ---
+class _IdxFixo:
+    """Índice de checagens com hits fixos (sem BM25): o teste controla exatamente a base."""
+
+    def __init__(self, hits):
+        self.hits = hits
+
+    def buscar_checagens(self, q, k=5):
+        return [dict(h) for h in self.hits]
+
+
+def _hit_base(url, titulo):
+    return {"url": url, "titulo": titulo, "agencia_nome": "G1", "trecho": "É falso que café cura câncer",
+            "data_pub": None, "veredito": None, "selo_original": None, "agencia": None,
+            "afirmacao_checada": None, "score_rel": 0.5}
+
+
+def _base_e_web(amb, sufixo):
+    """Base: 1 checagem lida SEM selo (inaplicável: a web roda). Web: 1 página lida."""
+    url_a = f"https://g1.globo.com/saude/noticia/2024/01/cafe-{sufixo}.ghtml"
+    _, corpo_a = _pag(url_a, "Café cura câncer? Checagem", "É falso que café cura câncer, segundo o INCA.")
+    res_b, corpo_b = _pag(f"https://www.estadao.com.br/estadao-verifica/cafe-{sufixo}/", "Post sobre café e câncer",
+                          "Não há evidência de que café cura câncer, dizem oncologistas.")
+    amb[url_a] = corpo_a
+    amb[res_b["link"]] = corpo_b
+    return url_a, res_b
+
+
+@pytest.mark.parametrize("selo_pagina", [
+    {"veredito": "FALSO", "selo_original": "Falso", "agencia": "G1", "afirmacao_checada": "Café cura câncer"},
+    None])
+def test_i3_selo_da_pagina_nao_fecha_o_gate_e_a_web_roda(amb, monkeypatch, selo_pagina):
+    """I3: o ClaimReview da PÁGINA (base sem selo no índice) não torna a base aplicável: T6 diz que ele não vota."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url_a = "https://g1.globo.com/saude/noticia/2024/01/cafe-i3-gate.ghtml"
+    _, corpo_a = _pag(url_a, "Café cura câncer? Checagem", "É falso que café cura câncer, segundo o INCA.")
+    res_b, corpo_b = _pag("https://www.estadao.com.br/estadao-verifica/cafe-i3-gate/", "Post sobre café e câncer",
+                          "Não há evidência de que café cura câncer, dizem oncologistas.")
+    amb[url_a] = (corpo_a, selo_pagina) if selo_pagina else corpo_a
+    amb[res_b["link"]] = corpo_b
+    pipe = Pipeline(Catalogo.carregar(), _IdxFixo([_hit_base(url_a, "Café cura câncer? Checagem")]), Indice(),
+                    serpapi=FakeSerp([res_b]), detector=MockDetector())
+    rel = asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    assert not any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)
+    assert rel.onde_encontrado == "web"
+    assert rel.decisao["vereditos_aplicados"] == []
+
+
+def test_i3_selo_da_pagina_nao_vira_tipo_fonte_veredito(amb, monkeypatch):
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url_a = "https://g1.globo.com/saude/noticia/2024/01/cafe-i3-tipo.ghtml"
+    _, corpo_a = _pag(url_a, "Café cura câncer? Checagem", "É falso que café cura câncer, segundo o INCA.")
+    res_b, corpo_b = _pag("https://www.estadao.com.br/estadao-verifica/cafe-i3-tipo/", "Post sobre café e câncer",
+                          "Não há evidência de que café cura câncer, dizem oncologistas.")
+    amb[url_a] = (corpo_a, {"veredito": "FALSO", "selo_original": "Falso", "agencia": "G1",
+                            "afirmacao_checada": "Café cura câncer"})
+    amb[res_b["link"]] = corpo_b
+    pipe = Pipeline(Catalogo.carregar(), _IdxFixo([_hit_base(url_a, "Café cura câncer? Checagem")]), Indice(),
+                    serpapi=FakeSerp([res_b]), detector=MockDetector())
+    rel = asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    por_url = {f.url: f for f in rel.fontes}
+    assert por_url[url_a].veredito == "FALSO" and por_url[url_a].tipo_fonte == "corroboracao"
+
+
+def test_i3_selecao_nao_da_bonus_ao_selo_de_pagina():
+    afs = [Afirmacao(texto="Café cura câncer", nucleo="Café cura câncer", polaridade="afirma",
+                     consulta="café cura câncer")]
+    pecas = [
+        {"url": "https://a.com.br/x", "titulo": "Café cura câncer", "snippet": "", "afs": {0},
+         "veredito": "FALSO", "origem_veredito": "pagina"},
+        {"url": "https://b.com.br/y", "titulo": "Café cura câncer", "snippet": "", "afs": {0},
+         "veredito": "FALSO", "origem_veredito": "indice"},
+    ]
+    pipe = Pipeline(Catalogo.carregar(), Indice(), Indice(), serpapi=FakeSerp([]), detector=MockDetector())
+    assert pipe._selecionar(afs, pecas)[0] == (1, 0)  # o selo do índice ganha o bônus; o da página não
+
+
+def test_m2_passada_da_web_nao_relê_a_base_nem_repete_o_bert(amb, monkeypatch):
+    """M2: a base (lida ou que falhou) não volta ao aprofundar na passada da web, e cada página passa
+    pelo BERT uma só vez."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url_a, res_b = _base_e_web(amb, "m2")
+    url_falha = "https://boatos.org/cafe-m2-sem-corpo"  # fora de `amb`: a leitura falha
+    lidas = []
+    orig = pl.aprofundar
+
+    async def contado(cands, catalogo, **kw):
+        lidas.extend(d["url"] for d in cands)
+        return await orig(cands, catalogo, **kw)
+    monkeypatch.setattr(pl, "aprofundar", contado)
+    analisadas = []
+
+    class Contador(MockDetector):
+        def analisar_pagina(self, titulo, corpo):
+            analisadas.append(titulo)
+            return super().analisar_pagina(titulo, corpo)
+    idx = _IdxFixo([_hit_base(url_a, "Café cura câncer? Checagem"), _hit_base(url_falha, "Café cura câncer: outra")])
+    pipe = Pipeline(Catalogo.carregar(), idx, Indice(), serpapi=FakeSerp([res_b]), detector=Contador())
+    asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    assert lidas.count(url_a) == 1 and lidas.count(url_falha) == 1, lidas
+    assert analisadas.count("Café cura câncer? Checagem") == 1, analisadas
+
+
+def test_m3_recibo_do_deep_crawl_bate_com_as_paginas_lidas_da_decisao(amb, monkeypatch):
+    """M3: o recibo conta as páginas lidas da consulta toda (base + web), como `contagem.lidas`."""
+    monkeypatch.setenv("INDICE_CHECAGENS", "1")
+    url_a, res_b = _base_e_web(amb, "m3")
+    pipe = Pipeline(Catalogo.carregar(), _IdxFixo([_hit_base(url_a, "Café cura câncer? Checagem")]), Indice(),
+                    serpapi=FakeSerp([res_b]), detector=MockDetector())
+    rel = asyncio.run(pipe.executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer")))
+    assert rel.decisao["contagem"]["lidas"] == 2
+    detalhe = next(e.detalhe for e in rel.etapas if e.nome == "deep-crawl")
+    assert detalhe.startswith("2/2 página(s) com corpo lido"), detalhe
+
+
+@pytest.mark.parametrize("bruto", [b"null", b"[]", b'{"resp": "x"}'])
+def test_i2_consulta_completa_nao_cai_com_cassete_do_relogio_sem_estrutura(amb, tmp_path, monkeypatch, bruto):
+    """I2: o relógio é lido dentro de `executar`; cassete com estrutura errada não derruba a consulta."""
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    texto = "Café cura câncer, segundo a notícia de hoje"
+    k = replay.chave("GET", replay.RELOGIO_URL, texto)
+    replay._caminho(k).parent.mkdir(parents=True, exist_ok=True)
+    replay._caminho(k).write_bytes(bruto)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(), serpapi=FakeSerp([]),
+                    detector=MockDetector())
+    with replay.modo("replay"):
+        rel = asyncio.run(pipe.executar(EntradaConsulta(tipo="texto", conteudo=texto), usar_llm=False))
+    assert "(origem: ausente)" in _recebimento(rel)  # sem relógio: E4 desligado, sem exceção
+
+
+# --- Revisão I1 (pipeline): a fusão e `_ler` escolhem a data pelo tier, com precisão e bruta juntas ---
+_URL_I1 = "https://www.jornal-exemplo.com.br/politica/2026/10/caso-x.html"
+
+
+def _peca_i1(url, data, precisao, bruta):
+    return {"url": url, "titulo": "Caso X", "snippet": "", "veiculo": "", "afs": {0}, "origens": {"web"},
+            "scholar": False, "data_pub": data, "data_pub_precisao": precisao, "data_pub_bruta": bruta}
+
+
+def _ler_fundido_i1(monkeypatch, pecas, data_pagina):
+    """Funde as peças (como o pipeline faz antes da leitura) e lê com uma página de data `data_pagina`."""
+    peca = corroboracao.fundir_por_url(pecas)[0][0]
+    return _ler_com_pagina(monkeypatch, peca, peca["url"], metodo="trafilatura", data_pub=data_pagina,
+                           data_pub_fonte="trafilatura")
+
+
+def test_i1_pagina_substitui_a_data_relativa_ancorada_da_duplicata(monkeypatch):
+    """A1: duplicata 'há 2 dias' ancorada (dia, tier 3) + página de 08/10 (dia, tier 4): vale a página."""
+    p = _ler_fundido_i1(monkeypatch, [_peca_i1(_URL_I1, None, None, None),
+                                      _peca_i1(_URL_I1 + "?utm_source=news", "2026-10-07", "dia", "há 2 dias")],
+                        "2026-10-08")
+    assert (p["data_pub"], p["data_pub_precisao"], p["data_pub_bruta"]) == ("2026-10-08", "dia", "2026-10-08")
+
+
+def test_i1_pagina_substitui_a_data_so_ano_da_duplicata(monkeypatch):
+    """A2: duplicata só com o ano (tier 2) cede para a página do dia (tier 4), não fica '31/12/2021'."""
+    p = _ler_fundido_i1(monkeypatch, [_peca_i1(_URL_I1, None, None, None),
+                                      _peca_i1(_URL_I1 + "?utm_source=news", "2021-12-31", "ano", "2021")],
+                        "2021-07-18")
+    assert (p["data_pub"], p["data_pub_precisao"]) == ("2021-07-18", "dia")
+
+
+def test_i1_data_absoluta_da_duplicata_nao_cai_para_pagina_de_tier_menor(monkeypatch):
+    """A3: peça mantida com relativa sem âncora + duplicata absoluta da SerpAPI: a página (tier 4) não troca."""
+    p = _ler_fundido_i1(monkeypatch, [_peca_i1(_URL_I1, None, None, "há 3 dias"),
+                                      _peca_i1(_URL_I1 + "?utm_source=news", "2026-10-06", "dia", "6 de out. de 2026")],
+                        "2026-10-07")
+    assert (p["data_pub"], p["data_pub_precisao"], p["data_pub_bruta"]) == ("2026-10-06", "dia", "6 de out. de 2026")

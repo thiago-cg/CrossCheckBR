@@ -128,21 +128,10 @@ def _veredito_tipado(valor: Optional[str], selo: Optional[str], agencia: Optiona
     return selos.normalizar(selo or valor, agencia) if (selo or valor) else None
 
 
-def _tier_data(fonte: Optional[str], precisao: Optional[str], relativa: bool = False) -> int:
-    """Prioridade de uma data de publicação (maior vence; E4 Task 2 + revisão I-3).
-
-    JSON-LD (dia) 6 > SerpAPI absoluta/ISO (dia) 5 > trafilatura (dia) 4 > SerpAPI relativa
-    ancorada 3 > só ano 2 > ReaderLM 1. `fonte` é a fonte REAL da data; o método que extraiu o
-    texto não entra. Fonte não declarada (None) fica no nível da trafilatura: não sobrepõe a
-    data absoluta da SerpAPI.
-    """
-    if relativa:
-        return 3
-    if fonte == "readerlm":
-        return 1
-    if precisao == "ano":
-        return 2
-    return {"jsonld": 6, "serpapi": 5, "trafilatura": 4}.get(fonte, 4)
+def _selo_vota(p: Dict[str, Any]) -> bool:
+    """T6: o selo que conta como veredito NOSSO é o do ÍNDICE (ou sem origem, como antes). O
+    ClaimReview extraído da página não vota: mesma regra de `decisao` (origem_veredito "pagina")."""
+    return bool(p.get("veredito")) and p.get("origem_veredito") != "pagina"
 
 
 # Campos que `avaliador.avaliar` lê da peça: se nenhum mudou, a entrada do LLM é a mesma.
@@ -507,8 +496,10 @@ class Pipeline:
                         limitacoes.append("SerpAPI sem resultados para as afirmações.")
 
             # 6. Crawl-primeiro: deep crawl de TODAS as relevantes, depois a seleção só ordena
-            n_lidas, n_alvo = await self._ler(afs, pecas, avisar)
+            await self._ler(afs, pecas, avisar)
             selecionados = self._selecionar(afs, pecas)
+            # M3: o recibo conta a consulta toda (base lida na fase base + web), como `contagem.lidas`
+            n_alvo, n_lidas = sum(1 for p in pecas if p.get("_tentada")), _contar_lidas(pecas)
             if n_alvo:
                 etapa("deep-crawl", "ok" if n_lidas == n_alvo else "parcial",
                       f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
@@ -652,9 +643,10 @@ class Pipeline:
         for (pi, ai), r in julg.items():
             p = pecas_base[pi]
             janela, marco = janelas[ai], marcos[ai]
+            # I3/T6: só o selo do ÍNDICE fecha o gate; o ClaimReview da página não vota na decisão.
             aplicavel, motivo = aplicabilidade.e_aplicavel(
                 r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
-                p.get("veredito"), texto_usuario, p.get("data_pub"),
+                p.get("veredito") if _selo_vota(p) else None, texto_usuario, p.get("data_pub"),
                 referencia=referencia, janela=janela, marco=marco)
             medida = aplicabilidade.medida_da_afirmacao(janela, marco, p.get("data_pub"), referencia)
             telemetria.evento("fonte", url=p.get("url"), estagio="aplicabilidade",
@@ -679,6 +671,8 @@ class Pipeline:
         espúrio); `por_afirm` segue intacto em cada chamada.
         Preenche corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não
         lidas seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
+        M2: peça já tentada (`_tentada`, lida ou não) não é relida; a página já analisada
+        pelo BERT não passa de novo.
         Timeout/cap (URLs sem resposta, ausentes do dict): parcial preservado +
         `fallback deep-crawl`. Marca `_generica` nas homepages/seções reveladas
         genéricas após a leitura.
@@ -686,7 +680,9 @@ class Pipeline:
         alvo_crawl: List[Dict[str, Any]] = []
         vistos = set()
         for p in pecas:
-            if p["url"] not in vistos and not p.get("corpo"):
+            # M2: peça já tentada (lida ou não) não volta ao aprofundar: a base é lida na fase base e
+            # não se relê na passada da web (nem a que falhou).
+            if p["url"] not in vistos and not p.get("corpo") and not p.get("_tentada"):
                 vistos.add(p["url"])
                 ai0 = next((ai for ai in sorted(p.get("afs") or {0}) if ai < len(afs)), None)
                 alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""),
@@ -694,6 +690,9 @@ class Pipeline:
         por_afirm = max(1, int(getattr(config, "AGENTE_MAX_POR_AFIRMACAO", 12) or 12))
         teto_total = max(1, int(getattr(config, "DEEP_CRAWL_TOTAL", 0) or 0), 3 * por_afirm)
         alvo_crawl = alvo_crawl[: teto_total]
+        por_url = {p["url"]: p for p in pecas}
+        for d in alvo_crawl:  # marcada antes da leitura: falha ou timeout também conta como tentativa
+            por_url[d["url"]]["_tentada"] = True
         n_lidas = 0
         if alvo_crawl:
             await avisar("Lendo o corpo das fontes…")
@@ -715,7 +714,6 @@ class Pipeline:
                 telemetria.fallback("deep-crawl",
                                     f"teto {budget:.0f}s/cap: {len(faltantes)}/{len(alvo_crawl)} "
                                     "sem resposta, parcial preservado")
-            por_url = {p["url"]: p for p in pecas}
             for url, c in corpos.items():
                 p = por_url.get(url)
                 if not p or c is None:
@@ -744,16 +742,11 @@ class Pipeline:
                     nova, prec_nova = norm_pagina
                     # Tier pela FONTE da data (jsonld|trafilatura|readerlm), não pelo método do texto:
                     # falha/seletor/regex não rebaixam uma data que veio do JSON-LD (revisão I-3).
-                    tier_nova = _tier_data(getattr(c, "data_pub_fonte", None), prec_nova)
-                    bruta_atual = p.get("data_pub_bruta")
-                    if not p.get("data_pub"):
-                        tier_atual = -1
-                    else:
-                        tier_atual = _tier_data("serpapi", p.get("data_pub_precisao"),
-                                                relativa=aplicabilidade.e_relativa(bruta_atual))
-                    if tier_nova > tier_atual:
+                    tier_nova = corroboracao.tier_data(getattr(c, "data_pub_fonte", None), prec_nova)
+                    if tier_nova > corroboracao.tier_da_peca(p):
+                        # I1: a data inteira troca junto, com o tier da fonte real da página gravado
                         p["data_pub"], p["data_pub_precisao"] = nova, prec_nova
-                        p["data_pub_bruta"] = bruta_pagina
+                        p["data_pub_bruta"], p["data_pub_tier"] = bruta_pagina, tier_nova
                 vp = getattr(c, "veredito_pagina", None)
                 if vp and not p.get("veredito"):
                     v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
@@ -767,7 +760,7 @@ class Pipeline:
         # B1b (T5/D1): BERTimbau/mock mede a CREDIBILIDADE da página (prob_fake);
         # a direção vem do avaliador (T6 consome p["bert"]). Só páginas lidas.
         for p in pecas:
-            if not p.get("corpo_lido"):
+            if not p.get("corpo_lido") or p.get("bert") is not None:  # M2: página já analisada não passa de novo
                 continue
             try:
                 r = self.detector.analisar_pagina(p.get("titulo") or "", p.get("corpo") or "")
@@ -807,7 +800,7 @@ class Pipeline:
             cands = [i for i, p in enumerate(pecas)
                      if ai in (p.get("afs") or {0}) and (i, ai) not in excluir and not p.get("_generica")]
             cands.sort(key=lambda i: (_overlap(ref, f"{pecas[i].get('titulo','')} {pecas[i].get('snippet','')}")
-                                      + (0.3 if pecas[i].get("veredito") else 0)
+                                      + (0.3 if _selo_vota(pecas[i]) else 0)
                                       + (0.15 if pecas[i].get("curada") else 0)
                                       + (0.1 if pecas[i].get("tipo_portal") == "checagem" else 0)
                                       + confiabilidade.BONUS_SELECAO.get(pecas[i].get("confiabilidade") or "", 0.0)),
@@ -961,7 +954,8 @@ class Pipeline:
                 pedidos = []
                 for ai in range(len(afs)):
                     itens = [{"classe": r.get("classe"), "cluster": pecas[pi].get("cluster"), "url": pecas[pi]["url"],
-                              "veredito": pecas[pi].get("veredito"), "titulo": pecas[pi].get("titulo"),
+                              "veredito": pecas[pi].get("veredito") if _selo_vota(pecas[pi]) else None,
+                              "titulo": pecas[pi].get("titulo"),
                               "dominio": pecas[pi].get("dominio")}
                              for (pi, a), r in julg.items() if a == ai]
                     res = _agente.resumir_julgamento(ai, itens)
@@ -1151,7 +1145,7 @@ class Pipeline:
                            FonteEvidencia(
                 url=p["url"], titulo=p.get("titulo") or "", portal_id=p.get("portal_id"),
                 portal_nome=p.get("veiculo") or p.get("dominio") or "",
-                tipo_fonte="veredito" if p.get("veredito") else "corroboracao",
+                tipo_fonte="veredito" if _selo_vota(p) else "corroboracao",
                 veredito=p.get("veredito"), selo_original=p.get("selo_original"),
                 veredito_normalizado=p.get("veredito"),
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
