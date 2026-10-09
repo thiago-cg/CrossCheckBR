@@ -8,18 +8,20 @@ e `citacao_verificada` do avaliador;
 
 O nível é propensão a a entrada ser desinformação, só a partir de VERACIDADE:
 (a) postura das fontes julgadas (juiz de 4 classes, citação verificada), um voto
-por CLUSTER independente; (b) vereditos tipados de checagem (ClaimReview da página
-ou índice), direção por `selos.direcao` e só quando o juiz disse que a página trata
-da afirmação. Estilo (BERTimbau/mock, padrões) NÃO entra.
+por CLUSTER independente, ponderado pela credibilidade da página (T6: o BERTimbau mede
+a credibilidade; a direção é sempre do juiz; o mock não entra); (b) vereditos tipados
+de checagem do ÍNDICE (E1/aplicabilidade), direção por `selos.direcao` e só quando o
+juiz disse que a página trata da afirmação. Selo ClaimReview extraído da própria
+página NÃO vota (T6). Padrões de estilo NÃO entram.
 
 Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
 
     s_a       = +1 se o usuário afirma o núcleo, -1 se nega (polaridade)
     contrib   = s_a * d * w
       postura : d = +1 REFUTA, -1 SUSTENTA (RELATA/NAO_TRATA não votam)
-                w = W_POSTURA * f_fonte * f_corpo
+                w = W_POSTURA * f_fonte * (1 − prob_fake_pagina)  (T6; sem modelo real, fator 1,0)
       veredito: d = selos.direcao(veredito) (FALSO +1 … VERDADEIRO -1; SATIRA 0 = não vota)
-                w = W_VEREDITO * f_fonte
+                w = W_VEREDITO * f_fonte; só selo do ÍNDICE (origem "pagina" não vota: T6)
       f_fonte = confiabilidade da fonte (confiabilidade.FATOR_POSTURA / FATOR_VEREDITO):
                 curada 1,0 · institucional / muito acessada (Tranco) 0,6 (selo 0,8) ·
                 rede social / plataforma 0,45 (selo 0,55) · site pouco acessado 0,3 (selo 0,4)
@@ -45,7 +47,7 @@ Trava de confiabilidade: sem ao menos 1 voto de fonte confiável (curada, instit
 acessada) no mesmo sentido, |L_a| fica abaixo de τ — redes sociais e sites pouco acessados votam,
 mas sozinhos não cravam alta/baixa.
 Consequências: 1 fonte curada sozinha (w=1,0) → média (não satura); 2 clusters
-concordes → alta/baixa; 1 selo de checagem aplicável (1,5) → alta/baixa; fontes em
+concordes → alta/baixa; 1 selo do índice aplicável (1,5) → alta/baixa; fontes em
 conflito → média. Sinais `fallback-*` (sem juiz) são ignorados. Ausência de
 evidência não é evidência: nada empurra o nível sem uma fonte com postura.
 
@@ -87,6 +89,7 @@ class ItemEvidencia:
     veiculo: str = ""
     confiabilidade: Optional[str] = None   # confiabilidade.NIVEIS; None = calcula pela URL
     data_pub: Optional[str] = None         # YYYY-MM-DD da peça (E4: relevância temporal)
+    prob_fake_pagina: Optional[float] = None  # T6/B1c: P(fake) da página (BERTimbau); None = sem modelo real
 
     def nivel_confiabilidade(self) -> str:
         return self.confiabilidade or confiabilidade.classificar(self.url, self.curada)
@@ -265,6 +268,14 @@ def _descontar(valor: float, r: float) -> float:
     return math.copysign(math.log(r * math.exp(abs(valor)) + (1.0 - r)), valor)
 
 
+def _fator_credibilidade(it: ItemEvidencia) -> float:
+    """T6/D1: fator (1 − prob_fake_pagina) da postura, com prob_fake limitada a [0, 1].
+    Sem modelo real (None: snapshot antigo, página não lida, mock) o fator é 1,0."""
+    if it.prob_fake_pagina is None:
+        return 1.0
+    return 1.0 - min(1.0, max(0.0, float(it.prob_fake_pagina)))
+
+
 def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     """(valor, descrição) de um item; registra vereditos aplicados/ignorados e conflitos."""
     if (it.motor or "").startswith("fallback") or it.classe is None:
@@ -284,13 +295,19 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     post = None
     if it.classe in CLASSES_VOTO:
         d = 1.0 if it.classe == "REFUTA" else -1.0
-        w = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]
-        post = (s * d * w, f"postura {it.classe}")
+        w = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()] * _fator_credibilidade(it)
+        if w > 0:  # prob_fake 1,0: a página não vota na postura
+            post = (s * d * w, f"postura {it.classe}")
     ver = None
     if it.veredito:
         if it.classe not in CLASSES_TRATA:
             dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
                                             "motivo": "juiz: a página não trata desta afirmação"})
+        elif it.origem_veredito == "pagina":
+            # T6: selo ClaimReview extraído da própria página (template/JSON-LD do portal) não
+            # vota; só o do índice. origem_veredito None (ausente) segue votando, como antes.
+            dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
+                                            "motivo": "selo extraído da página não vota (só o do índice)"})
         else:
             d = selos.direcao(it.veredito)
             if d == 0:
@@ -384,7 +401,8 @@ def decidir(ev: Evidencias) -> Decisao:
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
-                              "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO)})
+                              "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
+                              "postura": "W_POSTURA·f_fonte·(1−prob_fake_pagina)"})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),

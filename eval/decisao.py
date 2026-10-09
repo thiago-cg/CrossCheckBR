@@ -23,7 +23,7 @@ Formato do snapshot (1 linha por caso):
    evidencias: {afirmacoes: [{texto, nucleo, polaridade}],
                 itens: [{url, afirmacao, cluster, classe, motor,
                          citacao_verificada, curada, corpo_lido,
-                         veredito, origem_veredito, veiculo}],
+                         veredito, origem_veredito, veiculo[, prob_fake_pagina]}],
                 vago, opiniao, rumor, juiz_disponivel, n_lidas, n_consultadas}}
 """
 from __future__ import annotations
@@ -62,6 +62,7 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         origem_veredito=i.get("origem_veredito"),
         veiculo=i.get("veiculo") or "",
         data_pub=i.get("data_pub"),
+        prob_fake_pagina=i.get("prob_fake_pagina"),  # T6: opcional (snapshots antigos não têm)
     ) for i in (d.get("itens") or [])]
     return decisao.Evidencias(
         afirmacoes=afs, itens=itens,
