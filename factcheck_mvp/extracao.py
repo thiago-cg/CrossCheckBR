@@ -181,6 +181,25 @@ def _trafilatura(html: str, url: str) -> Tuple[Optional[Dict[str, Any]], Optiona
     return (doc or None), None
 
 
+def data_publicacao_pagina(html: str, url: str = "") -> Optional[str]:
+    """Data de publicação BRUTA da página (referência de uma entrada por link), ou None.
+
+    JSON-LD (datePublished) primeiro; senão a data de metadados do trafilatura. Só a data:
+    sem corpo e sem ReaderLM (nenhuma chamada de LLM). Nunca levanta.
+    """
+    if not html or not html.strip():
+        return None
+    try:
+        from . import jsonld
+        data = (jsonld.extrair(html) or {}).get("data_pub")
+        if data:
+            return data
+    except Exception as e:
+        telemetria.fallback("extracao.jsonld", f"data da página: {type(e).__name__}: {e}"[:200], url=url)
+    doc, _erro = _trafilatura(html, url)
+    return (doc or {}).get("date") or None
+
+
 # ----------------------------------------------------------------------------- (e) ReaderLM-v2
 def readerlm_ativo() -> bool:
     return os.getenv("EXTRACAO_READERLM", "0").strip().lower() in ("1", "true", "sim", "on")

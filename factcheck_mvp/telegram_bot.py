@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
-from . import config
+from . import config, extracao
+from .aplicabilidade import referencia_de_pagina
 from .pipeline import Pipeline
 from .schemas import EntradaConsulta, RelatorioChecagem
 
@@ -169,11 +171,39 @@ RUMOR_MSG = ("Entendi — relato sem fonte nem certeza. Vou checar o núcleo fac
              "como rumor de segunda-mão (se souber onde/quando ouviu, me diga).")
 
 
-def _texto_link(url: str, catalogo, timeout: int = 15) -> str | None:
+class TextoLido(str):
+    """Texto de uma página lida (é um str, como antes) + `data_pub`: data de publicação
+    BRUTA da página (ISO ou texto como veio) ou None. Daqui sai a referência do E4 de um link (A5)."""
+
+    data_pub: str | None = None
+
+
+def entrada_de_link(url: str, pagina: str) -> EntradaConsulta:
+    """Entrada do texto de um link já lido (api e bot). O "hoje" da matéria é a data da própria
+    página; página sem data útil (ou só ano/placeholder) = E4 desligado, nunca a data de hoje."""
+    ref = referencia_de_pagina(getattr(pagina, "data_pub", None))
+    return EntradaConsulta(tipo="texto", conteudo=f"{url}\n\n{pagina}"[:20000],
+                           data_referencia=ref, sem_referencia_temporal=ref is None)
+
+
+def referencia_do_encaminhamento(data_origem: datetime | None) -> str | None:
+    """"Hoje" de uma mensagem encaminhada: o dia (UTC−3) em que a original foi enviada.
+
+    `data_origem` é `forward_origin.date` do Telegram (UTC). Naive = UTC. None -> None (relógio).
+    """
+    if not isinstance(data_origem, datetime):
+        return None
+    if data_origem.tzinfo is None:
+        data_origem = data_origem.replace(tzinfo=timezone.utc)
+    return (data_origem.astimezone(timezone.utc) - timedelta(hours=3)).date().isoformat()
+
+
+def _texto_link(url: str, catalogo, timeout: int = 15) -> TextoLido | None:
     """Baixa link SOMENTE de domínio do catálogo (allow-list anti-SSRF).
 
     Teto de 1,5 MB, timeout curto, e a URL final (após redirects) precisa
     continuar no catálogo. Fora disso: None (pipeline registra limitação).
+    Devolve o texto com `data_pub` (data de publicação da página, se houver).
     """
     import curl_cffi.requests as _curl
 
@@ -196,9 +226,14 @@ def _texto_link(url: str, catalogo, timeout: int = 15) -> str | None:
         limpo = re.sub(r"<[^>]+>", " ", " ".join(paras))
         limpo = re.sub(r"\s+", " ", limpo).strip()[:8000]
         cabeca = (titulo.group(1).strip()[:200] + "\n\n") if titulo else ""
-        return (cabeca + limpo) or None
+        texto = (cabeca + limpo) or None
     except Exception:
         return None
+    if texto is None:
+        return None
+    lido = TextoLido(texto)
+    lido.data_pub = extracao.data_publicacao_pagina(html, final)
+    return lido
 
 
 def _urls_nao_analisadas(rel) -> set:
@@ -361,7 +396,13 @@ async def _checar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 # Plano B: sem o conteúdo, a checagem seria só sobre o endereço.
                 await aviso.edit_text(LINK_SEM_TEXTO_MSG)
                 return
-            entrada = EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto_extra}"[:20000])
+            entrada = entrada_de_link(entrada.conteudo, texto_extra)
+        else:
+            # Encaminhada: o "hoje" do texto é o dia em que a mensagem original foi enviada.
+            origem = getattr(update.message, "forward_origin", None)
+            ref_enc = referencia_do_encaminhamento(getattr(origem, "date", None))
+            if ref_enc:
+                entrada = EntradaConsulta(tipo=entrada.tipo, conteudo=entrada.conteudo, data_referencia=ref_enc)
         # Aviso de rumor de 2ª mão (usa a mesma regex do pipeline, sem drift)
         try:
             from .pipeline import RUMOR_RE as _RR
