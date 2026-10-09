@@ -108,7 +108,7 @@ class AfirmacaoDecisao:
     nucleo: str = ""
     polaridade: str = "afirma"
     janela: Optional[int] = None  # E4: janela temporal da afirmação (janela_da_afirmacao); None = sem marcador
-    marco: Optional[tuple] = None  # E4 (Task 4b): (data_evento ISO, folga) da data explícita do fato; tem precedência
+    marco: Optional[tuple[str, int]] = None  # E4 (Task 4b): (data_evento ISO, folga) da data explícita do fato; tem precedência
 
 
 @dataclass
