@@ -352,11 +352,26 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]
-    texto = "\n".join(linhas)
-    if len(texto) <= LIMITE_TELEGRAM:
+    return _cortar_telegram("\n".join(linhas))
+
+
+def _len_telegram(texto: str) -> int:
+    """Tamanho como o Telegram conta: UTF-16 (emoji e símbolo fora do BMP valem 2 unidades)."""
+    return len(texto.encode("utf-16-le")) // 2
+
+
+def _cortar_telegram(texto: str, limite: int = LIMITE_TELEGRAM) -> str:
+    """Até `limite` unidades UTF-16. Acima disso, corta em quebra de linha (nunca no meio da URL)."""
+    if _len_telegram(texto) <= limite:
         return texto
-    # Acima do limite do Telegram: corta em quebra de linha, nunca no meio da URL.
-    return texto[:LIMITE_TELEGRAM].rsplit("\n", 1)[0]
+    lo, hi = 0, len(texto)  # maior prefixo (em código de ponto) que ainda cabe
+    while lo < hi:
+        meio = (lo + hi + 1) // 2
+        if _len_telegram(texto[:meio]) <= limite:
+            lo = meio
+        else:
+            hi = meio - 1
+    return texto[:lo].rsplit("\n", 1)[0]
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

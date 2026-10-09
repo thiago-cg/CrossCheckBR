@@ -451,6 +451,25 @@ def test_web_achata_titulo_e_citacao():
     assert "Título em duas linhas" in h and "Citação em duas" in h
 
 
+# ------------------------------------------------------------------ M1: limite do Telegram em UTF-16
+def _utf16(texto):
+    return len(texto.encode("utf-16-le")) // 2
+
+
+def test_bot_limite_do_telegram_conta_utf16_com_emojis():
+    """M1: o Telegram conta UTF-16 (emoji vale 2). Medido em código de ponto, o texto cabia; no Telegram, não."""
+    from factcheck_mvp.telegram_bot import LIMITE_TELEGRAM, formatar
+    emo = "🔴"
+    rel = RelatorioChecagem(
+        propensao="alta", justificativa="Alta propensão de ser fake news.",
+        header="🔴 Alta propensão de ser fake news", why_1linha=emo * 1000,
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        perguntas_guia=[emo * 400, emo * 400, emo * 400])
+    t = formatar(rel)
+    assert _utf16(t) <= LIMITE_TELEGRAM
+    assert "Para avaliar você mesmo" in t  # o corte fica numa quebra de linha e mantém o bloco
+
+
 # ------------------------------------------------------------------ I3: href só com http(s)
 def _rel_url(url):
     return RelatorioChecagem(
