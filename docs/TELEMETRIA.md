@@ -65,12 +65,23 @@ n_fallbacks, fallbacks_por_onde, descartes_por_motivo, n_erros, dur_ms, nivel}`.
 | `http` | `metodo`, `url` (redigida), `status`, `bytes`, `latencia_ms`, `cache` (live\|hit\|miss), `erro`, `truncado`, `gravado` | todo wrapper do `replay` |
 | `fonte` | `url`, `estagio` (deep-crawl\|descoberta-site\|relatorio\|**data**), `decisao` (mantida\|descartada\|**descontada**), `motivo` (+ `tipo_fonte`, `corpo_lido`, `confianca` no estágio relatorio; no estágio `data`: `afirmacao`, `data_pub`, `data_pub_bruta`, `precisao`, `r`, `bits`) | aprofundar, descoberta_site, `Pipeline.executar`, `Pipeline._emitir_decisao` (estágio `data`, 1 por fonte com desconto temporal) |
 | `fonte` (`estagio=aplicabilidade`) | 1 por par (peça da base julgada, afirmação) na fase base: `url`, `afirmacao` (índice), `classe`, `corpo_lido`, `veredito`, `decisao` (aplicavel\|inaplicavel), `motivo` (de `e_aplicavel`: corpo não lido, juiz não trata do fato, sem citação verificada, sem selo com direção, data incompatível, aplicável). E4: `janela` (dias do marcador relativo; None = sem), `marco` (`[data_evento ISO, folga]` da data explícita do fato; None = sem), `excedente` (dias além da janela ou do marco; None = não mede), `referencia` (YYYY-MM-DD do "hoje" da checagem; None = ausente) | `Pipeline._fase_base` |
+| `bert_pagina` | `url`, `prob_fake` (média dos blocos de 192 tokens; só páginas com `corpo_lido`) | `Pipeline._ler` (B1b) |
 | `fallback` | `onde`, `motivo` (+ extras) | ver tabela abaixo |
 | `sinal` | `motor`, `rotulo`, `valor`, `confianca`, `direcao` (via `agregador._direcao`, `None` se não existir), `peso` (`agregador.PESOS`), `evidencias` | pipeline, antes de `agregar` |
-| `decisao` | `nivel` (final), `nivel_agregador`, `score`, `sinais` (lista `motor:rotulo`), `why`, `travas{opiniao, vago, rumor, tem_veredito, tem_corpo, n_corpo}` | pipeline (fim, e no retorno "sem afirmação") |
-| | `travas` é o `decisao.resumo_trace()`: inclui `contagem`, `L_sem_desconto`, `nivel_sem_desconto` (contrafactual sem desconto temporal, E4) e `descontos` (≤6, `"<url[:60]> +<dias>d r=<r> −<bits>b"`) | |
+| `decisao` | `nivel` (final), `nivel_agregador`, `score`, `sinais` (lista `motor:rotulo`), `why`, `travas` (ver abaixo), `decisao` (`Decisao.to_dict()`, ver abaixo) | pipeline (fim, e no retorno "sem afirmação") |
+| | `travas` é o `decisao.resumo_trace()`: inclui `L`, `p`, `motivo`, `votos`, `vereditos`, `vereditos_ignorados`, `conflitos`, `contagem`, `L_sem_desconto`, `nivel_sem_desconto` (contrafactual sem desconto temporal, E4) e `descontos` (≤6, `"<url[:60]> +<dias>d r=<r> −<bits>b"`) | |
 | `erro` | `onde`, `erro` | pipeline (exceção), replay (gravar cassete), eval |
 | `span_inicio` / `span_fim` | `nome`, extras; no fim `dur_ms`, `ok`, `erro` | quem usar `span` |
+
+Travas do evento `decisao` (`travas` = `resumo_trace()`, com estas chaves de `Decisao.travas`):
+
+- `vago`, `opiniao`, `rumor`: entrada do pipeline (afirmação vaga, opinião/sátira, relato de segunda mão).
+- `juiz_disponivel`: o juiz LLM respondeu. Sem ele, os votos vêm de fallback léxico.
+- `sem_fonte_confiavel`: o |L| foi cortado para 0,99τ porque nenhum voto confiável (curado, institucional
+  ou muito acessado) estava no mesmo sentido.
+- `so_fontes_de_outro_periodo` (E4): o |L| foi cortado porque só fontes de outro período (descontadas)
+  votaram na direção. Só age no caminho com desconto.
+- `data_incompativel`: há fontes com desconto temporal (`descontos_temporais` não vazio).
 
 `finalidade` de LLM: explícita (`llm_post(finalidade=...)` ou `with telemetria.finalidade(...)`) ou
 inferida do chamador: `afirmacoes`, `padroes`, `reformular` (agente: consulta da onda extra), `juiz-resumo` (`juiz_llm.resumir`), `juiz`
@@ -85,7 +96,10 @@ modelo que falhou; teto diário), `juiz` (item julgado por fallback léxico; tim
 `serpapi.cap` (teto diário interno), `serpapi.agencias` (catálogo indisponível: sem `site:` de agências),
 `agente` (onda passou de `AGENTE_TIMEOUT_S`, parcial preservado; falha nas ondas extras),
 `agente.reformular` (LLM de reformulação falhou → consulta determinística), `deep-crawl`, `aprofundar`,
-`descoberta-catalogo`, `descoberta-site`, `descoberta-site.jev`.
+`descoberta-catalogo`, `descoberta-site`, `descoberta-site.jev`, `bert_pagina` (o detector falhou numa
+página), `raciocinio` (C1: a linha do raciocínio do avaliador foi omitida por conter expressão proibida;
+`motivo` = `expressao binaria omitida` ou `expressao proibida omitida`. Emitido na renderização do bot e da
+web, então é no-op fora de um run ativo).
 `relogio` (E4, em replay: sem data de referência → E4 desligado neste caso; `motivo` = `data de referência
 não gravada` (não há cassete `relogio://hoje`) ou `cassete sem data` (o cassete não tem data válida)),
 `data_pub` (E4: `data_pub` não-vazia que `normalizar_data` não lê → a fonte fica sem data e sem desconto
