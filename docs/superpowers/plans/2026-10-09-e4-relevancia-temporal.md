@@ -19,28 +19,28 @@ E4 só remove informação de fonte de outro episódio (formulação de 09/10, G
 (`Decisao.descontos_temporais`, `travas['data_incompativel']`); motivo "podem tratar de outro episódio —
 verifique se não é notícia antiga recirculando" quando o nível fica `media` por isso. E3 aprovado e já no código.
 
-## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`)
+## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`; atualizado no follow-up `feat/fase-eb-followup` @ `c7a8868`)
 
 | Task | Estado | Evidência |
 |---|---|---|
 | 0 | ✅ feita | hiperbólica no HEAD + `test_e4_relevancia_temporal_contrato` verde |
 | 1 | ✅ implementada + review Approved | 4 testes novos; review sem Critical/Important (só minors diferidos) |
-| 2 | ✅ implementada (review pendente) | 17 casos `normalizar_data` + prioridade da data; cobertura 90,7% (era ~20%) |
-| 3 | ✅ implementada (review pendente) | relógio `replay.hoje` (live/record/replay-miss→None+fallback); 40+10 testes |
-| 4 | ✅ implementada (review pendente) | exclusões/extensões + `janela_da_afirmacao`; check eval: só `cr_el_nino` 2→32 |
-| 4b | ✅ implementada (review pendente) | `marco_do_evento` + `marco=(D,folga)`; 5 testes TDD, frases fora do eval |
-| 5 | ⬜ não iniciada | gate E1 ainda usa janela/referência/data antigas |
-| 6 | ✅ implementada (review pendente) | aviso neutro em `justificativa`/`why_1linha` + 📅 por fonte; `verificar_neutralidade == []` |
-| 7 | ✅ implementada (review pendente) | `fonte estagio=data`, `resumo_trace`, `--sem-e4`, `--gerar-snapshot`, `metricas.e4` |
-| 8 | ⬜ não iniciada | sem regressão Bolsonaro REFUTA→"não alta"; sem record (precisa aprovação); `ITERACOES.md`/`PROXIMOS_PASSOS.md` intactos |
+| 2 | ✅ implementada e revisada | 17 casos `normalizar_data` + prioridade da data; cobertura 90,7% (era ~20%) |
+| 3 | ✅ implementada e revisada | relógio `replay.hoje` (live/record/replay-miss→None+fallback); 40+10 testes |
+| 4 | ✅ implementada e revisada | exclusões/extensões + `janela_da_afirmacao`; check eval: só `cr_el_nino` 2→32 |
+| 4b | ✅ implementada e revisada | `marco_do_evento` + `marco=(D,folga)`; 5 testes TDD, frases fora do eval |
+| 5 | ✅ feita | gate E1 alinhado e binário (`4b575ec`): mesma janela, referência e data da decisão |
+| 6 | ✅ implementada e revisada | aviso neutro em `justificativa`/`why_1linha` + 📅 por fonte; `verificar_neutralidade == []` |
+| 7 | ✅ implementada e revisada | `fonte estagio=data`, `resumo_trace`, `--sem-e4`, `--gerar-snapshot`, `metricas.e4` |
+| 8 | Steps 1–2 ✅ (Step 2 com ressalva); Steps 3–7 ⬜ (record e holdout: aprovação e cassetes) | regressão Bolsonaro nas duas direções (`0ebcd57`); a3-dev no HEAD difere do estado de partida só por T6/T7 (ver Step 2); `ITERACOES.md` atualizado (dev, nível 0); `PROXIMOS_PASSOS.md` (E4 e §5.2) atualizado |
 
-- Suite no commit: **467 passed, 0 failed** (`python3 -m pytest tests -q`).
+- Suite no HEAD `c7a8868` (09/10, follow-up): **688 passed, 0 failed, 0 xfail** (`python3 -m pytest tests -q`, com e sem `PYTHONUTF8`). Antes, no `main` `56c4b33`: 467 passed.
 - Incidentes revertidos (comportamento fora deste plano, introduzido 2x, revertido 2x — R6 no ledger):
   peso `f_fake`, filtro "selo de página não vota", testes `test_t6_*`, reescrita do teste pinado do selo.
   Árvore limpa confirmada por grep no commit.
 - Flaky conhecido (ambiental, sem relação com E4): `test_orcamento_parcial_preservado`
   (budget 0,15s; contagem 4-vs-5 eventos; passa intermitente).
-- Pendente após o commit: reviews das Tasks 4b/6/7, Task 5, Task 8, final whole-branch review.
+- Pendente: Task 8 Steps 3–7 (record e replay da subamostra, holdout; com aprovação e cassetes) e o final whole-branch review.
 
 ## Global Constraints
 
@@ -615,14 +615,15 @@ def test_e4_aviso_chega_ao_usuario_e_e_neutro(monkeypatch):
 **Files:** `tests/test_pipeline.py` (regressão com a base real), `eval/ITERACOES.md`, `eval/snapshots/` (snapshot
 novo), `docs/PROXIMOS_PASSOS.md` (E4 ✅, §5.2 resolvida pela decisão de 09/10).
 
-- [ ] **Step 1: Regressão Bolsonaro nas duas direções (offline, sem rede):**
+- [x] **Step 1: Regressão Bolsonaro nas duas direções (offline, sem rede):** feito (`0ebcd57`). REFUTA: sem E4 alta (L=+1,50), com E4 média (L=+0,16); SUSTENTA: sem E4 baixa (L=−3,00), com E4 média (L=−0,25) (base real do índice, `r` stub = 0,05).
   teste com `Indice.de_checagens()` **real**, `FakeSerp([])`, juiz falso que devolve REFUTA com citação para as
   checagens Boatos.org (FALSO, 2026-01-14 e 2025-04-23, A8), `data_referencia="2026-10-09"`,
   entrada "Bolsonaro recebeu alta do hospital hoje" → `propensao != "alta"`,
   `decisao["travas"]["data_incompativel"] is True`, aviso no `justificativa`, web **não** pulada.
   Complementa `test_e4_fonte_antiga_que_confirma_nao_crava_baixa` (direção SUSTENTA). Stub de `r` = 0.05.
-- [ ] **Step 2: Nível 0, guarda de regressão:** `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`
+- [x] **Step 2: Nível 0, guarda de regressão (feito em 09/10, com ressalva):** `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`
   → Expected: **idêntico** ao estado de partida (15,9% / 30,4% / grave 2 / indet 65,2%) — snapshot sem datas.
+  **Resultado (09/10):** `main` 56c4b33 reproduz o estado de partida (15,9% / 30,4% / 2 / 65,2%); HEAD `c7a8868` dá 14,5% / 33,3% / 0 / 65,2%. A diferença vem de T6 e T7 (três casos: `cr_jn_soltura_vorcaro`, `cr_lula_nao_acredita_em_deus`, `cr_lula_acabar_bets_que_criou`), aceitos pela usuária em 09/10; o E4 não move este snapshot (sem datas: `referencia_ausente` 69). Ou seja, "idêntico" vale para o `main`, não para o HEAD.
   Qualquer diferença = E4 vazando para casos sem marcador → investigar antes de seguir.
 - [ ] **Step 3: Pedir aprovação** à usuária para o record da subamostra (nível 3, ~50 buscas SerpAPI; reusa
   cassetes existentes e grava o que falta, inclusive o relógio):
