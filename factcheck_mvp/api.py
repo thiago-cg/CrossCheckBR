@@ -180,11 +180,9 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
         nao_lidas = _urls_nao_analisadas(rel)
         uteis = [f for f in rel.fontes if f.relevante is not False][:5]
         cor = {"contesta o que o texto afirma": "#b42318", "confirma o que o texto afirma": "#067647"}
-        try:
-            _dec = rel.decisao or {}
-            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
-        except Exception:
-            _descontadas = set()
+        # E4: mesma regra do bot (ver telegram_bot.formatar): `decisao` validado pelo schema, sem try.
+        _dec = rel.decisao or {}
+        _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
 
         def _cartao(f) -> str:
             post = postura_legivel(f, direcoes)

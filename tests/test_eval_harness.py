@@ -213,6 +213,17 @@ def test_sem_e4_zera_desconto_e_recupera_modulo():
     assert abs(sem[0]["log_odds"]) > abs(base[0]["log_odds"])
 
 
+def test_e4_do_trace_marca_janela_do_texto_sem_try():
+    """`janela_temporal` só recebe texto (regex sobre str): a marca do texto sai direto."""
+    from eval.run import _e4_do_trace
+    eventos = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": "Bolsonaro recebeu alta do hospital hoje", "janela": None}],
+        "texto_usuario": "Bolsonaro recebeu alta do hospital hoje", "data_referencia": "2026-10-09"}}]
+    r = _e4_do_trace(eventos)
+    assert r["marcador"] is True and r["referencia_ausente"] is False
+    assert _e4_do_trace([{"tipo": "evidencias", "dados": {"afirmacoes": [], "texto_usuario": None}}])["marcador"] is False
+
+
 def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     from eval.decisao import gerar_snapshot_de_resultado
     res_dir = amb / "resultado"

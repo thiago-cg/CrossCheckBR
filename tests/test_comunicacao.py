@@ -250,6 +250,19 @@ def test_fontes_leva_a_precisao_da_data_da_peca():
     assert (f.data_pub, f.data_pub_precisao, f.data_pub_bruta) == ("2021-12-31", "ano", "2021-01-01")
 
 
+def test_bot_e_web_sem_decisao_renderizam_sem_descontos():
+    """Relatório sem `decisao` (snapshot antigo): sem descontos, sem aviso de data e sem erro."""
+    from factcheck_mvp.api import _render_html
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Texto sobre fato de hoje aqui"),
+        fontes=[_fonte("https://a.test/1", "REFUTA", corpo_lido=True, confiabilidade="alto_trafego")],
+        decisao=None)
+    assert "📅" not in formatar(rel)
+    assert "Fontes com desconto por data" not in _render_html("x", rel)
+
+
 def test_perguntas_guia_traz_a_de_data_primeiro_sem_parametro_inutil():
     """A pergunta de data já é a primeira da lista; o antigo `priorizar_data` não mudava nada."""
     import inspect

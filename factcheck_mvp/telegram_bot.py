@@ -255,11 +255,11 @@ def formatar(rel: RelatorioChecagem) -> str:
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
-        try:
-            _dec = getattr(rel, "decisao", None) or {}
-            _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
-        except Exception:
-            _descontadas = set()
+        # E4: fontes com desconto por data. `decisao` é Optional[dict] no schema e cada desconto é
+        # um dict (saída de asdict): não há exceção a engolir. Um erro aqui deve aparecer (o _checar
+        # loga e responde "Não consegui concluir"), e não virar um aviso de data silenciosamente faltando.
+        _dec = getattr(rel, "decisao", None) or {}
+        _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
             selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
