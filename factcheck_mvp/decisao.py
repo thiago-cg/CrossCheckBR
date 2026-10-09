@@ -46,7 +46,16 @@ critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
 T7 (E4 × D2): com 2+ afirmações com voto, sai do produto a afirmação cujos votos vêm SÓ de
 fontes fora da janela (descontadas) e cujo |L_a| < τ ("só evidência de outro período" em
 `por_afirmacao[i]`): evidência de outro episódio que não chega a um nível não informa o fato
-atual. Acima de τ ela continua. O contrafactual (sem desconto) não muda.
+atual. Também sai a afirmação que a trava so_fontes (abaixo) cortou. O contrafactual (sem
+desconto) não muda.
+E4, guarda do sinal (decisão da usuária, 09/10): E4 só remove informação de fonte de outro episódio.
+O nível pode ficar mais extremo apenas na direção de fontes do período, nunca sustentado só por
+fonte descontada. Trava `so_fontes_de_outro_periodo` (só no caminho COM desconto): por afirmação, se
+|L_a| ≥ τ e nenhum voto na direção de L_a tem contribuição de item NÃO descontado (r = 1, dentro da
+janela), então L_a = copysign(0,99τ, L_a) e `travas["so_fontes_de_outro_periodo"] = True`. Reusa o
+rastreio "descontado vs atual" da exclusão T7. Ordem com `sem_fonte_confiavel`: as duas leem o mesmo
+L_a bruto e cortam para o mesmo 0,99τ, então a ordem não muda o nível nem as flags, e aplicar as duas
+é idempotente (cada flag é registrada quando a própria condição vale).
 
 Faixas SIMÉTRICAS em torno de 0 (τ = ln 3 ≈ 1,10, ou seja p ≥ 0,75 / p ≤ 0,25):
     L ≥ +τ → alta · L ≤ −τ → baixa · |L| < τ → media
@@ -246,7 +255,7 @@ class Decisao:
                 partes.append(f"{n_dt} fontes foram publicadas antes do período que o texto descreve "
                               "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
                               "de outro episódio.")
-            if self.nivel != self.nivel_sem_desconto:
+            if self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"):
                 partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
         return " ".join(partes)
@@ -263,8 +272,9 @@ class Decisao:
             conflito = self._partes_em_conflito()  # D2: o bot e a API mostram o why primeiro
             if conflito:
                 base += " " + conflito
-        # E4 Task 6: sufixo curto só quando o desconto mudou o nível (neutro, sobre datas).
-        if (self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto
+        # E4 Task 6: sufixo curto só quando o desconto mudou o nível, ou a trava so_fontes cortou (neutro).
+        if (self.travas.get("data_incompativel")
+                and (self.nivel != self.nivel_sem_desconto or self.travas.get("so_fontes_de_outro_periodo"))
                 and not self._motivo_avisa_data()):
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
         return base
@@ -407,11 +417,15 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     return out
 
 
-def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registrar: bool) -> float:
-    """Agrega os votos de UMA afirmação (um voto por cluster + trava de confiabilidade).
+def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registrar: bool,
+             atuais: Optional[Dict[str, List[float]]] = None) -> tuple[float, bool]:
+    """Agrega os votos de UMA afirmação (um voto por cluster + duas travas: confiabilidade e E4).
 
     Mesma regra para o caminho com desconto e para o contrafactual sem desconto;
     só o caminho com desconto registra votos/travas em `dec` (o `decidir` segue puro).
+    `atuais` (só no caminho com desconto): por cluster, as contribuições de itens NÃO descontados
+    (dentro da janela). Sem ele a trava so_fontes_de_outro_periodo não age (contrafactual).
+    Devolve (L_a, cortou_so_fontes).
     """
     L_a = 0.0
     novos: List[Voto] = []
@@ -431,15 +445,28 @@ def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registr
                                   for v, _, it in contribs if v * sinal > 0))
         novos.append(voto)
         L_a += voto.valor
-    # Fontes pouco confiáveis (rede social, site pouco acessado) votam, mas sozinhas não
-    # cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na faixa média.
-    if abs(L_a) >= TAU and not any(v.confiavel and v.valor * L_a > 0 for v in novos):
+    # Duas travas leem o MESMO L_a bruto e cortam para o MESMO 0,99τ: idempotentes, então a ordem
+    # não muda o nível nem as flags; cada flag é registrada quando a própria condição vale.
+    # 1) sem_fonte_confiavel: fontes pouco confiáveis (rede social, site pouco acessado) votam, mas
+    #    sozinhas não cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na média.
+    # 2) so_fontes_de_outro_periodo (E4, só com `atuais`): nenhum voto na direção de L_a tem
+    #    contribuição de item NÃO descontado; o extremo é só de fonte de outro período.
+    corta_sem = corta_so = False
+    if abs(L_a) >= TAU:
+        sinal = 1.0 if L_a > 0 else -1.0
+        corta_sem = not any(v.confiavel and v.valor * sinal > 0 for v in novos)
+        corta_so = atuais is not None and not any(
+            v.valor * sinal > 0 and any(x * sinal > 0 for x in atuais.get(v.cluster, ())) for v in novos)
+    if corta_sem or corta_so:
         L_a = math.copysign(TAU * 0.99, L_a)
         if registrar:
-            dec.travas["sem_fonte_confiavel"] = True
+            if corta_sem:
+                dec.travas["sem_fonte_confiavel"] = True
+            if corta_so:
+                dec.travas["so_fontes_de_outro_periodo"] = True
     if registrar:
         dec.votos.extend(novos)
-    return L_a
+    return L_a, corta_so
 
 
 def _clusters_com_voto(clusters: Dict[str, List[tuple]]) -> int:
@@ -494,7 +521,7 @@ def decidir(ev: Evidencias) -> Decisao:
     """Função pura: mesma entrada, mesma Decisao. Não faz I/O nem telemetria."""
     dec = Decisao(nivel="indeterminada", log_odds=0.0, prob=0.5, motivo="",
                   travas={"vago": ev.vago, "opiniao": ev.opiniao, "rumor": ev.rumor, "sem_fonte_confiavel": False,
-                          "juiz_disponivel": ev.juiz_disponivel},
+                          "so_fontes_de_outro_periodo": False, "juiz_disponivel": ev.juiz_disponivel},
                   parametros={"tau": round(TAU, 4), "w_postura": W_POSTURA, "w_veredito": W_VEREDITO,
                               "f_nao_curada": F_NAO_CURADA, "f_veredito_nao_curada": F_VEREDITO_NAO_CURADA,
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
@@ -522,6 +549,7 @@ def decidir(ev: Evidencias) -> Decisao:
         s = -1.0 if af.polaridade == "nega" else 1.0
         clusters: Dict[str, List[tuple]] = {}
         clusters_brutos: Dict[str, List[tuple]] = {}
+        atuais: Dict[str, List[float]] = {}  # E4 (trava so_fontes): contribuições NÃO descontadas, por cluster
         contribuiu_atual = contribuiu_descontado = False  # T7: itens com voto dentro / fora da janela
         for it in ev.itens:
             if it.afirmacao != a_idx:
@@ -529,7 +557,8 @@ def decidir(ev: Evidencias) -> Decisao:
             contribs = _contribuicoes(it, s, dec)
             brutos = list(contribs)
             medida = (_medida_temporal(af, ev, it.data_pub) if contribs else None)
-            if medida and medida[1] > 0:
+            descontado = bool(medida and medida[1] > 0)  # E4: fonte de outro período (excedente > 0)
+            if descontado:
                 r = relevancia_temporal(medida[1], medida[0])
                 top = max(brutos, key=lambda x: abs(x[0]))
                 direcao = 1 if top[0] > 0 else -1
@@ -546,21 +575,24 @@ def decidir(ev: Evidencias) -> Decisao:
                     "bits_descartados": round(bits, 3)})
                 contribs = descontados
             if brutos:
-                if medida and medida[1] > 0:
+                if descontado:
                     contribuiu_descontado = True
                 else:
                     contribuiu_atual = True
+                    atuais.setdefault(it.cluster or it.url, []).extend(v for v, _ in brutos)
             for valor, desc in contribs:
                 clusters.setdefault(it.cluster or it.url, []).append((valor, desc, it))
             for valor, desc in brutos:
                 clusters_brutos.setdefault(it.cluster or it.url, []).append((valor, desc, it))
-        L_a = _agregar(clusters, a_idx, dec, registrar=True)
-        L_a_bruto = _agregar(clusters_brutos, a_idx, dec, registrar=False)
+        L_a, cortou_so = _agregar(clusters, a_idx, dec, registrar=True, atuais=atuais)
+        L_a_bruto, _ = _agregar(clusters_brutos, a_idx, dec, registrar=False)
         por_af[a_idx] = L_a
         por_af_brutos[a_idx] = L_a_bruto
         n_votos[a_idx] = sum(1 for v in dec.votos if v.afirmacao == a_idx)
         n_brutos[a_idx] = _clusters_com_voto(clusters_brutos)
-        so_descontada[a_idx] = contribuiu_descontado and not contribuiu_atual
+        # T7/E4: só-descontada = todo voto vem de fora da janela; a trava so_fontes também conta
+        # (o L cortado sustentava-se só em fonte descontada na direção dele).
+        so_descontada[a_idx] = (contribuiu_descontado and not contribuiu_atual) or cortou_so
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": n_votos[a_idx]})
     # combinação entre afirmações (D2, conjunção): o texto é desinformação se QUALQUER parte for.
@@ -583,7 +615,9 @@ def decidir(ev: Evidencias) -> Decisao:
     dec.nivel_sem_desconto = nivel_de(L_sem)
     dec.prob = round(_sig(L), 4)
     dec.parametros["e4"] = {"janelas": aplicabilidade.janelas_efetivas(),
-                            "formula": "sinal·ln(r·e^|c| + 1 − r)"}
+                            "formula": "sinal·ln(r·e^|c| + 1 − r)",
+                            "trava": ("so_fontes_de_outro_periodo: |L_a|≥τ sem voto de item não descontado na "
+                                      "direção de L_a → 0,99τ e fora da conjunção")}
 
     # elegibilidade (antes: travas espalhadas no pipeline)
     tem_voto = any(v.valor != 0 for v in dec.votos)
@@ -618,7 +652,8 @@ def decidir(ev: Evidencias) -> Decisao:
         if dec.nivel == "media" and dec.travas.get("sem_fonte_confiavel"):
             dec.motivo = ("as fontes com posição são redes sociais ou sites pouco acessados; "
                           "falta a confirmação de um veículo, órgão público ou site muito acessado")
-        elif dec.nivel == "media" and dec.nivel != dec.nivel_sem_desconto:
+        elif dec.nivel == "media" and (dec.nivel != dec.nivel_sem_desconto
+                                       or dec.travas.get("so_fontes_de_outro_periodo")):
             dec.motivo = ("as fontes encontradas são anteriores ao período que o texto descreve "
                           "(\"hoje\", \"ontem\"…): podem tratar de outro episódio — "
                           "verifique se não é notícia antiga recirculando")

@@ -57,8 +57,8 @@ verifique se não é notícia antiga recirculando" quando o nível fica `media` 
   por fonte descontada. Consequência aceita: quando uma fonte antiga de sinal oposto perde peso, o nível pode
   subir (ou descer) se o resultado vier de fontes atuais. Testes em `tests/test_decisao.py`
   (`test_e4_guarda_*`: sinais opostos em clusters distintos e no mesmo cluster; só fontes descontadas). Contraexemplo
-  conhecido e **pendente de decisão** (xfail estrito): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
-  somam ≥ τ e viram alta sem voto do período. Não corrigido aqui (guarda, sem mudança de lógica).
+  conhecido (xfail estrito): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
+  somam ≥ τ e viram alta sem voto do período. **Corrigido em 09/10** pela trava `so_fontes_de_outro_periodo` (ver Review Focus).
 - Todo fallback novo → `telemetria.fallback(onde, motivo)`; todo I/O novo (inclusive relógio) → `replay.*`.
 - Sem rede live; **sem eval `--modo record`** neste plano sem aprovação explícita (Task 8 só *pede*; custo
   estimado ~50 buscas SerpAPI, nível 3 da escada de custo em `PROXIMOS_PASSOS.md` §3).
@@ -158,6 +158,10 @@ O teste existente só cobre a direção SUSTENTA→"não baixa"; falta a direç�
   fontes dentro do período, nunca sustentado só por fonte descontada (decisão da usuária, 09/10, após review;
   ver Global Constraints). Testes: `test_e4_guarda_*` (sinais opostos em clusters distintos e no mesmo cluster;
   só fontes descontadas) e `test_e4_simetrico_nao_eleva_propensao` (uma fonte descontada não empurra sozinha).
+- Regra imposta por trava (09/10): `decidir`/`_agregar` cortam para 0,99τ o L_a de uma afirmação com desconto, com
+  |L_a| ≥ τ e nenhum voto na direção de L_a com contribuição de item não descontado (`travas["so_fontes_de_outro_periodo"]`);
+  a afirmação cortada sai da conjunção (T7). Testes: `test_e4_trava_*`, `test_t7_so_descontada_forte_e_cortada_*` e o
+  antigo xfail `test_e4_guarda_so_fontes_descontadas_nao_viram_alta_com_muitas_fontes`, agora teste normal.
 - Datas: precisão conservadora (usar o **fim** do intervalo: "2021" → 2021-12-31; "há 3 dias" ancorado na data
   da busca), nunca descontar mais do que a data permite afirmar.
 - Determinismo: replay de outro dia dá o mesmo nível; relógio ausente no cassete → `fallback onde=relogio` e E4
