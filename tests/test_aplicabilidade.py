@@ -5,19 +5,19 @@ from factcheck_mvp import aplicabilidade
 
 def test_aplicavel_exige_corpo_citacao_selo_data():
     from factcheck_mvp import aplicabilidade
-    ok, motivo = aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22")
+    ok, motivo = aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")
     assert ok is True
-    assert aplicabilidade.e_aplicavel("REFUTA", True, False, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("REFUTA", True, True, None, "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("NAO_TRATA", True, True, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("REFUTA", False, True, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", True, False, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, None, "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("NAO_TRATA", True, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", False, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
 
 
 def test_data_incompativel_barra_bolsonaro():
     from factcheck_mvp import aplicabilidade
-    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", "2020-01-01") is False
-    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", None) is True
-    assert aplicabilidade.data_compativel("Café cura câncer", "2020-01-01") is True
+    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", "2020-01-01", "2026-10-09") is False
+    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", None, "2026-10-09") is True
+    assert aplicabilidade.data_compativel("Café cura câncer", "2020-01-01", "2026-10-09") is True
 
 
 def test_dias_excedentes_mede_alem_da_janela():
@@ -271,7 +271,7 @@ def test_gate_janela_none_explicita_nao_herda_o_hoje_de_outra_frase():
 
 
 def test_gate_defaults_mantem_e1_sem_marcador():
-    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2020-01-01")[0] is True
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2020-01-01", "2026-10-09")[0] is True
 
 
 def test_dias_excedentes_da_janela_mede_com_janela_explicita():
@@ -384,3 +384,225 @@ def test_normalizar_data_total_em_entrada_aleatoria_determinista():
         ancora = rnd.choice([None, "2026-10-09", "2026-09-28 20:40:30 UTC", "lixo", "0001-01-01T00:00:00+05:00"])
         resultado = aplicabilidade.normalizar_data(valor, ancora)  # não pode levantar
         assert resultado is None or (isinstance(resultado, tuple) and resultado[1] in ("dia", "ano"))
+
+
+# --- E4 revisão (M6): nada do gate lê o dia de hoje; M-9: limite do marco nas janelas efetivas ---
+def test_referencia_e_obrigatoria_no_gate_e_em_data_compativel():
+    """M6 (relógio latente): sem `referencia` explícita não há medida por data (o gate não usa o relógio)."""
+    with pytest.raises(TypeError):
+        aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22")
+    with pytest.raises(TypeError):
+        aplicabilidade.data_compativel("Café cura câncer", "2026-09-22")
+
+
+def test_janelas_efetivas_registram_o_limite_do_marco(monkeypatch):
+    """M-9: E4_MARCO_MAX_DIAS é parâmetro efetivo da medida e vai para `parametros["e4"]["janelas"]`."""
+    from factcheck_mvp import config
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-04-20") == ("2026-03-08", 2)  # 43 dias, limite 60
+    assert "E4_MARCO_MAX_DIAS" in aplicabilidade.janelas_efetivas()
+    monkeypatch.setattr(config, "E4_MARCO_MAX_DIAS", 30)
+    assert aplicabilidade.janelas_efetivas()["E4_MARCO_MAX_DIAS"] == 30
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-04-20") is None  # 43 > 30
+
+
+# --- E4 revisão (I-1, M-5): intervalo ancora no INÍCIO; "1º" (o ordinal vira "o" na normalização) ---
+@pytest.mark.parametrize("texto", [
+    "A operação ocorreu entre 2 e 8 de outubro",
+    "A operação ocorreu entre os dias 2 e 8 de outubro",
+    "A feira ocorreu dias 2 a 8 de outubro",
+    "A feira ocorreu de 2 até 8 de outubro",
+    "A feira ocorreu de 2 a 8 de outubro",
+])
+def test_intervalo_de_dias_ancora_no_inicio(texto):
+    assert aplicabilidade.marco_do_evento(texto, "2026-10-09") == ("2026-10-02", 2)
+
+
+def test_intervalo_entre_meses_ancora_no_inicio():
+    assert aplicabilidade.marco_do_evento("A feira ocorreu entre 30 de setembro e 2 de outubro",
+                                          "2026-10-09") == ("2026-09-30", 2)
+
+
+@pytest.mark.parametrize("texto", ["O ato foi em 1º de março", "O ato foi no dia 1º de março"])
+def test_ordinal_primeiro_conta_como_dia(texto):
+    assert aplicabilidade.marco_do_evento(texto, "2026-03-10") == ("2026-03-01", 2)
+
+
+# --- E4 revisão (I-2, M-4): fração ("8/10 dos casos") não é data; dd/mm e ISO sem contexto contam ---
+@pytest.mark.parametrize("texto,ref", [
+    ("Em 8/10 dos casos o remédio falhou", "2026-10-09"),     # sem o filtro ancoraria 2026-10-08
+    ("Em 9/10 dos casos o remédio falhou", "2026-10-09"),
+    ("No 1/2 tempo o time ganhou", "2026-02-05"),             # sem o filtro ancoraria 2026-02-01
+    ("Em 1/2 hora o paciente melhorou", "2026-01-03"),        # sem o filtro ancoraria 2026-01-01
+])
+def test_fracao_com_contexto_nao_ancora_data(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+def test_fracao_nao_desliga_o_hoje_da_afirmacao():
+    t = "Hoje, em 8/10 dos casos o remédio falhou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+    assert aplicabilidade.marco_da_afirmacao(t, t, 1, "2026-10-09") is None
+
+
+@pytest.mark.parametrize("texto", ["Hoje, 2/3 do jogo foi ruim", "Hoje, 3/4 dos eleitores votaram"])
+def test_fracao_sem_contexto_nao_desliga_o_hoje(texto):
+    assert aplicabilidade.janela_da_afirmacao(texto, texto, 1, "2026-10-09") == 2
+
+
+def test_dd_mm_sem_contexto_e_data_explicita_no_hoje():
+    """M-4: "Hoje, 08/10, ..." — 08/10 é outro dia que não a referência: o "hoje" é do ato de dizer.
+    Igual à referência ("09/10") não desliga."""
+    t = "Hoje, 08/10, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") is None
+    t2 = "Hoje, 09/10, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t2, t2, 1, "2026-10-09") == 2
+
+
+def test_iso_sem_contexto_e_data_explicita_no_hoje():
+    t = "Hoje, 2026-03-05, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") is None
+    t2 = "Hoje, 2026-10-09, o ministro caiu"
+    assert aplicabilidade.janela_da_afirmacao(t2, t2, 1, "2026-10-09") == 2
+
+
+def test_iso_completa_ancora_o_marco_como_data_com_ano():
+    assert aplicabilidade.marco_do_evento("O ato foi em 2026-10-08", "2026-10-09") == ("2026-10-08", 2)
+
+
+# --- E4 revisão (I-3): recorrente ("todo dia 5") e comemorativa não são data do fato ---
+@pytest.mark.parametrize("texto,ref", [
+    ("A taxa cai todo dia 5", "2026-09-07"),
+    ("O imposto é pago todo dia 5", "2026-09-07"),
+    ("O benefício é pago todo dia 10", "2026-10-09"),
+    ("A taxa cai dia 5 do mês", "2026-09-07"),
+    ("A taxa cai dia 5 de cada mês", "2026-09-07"),
+])
+def test_data_recorrente_nao_ancora_o_marco(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+@pytest.mark.parametrize("texto,ref", [
+    ("Dia Internacional da Mulher: 8 de março", "2026-03-10"),
+    ("O Dia das Mães cai em 8 de maio", "2026-05-10"),
+    ("Dia das Mães: 8 de maio", "2026-05-10"),
+    ("A cerimônia de 8 de março, Dia Internacional da Mulher", "2026-03-10"),
+    ("Dia 8 de março é o Dia da Mulher", "2026-03-10"),
+])
+def test_data_comemorativa_nao_ancora_o_marco(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+def test_comemorativa_nao_desliga_o_hoje():
+    t = "Hoje, Dia Internacional da Mulher, 8 de março, o ministro falou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-03-10") == 2
+
+
+def test_recorrente_nao_desliga_o_hoje():
+    t = "O benefício é pago todo dia 10 e hoje o banco falhou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+    assert aplicabilidade.marco_da_afirmacao(t, t, 1, "2026-10-09") is None
+
+
+# --- E4 revisão (M-3): ano só desliga o "hoje" com preposição antes (em/de/desde/até) ou em data completa ---
+def test_ano_solto_nao_desliga_o_hoje():
+    t = "Hoje, 2020 pessoas morreram"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+
+
+@pytest.mark.parametrize("texto", ["Hoje, em 2020 pessoas morreram", "Hoje, desde 2020, pessoas morreram"])
+def test_ano_com_preposicao_diferente_da_referencia_desliga(texto):
+    assert aplicabilidade.janela_da_afirmacao(texto, texto, 1, "2026-10-09") is None
+
+
+# --- E4 revisão (I-5): travessão/meia-risca colados não colam palavras ("ontem—o" são duas) ---
+@pytest.mark.parametrize("texto,janela", [
+    ("Ontem—o ministro caiu", 3),
+    ("Ontem–o ministro caiu", 3),
+    ("O ministro caiu hoje—segundo fontes", 2),
+    ("Hoje…o time ganhou", 2),
+])
+def test_travessao_colado_separa_palavras(texto, janela):
+    assert aplicabilidade.janela_temporal(texto) == janela
+
+
+def test_marcador_com_travessao_colado_devolve_so_a_palavra():
+    assert aplicabilidade.marcador_temporal("Ontem—o ministro caiu") == "ontem"
+
+
+# --- E4 revisão (M-2): "segunda dose", "há pouco mais que", "de hoje em diante" não são momento ---
+@pytest.mark.parametrize("texto", [
+    "Nesta segunda dose da vacina foi aplicada",
+    "Esta quarta dose da vacina chegou",
+    "Nessa segunda chance o time virou",
+    "Há pouco mais que dez anos o país mudou",
+    "De hoje em diante o Pix será taxado",
+])
+def test_falsos_marcadores_m2_nao_contam(texto):
+    assert aplicabilidade.janela_temporal(texto) is None
+
+
+# --- E4 revisão (I-6, M-1): meia-noite LOCAL exata (qualquer offset) é a data literal; sentinela na
+#     data literal ou no instante UTC do epoch (1970-01-01T03:00+03:00 é o epoch exibido em +03) ---
+@pytest.mark.parametrize("valor,esperado", [
+    ("2000-01-01T00:00:00+03:00", None),                      # sentinela na data literal
+    ("2000-01-01T00:00:00+01:00", None),
+    ("1970-01-01T03:00:00+03:00", None),                      # instante = epoch UTC
+    ("2026-01-01T00:00:00+01:00", ("2026-12-31", "ano")),     # -01-01 à data literal = placeholder de ano
+    ("2026-09-22T00:00:00+02:00", ("2026-09-22", "dia")),     # meia-noite local: sem converter p/ BRT
+    ("2026-09-22T00:00:00+05:30", ("2026-09-22", "dia")),
+    ("Tue, 06 Sep 2022 00:00:00 +0100", ("2022-09-06", "dia")),   # RFC meia-noite local
+    ("2026-09-22T02:00:00+00:00", ("2026-09-21", "dia")),     # hora real converte (23h BRT do dia 21)
+])
+def test_meia_noite_local_e_data_literal(valor, esperado):
+    assert aplicabilidade.normalizar_data(valor, None) == esperado
+
+
+# --- E4 revisão (M-7): relativa com ponto final e por extenso até 99; "às" na hora; "Publicado em"; BRT ---
+@pytest.mark.parametrize("valor,ancora,esperado", [
+    ("2 dias atrás.", "2026-10-09", ("2026-10-07", "dia")),
+    ("3 days ago.", "2026-10-09", ("2026-10-06", "dia")),
+    ("há quinze dias", "2026-10-09", ("2026-09-24", "dia")),
+    ("há vinte dias", "2026-10-09", ("2026-09-19", "dia")),
+    ("há vinte e cinco dias", "2026-10-09", ("2026-09-14", "dia")),
+    ("há noventa e nove dias", "2026-10-09", ("2026-07-02", "dia")),
+    ("08/10/2026 às 10h00", None, ("2026-10-08", "dia")),
+    ("Publicado em 08/10/2026", None, ("2026-10-08", "dia")),
+    ("2026-10-08 10:00 BRT", None, ("2026-10-08", "dia")),
+])
+def test_normalizar_data_formatos_de_m7(valor, ancora, esperado):
+    assert aplicabilidade.normalizar_data(valor, ancora) == esperado
+
+
+# --- E4 revisão (M-12): "há N anos/meses" usa o FIM do intervalo calendário: nunca mais antigo que o texto ---
+@pytest.mark.parametrize("valor,esperado", [
+    ("há 2 anos", ("2024-12-31", "ano")),      # antes: 2024-10-09 (730 dias), mais antigo que o texto garante
+    ("há um ano", ("2025-12-31", "ano")),
+    ("há 1 mês", ("2026-09-30", "ano")),
+    ("há 3 meses", ("2026-07-31", "ano")),
+    ("há 3 dias", ("2026-10-06", "dia")),      # dias continuam exatos
+])
+def test_relativa_em_anos_e_meses_usa_o_fim_do_intervalo(valor, esperado):
+    assert aplicabilidade.normalizar_data(valor, "2026-10-09") == esperado
+
+
+# --- E4 revisão (M-8): motivo do fallback com âncora: relativa fora do intervalo não é "sem âncora" ---
+def test_texto_longo_com_muitas_datas_responde_em_menos_de_300_ms():
+    """Desempenho (E4 revisão): 20.000 caracteres com milhares de datas, recorrências e comemorativas
+    (antes do ajuste, varrer o texto a cada data levava vários segundos). Melhor de 3 execuções."""
+    import time
+    texto = ("dia 5 e 8 de outubro, Dia das Mães, 2/3 dos casos, todo dia 10; hoje, ontem. " * 400)[:20000]
+    melhor = float("inf")
+    for _ in range(3):
+        t0 = time.perf_counter()
+        aplicabilidade.marcas_da_afirmacao(texto, texto, 1, "2026-10-09")
+        aplicabilidade.marco_do_evento(texto, "2026-10-09")
+        melhor = min(melhor, time.perf_counter() - t0)
+    assert melhor < 0.300
+
+
+def test_motivo_relativa_com_ancora_fora_do_intervalo():
+    assert aplicabilidade.motivo_data_ilegivel("há 999999 dias", "2026-10-09") == "fora do intervalo"
+    assert aplicabilidade.motivo_data_ilegivel("há 999999999 dias", "2026-10-09") == "fora do intervalo"
+    assert aplicabilidade.motivo_data_ilegivel("há 3 dias") == "sem âncora"
+    assert aplicabilidade.motivo_data_ilegivel("há 3 dias", "lixo") == "âncora inválida"
+    assert aplicabilidade.motivo_data_ilegivel("ontem à tarde", "2026-10-09") == "formato não reconhecido"

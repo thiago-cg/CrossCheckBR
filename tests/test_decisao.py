@@ -1335,3 +1335,47 @@ def test_m6_a_flag_manda_e_nao_o_texto_do_motivo():
     assert "publicada antes" in d.justificativa()
     d.motivo_avisa_data = True
     assert "publicada antes" not in d.justificativa()
+
+
+# ------------------------------------------------------------------ E4 revisão (I-4): gate × decisão
+@pytest.mark.parametrize("texto,af_texto,pub,ref", [
+    ("Hoje ele caiu", "Ele caiu em 2019", "2026-10-01", "2026-10-09"),          # data explícita da afirmação
+    ("Hoje ele caiu", "Ele caiu", "2026-10-01", "2026-10-09"),                  # marcador do texto (1 afirmação)
+    ("Hoje, 08/10, o ministro caiu", "Hoje, 08/10, o ministro caiu", "2026-10-01", "2026-10-09"),
+    ("O jogo foi dia 8 e o time ganhou", "O jogo foi dia 8 e o time ganhou", "2026-09-01", "2026-10-09"),
+    ("Nesta semana o ministro caiu.", "Nesta semana o ministro caiu", "2026-09-01", "2026-10-09"),
+    ("Hoje, em 2019 o ministro caiu", "Hoje, em 2019 o ministro caiu", "2019-06-01", "2026-10-09"),
+    ("Bolsonaro recebeu alta do hospital hoje", "Bolsonaro recebeu alta do hospital", "2021-07-18", "2026-10-09"),
+    ("Hoje o ministro caiu", "Hoje o ministro caiu", None, "2026-10-09"),        # sem data da fonte
+    ("Hoje o ministro caiu", "Hoje o ministro caiu", "2026-10-01", None),        # sem referência
+])
+def test_i4_gate_e_decisao_medem_com_a_mesma_funcao(texto, af_texto, pub, ref):
+    """Paridade: a afirmação calculada pelo pipeline (janela/marco) mede a fonte igual no gate E1 e
+    na decisão; se o gate não barra por data, a decisão não desconta, e vice-versa."""
+    from factcheck_mvp import aplicabilidade
+    janela, marco = aplicabilidade.marcas_da_afirmacao(af_texto, texto, 1, ref)
+    af = AfirmacaoDecisao(texto=af_texto, nucleo=af_texto, janela=janela, marco=marco, calculada=True)
+    ev = Evidencias(afirmacoes=[af], texto_usuario=texto, data_referencia=ref)
+    medida = aplicabilidade.medida_da_afirmacao(janela, marco, pub, ref)
+    assert decisao._medida_temporal(af, ev, pub) == medida
+    motivo = aplicabilidade.e_aplicavel(
+        "REFUTA", True, True, "FALSO", af_texto, pub, ref, janela=janela, marco=marco)[1]
+    assert (motivo == "data incompatível") == bool(medida and medida[1] > 0)
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub=pub)
+    d = decidir(Evidencias(afirmacoes=[af], itens=[it], texto_usuario=texto, data_referencia=ref))
+    assert bool(d.descontos_temporais) == bool(medida and medida[1] > 0)
+
+
+def test_i4_data_explicita_da_afirmacao_nao_vira_hoje_no_gate_nem_na_decisao():
+    """Repro do revisor: 'Ele caiu em 2019' com texto 'Hoje ele caiu' (1 afirmação). A data 2019 desliga o
+    'hoje' da afirmação (janela None, calculada); nem o gate nem a decisão podem medir pelo texto."""
+    from factcheck_mvp import aplicabilidade
+    af_texto, texto, ref = "Ele caiu em 2019", "Hoje ele caiu", "2026-10-09"
+    janela, marco = aplicabilidade.marcas_da_afirmacao(af_texto, texto, 1, ref)
+    assert janela is None and marco is None
+    af = AfirmacaoDecisao(texto=af_texto, nucleo=af_texto, janela=janela, marco=marco, calculada=True)
+    ev = Evidencias(afirmacoes=[af], texto_usuario=texto, data_referencia=ref)
+    assert decisao._medida_temporal(af, ev, "2026-10-01") is None
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", af_texto, "2026-10-01", ref,
+                                      janela=janela, marco=marco) == (True, "aplicável")

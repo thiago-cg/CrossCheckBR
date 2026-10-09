@@ -213,6 +213,18 @@ def test_sem_e4_zera_desconto_e_recupera_modulo():
     assert abs(sem[0]["log_odds"]) > abs(base[0]["log_odds"])
 
 
+def test_snapshot_com_janela_null_ja_foi_calculada_e_sem_campo_e_legado():
+    """I-4: `janela: null` no snapshot = calculada sem marcador de fato (não recalcular pelo texto);
+    ausência do campo = snapshot antigo (caminho legado)."""
+    from eval.decisao import evidencias_de_dict
+    base = {"afirmacoes": [{"texto": "Ele caiu em 2019"}], "texto_usuario": "Hoje ele caiu",
+            "data_referencia": "2026-10-09", "itens": []}
+    nova = {"afirmacoes": [{"texto": "Ele caiu em 2019", "janela": None, "marco": None}],
+            "texto_usuario": "Hoje ele caiu", "data_referencia": "2026-10-09", "itens": []}
+    assert evidencias_de_dict(nova).afirmacoes[0].calculada is True
+    assert evidencias_de_dict(base).afirmacoes[0].calculada is False
+
+
 def _eventos_sem_evidencias(motivo_voto, veredito="FALSO", ignorado=None):
     """Trace antigo (sem evento `evidencias`): só `fonte juiz` e `decisao`, como a reconstrução lê."""
     votos = [] if motivo_voto is None else [

@@ -136,6 +136,10 @@ class AfirmacaoDecisao:
     polaridade: str = "afirma"
     janela: Optional[int] = None  # E4: janela temporal da afirmação (janela_da_afirmacao); None = sem marcador
     marco: Optional[tuple[str, int]] = None  # E4 (Task 4b): (data_evento ISO, folga) da data explícita do fato; tem precedência
+    # E4 (I-4): True = janela/marco já calculados pelo pipeline (`aplicabilidade.marcas_da_afirmacao`);
+    # None então significa "sem marcador de fato", e a decisão NÃO recalcula pelo texto. False = snapshot
+    # antigo ou construção sem o campo (testes/snapshots pré-campo): caminho legado.
+    calculada: bool = False
 
 
 @dataclass
@@ -606,7 +610,12 @@ def _medida_temporal(af: AfirmacaoDecisao, ev: Evidencias, data_pub: Optional[st
     snapshots pré-campo) usa só o marcador do texto, como antes; com 2+ afirmações e janela
     ausente não mede (o "hoje" de uma frase não desconta a outra). A janela do snapshot antigo
     NÃO olha a própria afirmação: `--sem-e4` zera o texto e o desconto some por construção.
+    Afirmação `calculada` (I-4): a medida é a MESMA do gate E1 (`aplicabilidade.medida_da_afirmacao`);
+    `None` em janela e marco é "sem marcador de fato" e não cai no texto. Só o caminho legado (não
+    calculada) recalcula pelo texto.
     """
+    if af.calculada:
+        return aplicabilidade.medida_da_afirmacao(af.janela, af.marco, data_pub, ev.data_referencia)
     if af.marco is not None:
         return aplicabilidade.dias_excedentes_do_marco(af.marco, data_pub)
     if af.janela is None:
