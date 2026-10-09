@@ -555,3 +555,19 @@ def test_falsos_marcadores_m2_nao_contam(texto):
 ])
 def test_meia_noite_local_e_data_literal(valor, esperado):
     assert aplicabilidade.normalizar_data(valor, None) == esperado
+
+
+# --- E4 revisão (M-7): relativa com ponto final e por extenso até 99; "às" na hora; "Publicado em"; BRT ---
+@pytest.mark.parametrize("valor,ancora,esperado", [
+    ("2 dias atrás.", "2026-10-09", ("2026-10-07", "dia")),
+    ("3 days ago.", "2026-10-09", ("2026-10-06", "dia")),
+    ("há quinze dias", "2026-10-09", ("2026-09-24", "dia")),
+    ("há vinte dias", "2026-10-09", ("2026-09-19", "dia")),
+    ("há vinte e cinco dias", "2026-10-09", ("2026-09-14", "dia")),
+    ("há noventa e nove dias", "2026-10-09", ("2026-07-02", "dia")),
+    ("08/10/2026 às 10h00", None, ("2026-10-08", "dia")),
+    ("Publicado em 08/10/2026", None, ("2026-10-08", "dia")),
+    ("2026-10-08 10:00 BRT", None, ("2026-10-08", "dia")),
+])
+def test_normalizar_data_formatos_de_m7(valor, ancora, esperado):
+    assert aplicabilidade.normalizar_data(valor, ancora) == esperado

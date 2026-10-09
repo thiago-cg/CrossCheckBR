@@ -280,19 +280,35 @@ _UNIDADES_RELATIVAS = {
 }
 _UNIDADES_ALTERNANCIA = "|".join(sorted(_UNIDADES_RELATIVAS, key=len, reverse=True))
 # Quantidade em algarismos ou por extenso ("há um dia", "há uma semana") — normalizada, sem acento.
-_NUMEROS_EXTENSO = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5,
-                    "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10}
-_QUANTIDADE = r"(\d{1,6}|" + "|".join(_NUMEROS_EXTENSO) + r")"
+# Numerais por extenso até 99 (M-7): unidades, 10-19, dezenas e "dezena e unidade" ("vinte e cinco").
+_UNIDADES_EXTENSO = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5,
+                     "seis": 6, "sete": 7, "oito": 8, "nove": 9}
+_DEZENAS_EXTENSO = {"dez": 10, "onze": 11, "doze": 12, "treze": 13, "quatorze": 14, "catorze": 14,
+                    "quinze": 15, "dezesseis": 16, "dezasseis": 16, "dezessete": 17, "dezassete": 17,
+                    "dezoito": 18, "dezenove": 19, "vinte": 20, "trinta": 30, "quarenta": 40,
+                    "cinquenta": 50, "sessenta": 60, "setenta": 70, "oitenta": 80, "noventa": 90}
+_NUMEROS_EXTENSO = {**_UNIDADES_EXTENSO, **_DEZENAS_EXTENSO}
+
+
+def _alternancia(palavras) -> str:
+    """Alternância regex das palavras, a mais longa primeiro (evita "dez" casar antes de "dezesseis")."""
+    return "|".join(sorted(palavras, key=len, reverse=True))
+
+
+_DEZENAS_COMPOSTAS = [d for d in _DEZENAS_EXTENSO if _DEZENAS_EXTENSO[d] >= 20]
+_SIMPLES = [d for d in _NUMEROS_EXTENSO if d not in _DEZENAS_COMPOSTAS]
+_QUANTIDADE = (r"(\d{1,12}|(?:" + _alternancia(_DEZENAS_COMPOSTAS) + r")"
+               r"(?:\s+e\s+(?:" + _alternancia(_UNIDADES_EXTENSO) + r"))?|" + _alternancia(_SIMPLES) + r")")
 _RELATIVA_HA_RE = re.compile(r"^ha\s+" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\b")
-_RELATIVA_ATRAS_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+atras$")
-_RELATIVA_AGO_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+ago$")
+_RELATIVA_ATRAS_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+atras\.?$")
+_RELATIVA_AGO_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+ago\.?$")
 
 # ISO 8601 com as variações das fontes: "YYYY-MM" (mês), "YYYY-MM-DD", espaço no lugar do T,
 # fração de segundo, "Z"/"UTC" ou offset com/sem dois-pontos.
 _ISO_RE = re.compile(
     r"(\d{4})-(\d{2})(?:-(\d{2}))?"
     r"(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?)?"
-    r"\s*(Z|UTC|[+-]\d{2}(?::?\d{2})?)?",
+    r"\s*(Z|UTC|BRT|[+-]\d{2}(?::?\d{2})?)?",
     re.IGNORECASE,
 )
 # RFC 2822 ("Tue, 06 Sep 2022 00:00:00 GMT"), o formato de feeds e de Last-Modified.
@@ -307,7 +323,7 @@ _PT_EXTENSO_RE = re.compile(r"(\d{1,2})o?\s+de\s+([a-z.]+)\s+de\s+(\d{4})"
 _EN_DIA_MES_ANO_RE = re.compile(r"(\d{1,2})\s+([a-z]{3,9})\.?\s+(\d{4})")
 _EN_MES_DIA_ANO_RE = re.compile(r"([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})")
 # Numérica dia-primeiro ("08/10/2026", "31/12/2025 10:00", "08-10-2026") e ano-primeiro ("2026/10/08").
-_NUM_DIA_PRIMEIRO_RE = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s+\d{1,2}[:h]\d{2}(?::\d{2})?)?")
+_NUM_DIA_PRIMEIRO_RE = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s+(?:as\s+)?\d{1,2}[:h]\d{2}(?::\d{2})?)?")
 _NUM_ANO_PRIMEIRO_RE = re.compile(r"(\d{4})[/.](\d{1,2})[/.](\d{1,2})")
 _SO_ANO_RE = re.compile(r"[12]\d{3}")
 
@@ -318,13 +334,24 @@ def _mes(nome: str) -> int | None:
     return _MESES_DATA.get(chave) or _MESES_EN.get(chave)
 
 
+def _valor_quantidade(token: str) -> int | None:
+    """Valor de um token de quantidade: algarismos, numeral por extenso ou "dezena e unidade"."""
+    if token.isdigit():
+        return int(token)
+    dezena, _, unidade = token.partition(" e ")
+    if unidade:
+        dez, uni = _DEZENAS_EXTENSO.get(dezena), _UNIDADES_EXTENSO.get(unidade)
+        return dez + uni if dez and uni else None
+    return _NUMEROS_EXTENSO.get(token)
+
+
 def _relativa(norm: str) -> tuple[int, str] | None:
     """(quantidade, unidade) de uma data relativa normalizada, ou None."""
     m = _RELATIVA_HA_RE.match(norm) or _RELATIVA_ATRAS_RE.match(norm) or _RELATIVA_AGO_RE.match(norm)
     if m is None:
         return None
-    qtd = _NUMEROS_EXTENSO.get(m.group(1)) or int(m.group(1))
-    return qtd, m.group(2)
+    qtd = _valor_quantidade(m.group(1))
+    return None if qtd is None else (qtd, m.group(2))
 
 
 def e_relativa(valor: str | None) -> bool:
@@ -341,6 +368,8 @@ def _offset(tz: str) -> timedelta:
     """Offset de um sufixo de fuso ISO: "Z"/"UTC" = 0; "-03", "-0300", "-03:00", "+05:30"."""
     if tz.upper() in ("Z", "UTC"):
         return timedelta(0)
+    if tz.upper() == "BRT":
+        return timedelta(hours=-3)
     sinal = -1 if tz[0] == "-" else 1
     digitos = tz[1:].replace(":", "")
     return sinal * timedelta(hours=int(digitos[:2]), minutes=int(digitos[2:4] or 0))
@@ -412,10 +441,16 @@ def _data_textual(nome: str, dia: str, ano: str) -> tuple[str, str] | None:
     return _fechar(date(int(ano), mes, int(dia)), "dia")
 
 
+# Prefixo de publicação colado à data ("Publicado em 08/10/2026"): a data é o que vem depois (M-7).
+_PREFIXO_PUBLICACAO_RE = re.compile(r"^\s*publicad[oa]\s+em:?\s+", re.IGNORECASE)
+
+
 def _normalizar_data(valor: str | None, ancora: str | None) -> tuple[str, str] | None:
     if not isinstance(valor, str) or not valor.strip():
         return None
-    s = valor.strip()
+    s = _PREFIXO_PUBLICACAO_RE.sub("", valor.strip(), count=1)
+    if not s:
+        return None
     norm = _normalizar(s)
 
     # 1. Relativas ("há 3 dias", "2 dias atrás", "há um dia", "3 days ago"): exigem âncora.
