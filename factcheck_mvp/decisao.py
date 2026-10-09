@@ -180,8 +180,15 @@ class Decisao:
         return asdict(self)
 
     # -------------------------------------------------------------- texto (mesmo objeto)
+    def _afirmacao_fora(self, a_idx: Any) -> bool:
+        """T7/E4: afirmação excluída da conjunção ("só evidência de outro período"). Os votos dela ficam
+        em `votos` (trace), mas o texto só conta as afirmações que pesaram no resultado."""
+        return (isinstance(a_idx, int) and 0 <= a_idx < len(self.por_afirmacao)
+                and "fora_da_conjuncao" in self.por_afirmacao[a_idx])
+
     def n_clusters(self, sinal: int) -> int:
-        return len({(v.afirmacao, v.cluster) for v in self.votos if v.valor * sinal > 0})
+        return len({(v.afirmacao, v.cluster) for v in self.votos
+                    if v.valor * sinal > 0 and not self._afirmacao_fora(v.afirmacao)})
 
     def n_fontes_descontadas(self) -> int:
         """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
@@ -223,9 +230,9 @@ class Decisao:
             up, down = self.n_clusters(+1), self.n_clusters(-1)
             partes.append(f"{up} fonte(s) independente(s) contestam o que o texto afirma e "
                           f"{down} o confirmam")
-            if self.vereditos_aplicados:
-                selos_txt = ", ".join(f"{v['veredito']} ({v['veiculo'] or v['url']})"
-                                      for v in self.vereditos_aplicados[:3])
+            selos = [v for v in self.vereditos_aplicados if not self._afirmacao_fora(v.get("afirmacao"))]
+            if selos:
+                selos_txt = ", ".join(f"{v['veredito']} ({v['veiculo'] or v['url']})" for v in selos[:3])
                 partes[-1] += f"; selos de checagem considerados: {selos_txt}"
             partes[-1] += "."
             conflito = self._partes_em_conflito()

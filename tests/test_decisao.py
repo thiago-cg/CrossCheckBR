@@ -959,3 +959,36 @@ def test_t7_duas_so_descontadas_fracas_nao_informam(monkeypatch):
     assert {x["afirmacao"] for x in d.descontos_temporais} == {0, 1}
     assert all(p["fora_da_conjuncao"] == "só evidência de outro período" for p in d.por_afirmacao)
     assert d.log_odds == 0 and d.nivel == "media"
+
+
+# ------------------------------------------------------------------ contagem do texto (só o que pesou)
+def test_t7_contagem_do_texto_so_conta_afirmacoes_que_entram_no_resultado(monkeypatch):
+    """A afirmação excluída da conjunção (só evidência de outro período) mantém os votos no trace (`votos`),
+    mas 'N fonte(s) contestam/confirmam' do texto conta só as afirmações que pesaram."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
+    b = [_it_datada("https://folha.uol.com.br/b", "REFUTA", "2021-07-18", af=1)]
+    d = decidir(_ev_afs_janela(a + b))
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert any(v.afirmacao == 1 for v in d.votos)  # trace: o voto de B continua registrado
+    assert d.n_clusters(+1) == 0 and d.n_clusters(-1) == 3  # texto: só A pesou
+    assert "0 fonte(s) independente(s) contestam o que o texto afirma e 3 o confirmam" in d.justificativa()
+    assert "0 fonte(s) independente(s) contestam e 3 confirmam" in d.why_1linha()
+
+
+def test_t7_selos_considerados_nao_listam_afirmacao_excluida(monkeypatch):
+    """Selo de checagem de afirmação excluída (só de outro período) não entra em 'selos de checagem
+    considerados'; o selo da afirmação que pesa continua listado. O trace guarda os dois."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.001)
+    ia = ItemEvidencia(url="https://g1.globo.com/a", afirmacao=0, cluster="g1", classe="SUSTENTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, veredito="VERDADEIRO",
+                       origem_veredito="indice", veiculo="Agencia A")
+    ib = ItemEvidencia(url="https://bbc.com/b", afirmacao=1, cluster="bbc", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-07-18",
+                       veredito="FALSO", origem_veredito="indice", veiculo="Agencia B")
+    d = decidir(_ev_afs_janela([ia, ib]))
+    assert d.por_afirmacao[1]["fora_da_conjuncao"] == "só evidência de outro período"
+    assert {v["afirmacao"] for v in d.vereditos_aplicados} == {0, 1}  # trace guarda os dois selos
+    j = d.justificativa()
+    assert "selos de checagem considerados: VERDADEIRO (Agencia A)" in j
+    assert "Agencia B" not in j
