@@ -135,16 +135,20 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
 
 
 def gerar_snapshot_de_resultado(resultado: Path, saida: Path,
-                                runs_dir: Optional[Path] = None) -> Tuple[int, int]:
+                                runs_dir: Optional[Path] = None) -> Tuple[int, int, int]:
     """Snapshot nível 0 a partir de um eval de pipeline: lê `casos.jsonl` do diretório
     de resultado (id, rotulo, esperado, aceitavel, tags, run_id), busca o evento
     `evidencias` no trace de cada run (via `decisao_gerar.evidencias_do_trace`) e
-    escreve 1 linha de snapshot por caso com evidência. Devolve (n, pulados)."""
+    escreve 1 linha de snapshot por caso com evidência.
+
+    Devolve (n, pulados, reconstruidos). `reconstruidos` (⊆ n) são as linhas montadas a
+    partir do evento `decisao` porque o trace não tem `evidencias` (sem texto_usuario nem
+    data_referencia): a medição de E4 nessas linhas não vale."""
     from eval.decisao_gerar import _ler_trace
     import eval.decisao_gerar as _dg
     _dg.RAIZ_RUNS = Path(runs_dir) if runs_dir else RAIZ / "runs"
     from eval.decisao_gerar import evidencias_do_trace
-    n = pul = 0
+    n = pul = rec = 0
     saida.parent.mkdir(parents=True, exist_ok=True)
     with open(Path(resultado) / "casos.jsonl", encoding="utf-8") as fh, \
             open(saida, "w", encoding="utf-8") as out:
@@ -165,13 +169,15 @@ def gerar_snapshot_de_resultado(resultado: Path, saida: Path,
             if evd is None:
                 pul += 1
                 continue
+            if not any(e.get("tipo") == "evidencias" for e in evs):
+                rec += 1  # reconstruída a partir do evento decisao (trace antigo)
             out.write(json.dumps({"id": c["id"], "rotulo": c["rotulo"],
                                   "esperado": c.get("esperado") or [],
                                   "aceitavel": c.get("aceitavel") or [],
                                   "tags": c.get("tags") or [], "run_id": c["run_id"],
                                   "evidencias": evd}, ensure_ascii=False) + "\n")
             n += 1
-    return n, pul
+    return n, pul, rec
 
 
 def main(argv=None) -> int:
@@ -191,8 +197,9 @@ def main(argv=None) -> int:
         if a.resultado:
             if not a.saida:
                 ap.error("--gerar-snapshot --resultado exige --saida")
-            n, pulados = gerar_snapshot_de_resultado(Path(a.resultado), Path(a.saida))
-            print(f"snapshot: {n} linha(s) em {a.saida} ({pulados} pulado(s) sem evento evidencias)")
+            n, pulados, reconstruidos = gerar_snapshot_de_resultado(Path(a.resultado), Path(a.saida))
+            print(f"snapshot: {n} linha(s) em {a.saida} ({pulados} pulado(s) sem evento evidencias; "
+                  f"{reconstruidos} reconstruída(s) a partir do evento decisao, sem texto_usuario/data_referencia)")
             return 0
         from eval.decisao_gerar import gerar_snapshot
         if not a.saida:

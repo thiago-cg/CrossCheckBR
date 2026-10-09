@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 AFIRM_RE = re.compile(r"\[(afirma|nega)\] (['\"])(.*?)\2 \(núcleo (['\"])(.*?)\4")
 MOTOR_RE = re.compile(r"via\s+(\S+)")
+# Motivo de voto de um selo: "selo FALSO (indice)" (decisao._contribuicoes).
+SELO_ORIGEM_RE = re.compile(r"selo (?P<veredito>.+?) \((?P<origem>pagina|indice|\?)\)")
 TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
 
 RAIZ_RUNS: Path
@@ -41,6 +43,36 @@ def afirmacoes_do_trace(eventos: List[Dict[str, Any]]) -> List[Dict[str, str]]:
                 if e.get("tipo") == "etapa" and e["dados"].get("nome") == "afirmacoes"), "")
     return [{"texto": m.group(3), "nucleo": m.group(5), "polaridade": m.group(1)}
             for m in AFIRM_RE.finditer(det or "")]
+
+
+def origem_do_trace(eventos: List[Dict[str, Any]], url: str, veredito: str) -> Optional[str]:
+    """Origem ('pagina' | 'indice') do selo que o PRÓPRIO trace registra, ou None se não registra.
+
+    Fica no evento `decisao` (todo trace tem): o voto que usou o selo traz `selo <VEREDITO>
+    (<origem>)` no motivo; o selo ignorado por ser de página traz 'selo extraído da página'
+    em `vereditos_ignorados`. Selo que não votou nem foi ignorado por origem não deixa rastro."""
+    dec = next(((e.get("dados") or {}).get("decisao") for e in eventos if e.get("tipo") == "decisao"),
+               None) or {}
+    for voto in dec.get("votos") or []:
+        if url not in (voto.get("urls") or []):
+            continue
+        for m in SELO_ORIGEM_RE.finditer(voto.get("motivo") or ""):
+            if m.group("veredito") == veredito and m.group("origem") != "?":
+                return m.group("origem")
+    for x in dec.get("vereditos_ignorados") or []:
+        if (x.get("url") == url and x.get("veredito") == veredito
+                and "extraído da página" in (x.get("motivo") or "")):
+            return "pagina"
+    return None
+
+
+def _origem_veredito(eventos: List[Dict[str, Any]], url: str, veredito: Optional[str]) -> Optional[str]:
+    """Origem do selo na reconstrução. Preserva a que o trace registra (`origem_do_trace`). Sem
+    registro, usa 'pagina' — default DOCUMENTADO, só quando há selo: trace antigo não guarda a
+    origem de selo que não votou. Sem selo, None."""
+    if not veredito:
+        return None
+    return origem_do_trace(eventos, url, veredito) or "pagina"
 
 
 def evidencias_do_trace(eventos: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -75,7 +107,8 @@ def evidencias_do_trace(eventos: List[Dict[str, Any]]) -> Optional[Dict[str, Any
             "citacao_verificada": (False if f.get("decisao") == "rebaixada"
                                    else (True if cl in TRATA else None)),
             "curada": _bool(f.get("curada")), "corpo_lido": _bool(f.get("corpo_lido")),
-            "veredito": ver, "origem_veredito": ("pagina" if ver else None), "veiculo": "",
+            "veredito": ver, "origem_veredito": _origem_veredito(eventos, f.get("url"), ver),
+            "veiculo": "",
         }
     return {"afirmacoes": afirmacoes_do_trace(eventos),
             "itens": list(vistos.values()),
