@@ -4,9 +4,11 @@ Módulo puro: sem I/O, sem LLM, sem rede.
 """
 from __future__ import annotations
 
+import calendar
 import re
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 
 from factcheck_mvp import config as _config
 from factcheck_mvp.selos import direcao
@@ -227,9 +229,20 @@ _MESES_DATA = {
     "julho": 7, "jul": 7, "agosto": 8, "ago": 8, "setembro": 9, "set": 9,
     "outubro": 10, "out": 10, "novembro": 11, "nov": 11, "dezembro": 12, "dez": 12,
 }
+# Mês em inglês ("06 Sep 2022", "Mar 3, 2024"), mesma convenção de chave de _MESES_DATA.
+_MESES_EN = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
 
-# Placeholders do extrator para "data desconhecida": nunca são data real.
+# Placeholders do extrator para "data desconhecida": nunca são data real. Valem só SEM hora.
 _SENTINELAS_DATA = frozenset({"1970-01-01", "1900-01-01", "2000-01-01"})
+# Data de publicação antes disso é ruído de extrator (ou N relativo absurdo): não é data.
+_ANO_MINIMO = 1900
+# Teto de N em "há N unidades": acima disso é absurdo (e evita estouro de calendário).
+_MAX_RELATIVA_N = 100_000
 
 # Unidade relativa normalizada (sem acento) -> (dias por unidade, precisao).
 _UNIDADES_RELATIVAS = {
@@ -247,113 +260,251 @@ _UNIDADES_RELATIVAS = {
     "year": (365, "ano"), "years": (365, "ano"),
 }
 _UNIDADES_ALTERNANCIA = "|".join(sorted(_UNIDADES_RELATIVAS, key=len, reverse=True))
-_RELATIVA_HA_RE = re.compile(r"^ha\s+(\d+)\s+(" + _UNIDADES_ALTERNANCIA + r")\b")
-_RELATIVA_ATRAS_RE = re.compile(r"^(\d+)\s+(" + _UNIDADES_ALTERNANCIA + r")\s+atras$")
-_RELATIVA_AGO_RE = re.compile(r"^(\d+)\s+(" + _UNIDADES_ALTERNANCIA + r")\s+ago$")
+# Quantidade em algarismos ou por extenso ("há um dia", "há uma semana") — normalizada, sem acento.
+_NUMEROS_EXTENSO = {"um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5,
+                    "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10}
+_QUANTIDADE = r"(\d{1,6}|" + "|".join(_NUMEROS_EXTENSO) + r")"
+_RELATIVA_HA_RE = re.compile(r"^ha\s+" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\b")
+_RELATIVA_ATRAS_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+atras$")
+_RELATIVA_AGO_RE = re.compile(r"^" + _QUANTIDADE + r"\s+(" + _UNIDADES_ALTERNANCIA + r")\s+ago$")
+
+# ISO 8601 com as variações das fontes: "YYYY-MM" (mês), "YYYY-MM-DD", espaço no lugar do T,
+# fração de segundo, "Z"/"UTC" ou offset com/sem dois-pontos.
+_ISO_RE = re.compile(
+    r"(\d{4})-(\d{2})(?:-(\d{2}))?"
+    r"(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?)?"
+    r"\s*(Z|UTC|[+-]\d{2}(?::?\d{2})?)?",
+    re.IGNORECASE,
+)
+# RFC 2822 ("Tue, 06 Sep 2022 00:00:00 GMT"), o formato de feeds e de Last-Modified.
+_RFC2822_RE = re.compile(
+    r"(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,\s*)?\d{1,2}\s+[a-z]{3}\s+\d{4}\s+\d{2}:\d{2}(?::\d{2})?"
+    r"\s+(?:gmt|utc|ut|z|[+-]\d{4}|[a-z]{3})",
+    re.IGNORECASE,
+)
+# PT-BR por extenso, com hora opcional ("26 de jan. de 2012 às 10:00"; "às" vira "as" ao normalizar).
+_PT_EXTENSO_RE = re.compile(r"(\d{1,2})o?\s+de\s+([a-z.]+)\s+de\s+(\d{4})"
+                            r"(?:\s+(?:as\s+)?\d{1,2}[:h]\d{2}(?::\d{2})?)?")
+_EN_DIA_MES_ANO_RE = re.compile(r"(\d{1,2})\s+([a-z]{3,9})\.?\s+(\d{4})")
+_EN_MES_DIA_ANO_RE = re.compile(r"([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})")
+# Numérica dia-primeiro ("08/10/2026", "31/12/2025 10:00", "08-10-2026") e ano-primeiro ("2026/10/08").
+_NUM_DIA_PRIMEIRO_RE = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s+\d{1,2}[:h]\d{2}(?::\d{2})?)?")
+_NUM_ANO_PRIMEIRO_RE = re.compile(r"(\d{4})[/.](\d{1,2})[/.](\d{1,2})")
+_SO_ANO_RE = re.compile(r"[12]\d{3}")
 
 
-def _data_iso_para_dia(texto: str | None) -> object | None:
-    """Âncora/ISO (YYYY-MM-DD, ISO com/sem fuso, 'YYYY-MM-DD HH:MM:SS [UTC]') -> date em UTC−3.
+def _mes(nome: str) -> int | None:
+    """Mês (1-12) de um nome PT ou EN, normalizado (sem acento, sem ponto)."""
+    chave = nome.replace(".", "")
+    return _MESES_DATA.get(chave) or _MESES_EN.get(chave)
 
-    None se não parseia. Só ancora datas absolutas (nunca relativas).
+
+def _relativa(norm: str) -> tuple[int, str] | None:
+    """(quantidade, unidade) de uma data relativa normalizada, ou None."""
+    m = _RELATIVA_HA_RE.match(norm) or _RELATIVA_ATRAS_RE.match(norm) or _RELATIVA_AGO_RE.match(norm)
+    if m is None:
+        return None
+    qtd = _NUMEROS_EXTENSO.get(m.group(1)) or int(m.group(1))
+    return qtd, m.group(2)
+
+
+def e_relativa(valor: str | None) -> bool:
+    """True se o valor é uma data relativa ("há 3 dias", "2 dias atrás"): precisa de âncora."""
+    return isinstance(valor, str) and _relativa(_normalizar(valor)) is not None
+
+
+def motivo_data_ilegivel(valor: str | None) -> str:
+    """Motivo do fallback `data_pub` para um valor não-vazio que normalizar_data não leu."""
+    return "sem âncora" if e_relativa(valor) else "formato não reconhecido"
+
+
+def _offset(tz: str) -> timedelta:
+    """Offset de um sufixo de fuso ISO: "Z"/"UTC" = 0; "-03", "-0300", "-03:00", "+05:30"."""
+    if tz.upper() in ("Z", "UTC"):
+        return timedelta(0)
+    sinal = -1 if tz[0] == "-" else 1
+    digitos = tz[1:].replace(":", "")
+    return sinal * timedelta(hours=int(digitos[:2]), minutes=int(digitos[2:4] or 0))
+
+
+def _dt_iso(ano: str, mes: str, dia: str, hh: str | None, mi: str | None,
+            ss: str | None, tz: str | None) -> datetime:
+    """Componentes ISO -> datetime (naive se sem fuso). ValueError se a data não existe."""
+    h, minuto, seg = (int(hh), int(mi), int(ss or 0)) if hh is not None else (0, 0, 0)
+    tzinfo = timezone(_offset(tz)) if tz is not None else None
+    return datetime(int(ano), int(mes), int(dia), h, minuto, seg, tzinfo=tzinfo)
+
+
+def _dia_de_datetime(dt: datetime) -> tuple[date, bool]:
+    """(dia de publicação, sem_hora) de um datetime.
+
+    Sem fuso: a data escrita. Meia-noite UTC exata: a data literal (é "só data" serializada;
+    converter p/ BRT recuaria 1 dia, o erro para o lado de DESCONTAR mais). Outros casos com
+    fuso: convertidos p/ BRT (UTC−3, A2). `sem_hora` = meia-noite ou só data.
     """
-    if not isinstance(texto, str) or not texto.strip():
+    meia_noite = (dt.hour, dt.minute, dt.second) == (0, 0, 0)
+    if dt.tzinfo is None:
+        return dt.date(), meia_noite
+    if dt.utcoffset() == timedelta(0) and meia_noite:
+        return dt.date(), True
+    return dt.astimezone(_BRT).date(), meia_noite
+
+
+def _data_de_ancora(ancora: str | None) -> date | None:
+    """Âncora (YYYY-MM-DD ou ISO com hora/fuso, p.ex. created_at da SerpAPI) -> dia em BRT."""
+    if not isinstance(ancora, str):
         return None
-    txt = texto.strip()
-    if txt[-1:] in ("Z", "z") and ("T" in txt or " " in txt):
-        txt = txt[:-1] + "+00:00"
-    txt = re.sub(r"\s+utc$", "+00:00", txt, flags=re.I)
-    try:
-        dt = datetime.fromisoformat(txt)
-    except ValueError:
+    m = _ISO_RE.fullmatch(ancora.strip())
+    if m is None or m.group(3) is None:
         return None
-    if isinstance(dt, datetime):
-        if dt.tzinfo is not None:
-            return dt.astimezone(_BRT).date()
-        return dt.date()
-    return dt
+    return _dia_de_datetime(_dt_iso(*m.groups()))[0]
+
+
+def _fechar(dia: date, precisao: str = "dia") -> tuple[str, str] | None:
+    """Data calculada sem placeholder: só o piso de ano (None se implausível)."""
+    if dia.year < _ANO_MINIMO:
+        return None
+    return dia.isoformat(), precisao
+
+
+def _fechar_absoluta(dia: date, sem_hora: bool) -> tuple[str, str] | None:
+    """Data absoluta ISO/RFC. Sentinelas e -01-01 são placeholders do extrator: valem só sem hora.
+
+    -01-01 sem hora vira "fim do ano, precisão ano" (A1: placeholder de ano). Hora real
+    (ex.: 10h UTC) não é placeholder e segue como dia.
+    """
+    if sem_hora:
+        if dia.isoformat() in _SENTINELAS_DATA:
+            return None
+        if dia.month == 1 and dia.day == 1:
+            return _fechar(date(dia.year, 12, 31), "ano")
+    return _fechar(dia, "dia")
+
+
+def _data_textual(nome: str, dia: str, ano: str) -> tuple[str, str] | None:
+    """Data por extenso (mês por nome, PT ou EN): dia de publicação ou None se o mês não existe."""
+    mes = _mes(nome)
+    if mes is None:
+        return None
+    return _fechar(date(int(ano), mes, int(dia)), "dia")
+
+
+def _normalizar_data(valor: str | None, ancora: str | None) -> tuple[str, str] | None:
+    if not isinstance(valor, str) or not valor.strip():
+        return None
+    s = valor.strip()
+    norm = _normalizar(s)
+
+    # 1. Relativas ("há 3 dias", "2 dias atrás", "há um dia", "3 days ago"): exigem âncora.
+    rel = _relativa(norm)
+    if rel is not None:
+        qtd, unidade = rel
+        base = _data_de_ancora(ancora)
+        if base is None or qtd > _MAX_RELATIVA_N:
+            return None
+        mult, precisao = _UNIDADES_RELATIVAS[unidade]
+        return _fechar(base - timedelta(days=qtd * mult), precisao)
+
+    # 2. ISO ("YYYY-MM-DD[ T]hh:mm[:ss][.f][Z|±hh:mm]", "YYYY-MM" = fim do mês) e RFC 2822.
+    m = _ISO_RE.fullmatch(s)
+    if m is not None:
+        ano, mes, dia, hh, mi, ss, tz = m.groups()
+        if dia is None:  # "YYYY-MM": só o mês; fim do mês, precisão ano
+            if hh is not None or tz is not None:
+                return None
+            ano_i, mes_i = int(ano), int(mes)
+            return _fechar(date(ano_i, mes_i, calendar.monthrange(ano_i, mes_i)[1]), "ano")
+        dia_pub, sem_hora = _dia_de_datetime(_dt_iso(ano, mes, dia, hh, mi, ss, tz))
+        return _fechar_absoluta(dia_pub, sem_hora)
+    if _RFC2822_RE.fullmatch(s) is not None:
+        dia_pub, sem_hora = _dia_de_datetime(parsedate_to_datetime(s))
+        return _fechar_absoluta(dia_pub, sem_hora)
+
+    # 3. Textual: PT-BR ("26 de jan. de 2012", "1º de março de 2020") e EN ("06 Sep 2022", "Mar 3, 2024").
+    m = _PT_EXTENSO_RE.fullmatch(norm)
+    if m is not None:
+        return _data_textual(m.group(2), m.group(1), m.group(3))
+    m = _EN_DIA_MES_ANO_RE.fullmatch(norm)
+    if m is not None:
+        return _data_textual(m.group(2), m.group(1), m.group(3))
+    m = _EN_MES_DIA_ANO_RE.fullmatch(norm)
+    if m is not None:
+        return _data_textual(m.group(1), m.group(2), m.group(3))
+
+    # 4. Numérica: dia-primeiro (padrão BR) ou ano-primeiro com barra/ponto.
+    m = _NUM_DIA_PRIMEIRO_RE.fullmatch(norm)
+    if m is not None:
+        return _fechar(date(int(m.group(3)), int(m.group(2)), int(m.group(1))), "dia")
+    m = _NUM_ANO_PRIMEIRO_RE.fullmatch(norm)
+    if m is not None:
+        return _fechar(date(int(m.group(1)), int(m.group(2)), int(m.group(3))), "dia")
+
+    # 5. Só ano ("2021", ano do Scholar) -> fim do ano.
+    if _SO_ANO_RE.fullmatch(norm) is not None:
+        return _fechar(date(int(norm), 12, 31), "ano")
+
+    return None
 
 
 def normalizar_data(valor: str | None, ancora: str | None = None) -> tuple[str, str] | None:
     """Data de publicação em qualquer formato real -> (fim_iso YYYY-MM-DD, precisao dia|ano).
 
-    Pura (sem I/O, sem fallback): vazio/ilegível -> None. Usa o FIM do intervalo
-    ("2021" -> 2021-12-31; "há 3 dias" ancorado na data da busca), nunca descontando
-    mais do que a data permite afirmar. Relativas exigem `ancora` (sem âncora ->
-    None). Futuro em relação à âncora é mantido. Ilegível não-vazio vira fallback
-    `telemetria.fallback("data_pub", ...)` CHAMADO PELO PIPELINE, não daqui.
+    Pura (sem I/O, sem fallback) e TOTAL: nunca levanta. Vazio/ilegível/implausível -> None.
+    Usa o FIM do intervalo ("2021" -> 2021-12-31; "2021-05" -> 2021-05-31; "há 3 dias" ancorado
+    na data da busca), nunca descontando mais do que a data permite afirmar. Relativas exigem
+    `ancora` (sem âncora -> None). Fuso: ver `_dia_de_datetime`. Sentinelas e -01-01 sem hora
+    são placeholders (None e "ano"). Futuro em relação à âncora é mantido. Ilegível não-vazio
+    vira fallback `telemetria.fallback("data_pub", motivo_data_ilegivel(v))` CHAMADO PELO
+    PIPELINE, não daqui.
     """
-    if not isinstance(valor, str) or not valor.strip():
+    try:
+        return _normalizar_data(valor, ancora)
+    except (ValueError, OverflowError, TypeError, IndexError, OSError):
+        return None  # dado da web é entrada hostil: calendário estourado, formato torto etc.
+
+
+def referencia_de_pagina(data_bruta: str | None) -> str | None:
+    """"Hoje" de uma página lida (entrada por link): dia ISO, ou None.
+
+    Só com precisão de DIA. "Só ano", sentinela ou placeholder -01-01 não dizem o dia da
+    matéria; usar o fim do ano deslocaria o desconto do E4 para o lado errado. None = E4 off.
+    """
+    norm = normalizar_data(data_bruta, None)
+    if norm is None or norm[1] != "dia":
         return None
-    s = valor.strip()
+    return norm[0]
 
-    # 1. Relativas ("há 3 dias", "2 dias atrás", "3 days ago"): exigem âncora.
-    norm = _normalizar(s)
-    m = (_RELATIVA_HA_RE.match(norm) or _RELATIVA_ATRAS_RE.match(norm)
-         or _RELATIVA_AGO_RE.match(norm))
-    if m:
-        base = _data_iso_para_dia(ancora)
-        if base is None:
-            return None
-        mult, prec = _UNIDADES_RELATIVAS[m.group(2)]
-        fim = base - timedelta(days=int(m.group(1)) * mult)
-        return fim.isoformat(), prec
 
-    # 2. ISO / "YYYY-MM-DD HH:MM:SS [UTC]": com fuso converte p/ UTC−3 antes da data.
-    tem_hora = bool(re.search(r"[T ]\d{1,2}:\d{2}", s))
-    dia = _data_iso_para_dia(s)
-    if dia is not None and re.match(r"^\d{4}-\d{2}-\d{2}", s):
-        try:
-            dt = datetime.fromisoformat(
-                re.sub(r"\s+utc$", "+00:00", s[:-1] + "+00:00"
-                       if s[-1:] in ("Z", "z") and ("T" in s or " " in s) else s,
-                       flags=re.I))
-            meia_noite = (dt.hour, dt.minute, dt.second, dt.microsecond) == (0, 0, 0, 0)
-        except ValueError:
-            meia_noite = True
-        sem_hora = (not tem_hora) or meia_noite
-        iso = dia.isoformat()
-        if iso in _SENTINELAS_DATA and sem_hora:
-            return None
-        if sem_hora and dia.month == 1 and dia.day == 1 and iso not in _SENTINELAS_DATA:
-            return f"{dia.year:04d}-12-31", "ano"  # placeholder de ano do extrator
-        return iso, "dia"
+def marcador_temporal(texto_usuario: str) -> str | None:
+    """Literal (normalizado) do marcador que define `janela_temporal(texto)`: o de menor janela.
 
-    # 3. PT-BR textual ("26 de jan. de 2012", "3 de julho de 2026").
-    m = re.match(r"^(\d{1,2})\s+de\s+([a-zà-ÿ.]+)\s+de\s+(\d{4})$", s, re.I)
-    if m:
-        mes = _MESES_DATA.get(_normalizar(m.group(2)).replace(".", "").replace(" ", ""))
-        try:
-            dia = datetime(int(m.group(3)), mes or 0, int(m.group(1))).date() if mes else None
-        except ValueError:
-            dia = None
-        if dia is not None:
-            return dia.isoformat(), "dia"
+    Mesma busca de `janela_temporal` (exclusões, "agora em <mês>", _MARCADORES_JANELA e
+    _JANELA_REGEX), mas devolve o trecho casado, não a janela. Usado só para a etapa de
+    recebimento; test_marcador_temporal_acompanha_janela_temporal_em_todos_os_casos guarda
+    a equivalência com `janela_temporal`.
+    """
+    melhor: tuple[int, str] | None = None
+    texto = _normalizar(texto_usuario)
 
-    # 4. Numérica dia-primeiro ("08/10/2026") ou ano-primeiro com barra ("2026/10/08").
-    m = re.match(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$", s)
-    if m:
-        try:
-            dia = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))).date()
-        except ValueError:
-            dia = None
-        if dia is not None:
-            return dia.isoformat(), "dia"
-    m = re.match(r"^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$", s)
-    if m:
-        try:
-            dia = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
-        except ValueError:
-            dia = None
-        if dia is not None:
-            return dia.isoformat(), "dia"
+    def _candidato(dias: int, trecho: str) -> None:
+        nonlocal melhor
+        if melhor is None or dias < melhor[0]:
+            melhor = (dias, trecho)
 
-    # 5. Só ano ("2021", ano do Scholar) -> fim do ano.
-    m = re.match(r"^([12]\d{3})$", s)
-    if m:
-        return f"{m.group(1)}-12-31", "ano"
-
-    return None
+    m_mes = _AGORA_EM_MES.search(texto)
+    if m_mes:
+        _candidato(_cfg_janela("E4_JANELA_MES", 32), m_mes.group(0))
+        texto = _AGORA_EM_MES.sub(" ", texto)
+    for exclusao in _EXCLUSOES:
+        texto = exclusao.sub(" ", texto)
+    for marcador, variavel, default in _MARCADORES_JANELA:
+        if re.search(r"\b" + re.escape(marcador) + r"\b", texto):
+            _candidato(_cfg_janela(variavel, default), marcador)
+    for padrao, variavel, default in _JANELA_REGEX:
+        m = padrao.search(texto)
+        if m:
+            _candidato(_cfg_janela(variavel, default), m.group(0))
+    return melhor[1] if melhor is not None else None
 
 
 # ------------------------------------------------------------------ Task 4b (E4): data explícita do evento (pura, sem I/O)

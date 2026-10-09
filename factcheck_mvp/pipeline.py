@@ -128,6 +128,23 @@ def _veredito_tipado(valor: Optional[str], selo: Optional[str], agencia: Optiona
     return selos.normalizar(selo or valor, agencia) if (selo or valor) else None
 
 
+def _tier_data(fonte: Optional[str], precisao: Optional[str], relativa: bool = False) -> int:
+    """Prioridade de uma data de publicação (maior vence; E4 Task 2 + revisão I-3).
+
+    JSON-LD (dia) 6 > SerpAPI absoluta/ISO (dia) 5 > trafilatura (dia) 4 > SerpAPI relativa
+    ancorada 3 > só ano 2 > ReaderLM 1. `fonte` é a fonte REAL da data; o método que extraiu o
+    texto não entra. Fonte não declarada (None) fica no nível da trafilatura: não sobrepõe a
+    data absoluta da SerpAPI.
+    """
+    if relativa:
+        return 3
+    if fonte == "readerlm":
+        return 1
+    if precisao == "ano":
+        return 2
+    return {"jsonld": 6, "serpapi": 5, "trafilatura": 4}.get(fonte, 4)
+
+
 class Pipeline:
     def __init__(self, catalogo: Catalogo, indice_vereditos: Indice, indice_noticias: Indice,
                  serpapi: Optional[SerpAPIClient] = None, detector: Optional[DetectorFake] = None):
@@ -251,7 +268,7 @@ class Pipeline:
                 "scholar": bool(d.get("_scholar"))}
         bruta = peca.get("data_pub_bruta")
         if bruta and not peca.get("data_pub"):
-            telemetria.fallback("data_pub", "formato não reconhecido", valor=str(bruta)[:40])
+            telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta), valor=str(bruta)[:40])
         return peca
 
     # ------------------------------------------------------------------ principal
@@ -276,12 +293,18 @@ class Pipeline:
 
         # 1. Recebimento + marcas de rumor/opinião/vago
         texto_base = entrada.conteudo.strip()
-        # E4: data de referência explícita (entrada) ou relógio gravado (replay.*).
-        ref = entrada.data_referencia or replay.hoje(contexto=texto_base)
-        origem_ref = "entrada" if entrada.data_referencia else ("relogio" if ref else "ausente")
+        # E4: referência explícita (entrada) > relógio gravado (replay.*) > nenhuma. Link sem data
+        # (A5) desliga o E4 de forma explícita: nunca cai no relógio de hoje.
+        if entrada.sem_referencia_temporal:
+            ref, origem_ref = None, "ausente (link sem data)"
+        elif entrada.data_referencia:
+            ref, origem_ref = entrada.data_referencia, "entrada"
+        else:
+            ref = replay.hoje(contexto=texto_base)
+            origem_ref = "relogio" if ref else "ausente"
+        marcador = aplicabilidade.marcador_temporal(texto_base)
         janela_ref = aplicabilidade.janela_temporal(texto_base)
-        marcador_ref = (f"presente (janela {janela_ref}d)" if janela_ref is not None
-                        else "ausente")
+        marcador_ref = f"{marcador} (janela {janela_ref}d)" if marcador is not None else "ausente"
         eh_rumor = bool(RUMOR_RE.search(texto_base))
         eh_opiniao = bool(OPINIAO_SATIRA_RE.search(texto_base[:500]))
         eh_vago = (bool(VAGO_RE.search(texto_base[:500]))
@@ -341,7 +364,7 @@ class Pipeline:
                     norm_base = (aplicabilidade.normalizar_data(bruta_base)
                                  if isinstance(bruta_base, str) and bruta_base.strip() else None)
                     if bruta_base and not norm_base:
-                        telemetria.fallback("data_pub", "formato não reconhecido",
+                        telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta_base),
                                             valor=str(bruta_base)[:40])
                     pecas_base.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
                                    "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
@@ -692,24 +715,19 @@ class Pipeline:
                 norm_pagina = (aplicabilidade.normalizar_data(bruta_pagina)
                                if isinstance(bruta_pagina, str) and bruta_pagina.strip() else None)
                 if bruta_pagina and not norm_pagina:
-                    telemetria.fallback("data_pub", "formato não reconhecido",
+                    telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta_pagina),
                                         valor=str(bruta_pagina)[:40])
                 elif norm_pagina is not None:
                     nova, prec_nova = norm_pagina
-                    metodo = getattr(c, "metodo", "") or ""
-                    fonte_nova = {"jsonld": "jsonld", "readerlm": "readerlm",
-                                  "falha": "readerlm"}.get(metodo, "trafilatura")
-                    tier_nova = (1 if fonte_nova == "readerlm" else
-                                 2 if prec_nova == "ano" else
-                                 6 if fonte_nova == "jsonld" else 4)
+                    # Tier pela FONTE da data (jsonld|trafilatura|readerlm), não pelo método do texto:
+                    # falha/seletor/regex não rebaixam uma data que veio do JSON-LD (revisão I-3).
+                    tier_nova = _tier_data(getattr(c, "data_pub_fonte", None), prec_nova)
                     bruta_atual = p.get("data_pub_bruta")
                     if not p.get("data_pub"):
                         tier_atual = -1
-                    elif (isinstance(bruta_atual, str) and bruta_atual.strip()
-                          and aplicabilidade.normalizar_data(bruta_atual) is None):
-                        tier_atual = 3  # SerpAPI relativa: só resolveu com âncora
                     else:
-                        tier_atual = 2 if p.get("data_pub_precisao") == "ano" else 5
+                        tier_atual = _tier_data("serpapi", p.get("data_pub_precisao"),
+                                                relativa=aplicabilidade.e_relativa(bruta_atual))
                     if tier_nova > tier_atual:
                         p["data_pub"], p["data_pub_precisao"] = nova, prec_nova
                         p["data_pub_bruta"] = bruta_pagina

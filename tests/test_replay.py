@@ -295,3 +295,54 @@ def test_relogio_replay_grava_e_reproduz(tmp_path, monkeypatch):
     with replay.modo("replay"):
         assert replay.hoje("Bolsonaro recebeu alta do hospital hoje") == d1
         assert replay.hoje("texto nunca gravado") is None   # + fallback onde=relogio
+
+
+# --- E4 revisão (item 5): relógio valida a data gravada; cassete sem data = None + fallback ---
+def _capturar_fallbacks(monkeypatch):
+    capturados = []
+    monkeypatch.setattr(replay.telemetria, "fallback",
+                        lambda onde, motivo="", /, **extra: capturados.append((onde, motivo)))
+    return capturados
+
+
+def _cassete_relogio(contexto, corpo):
+    """Grava no cassete do relógio um corpo arbitrário (cassete bom ou ruim)."""
+    k = replay.chave("GET", replay.RELOGIO_URL, contexto)
+    resp = replay.Resposta(200, {"content-type": "application/json"},
+                           json.dumps(corpo).encode("utf-8"), replay.RELOGIO_URL, cache="live")
+    replay._gravar(k, "GET", replay.RELOGIO_URL, contexto, resp, 0.0)
+
+
+@pytest.mark.parametrize("corpo", [{}, {"data": None}, {"data": "2026-1-9"}, {"data": "amanhã"},
+                                   {"data": "2026-10-09T10:00"}, {"data": "2026-02-30"}])
+def test_relogio_cassete_sem_data_valida_vira_none_com_fallback(tmp_path, monkeypatch, corpo):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_relogio("texto X", corpo)
+    with replay.modo("replay"):
+        assert replay.hoje("texto X") is None  # nunca a string "None" nem data inventada
+    assert fb == [("relogio", "cassete sem data")]
+
+
+def test_relogio_replay_sem_cassete_registra_nao_gravada(tmp_path, monkeypatch):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    with replay.modo("replay"):
+        assert replay.hoje("nunca gravado") is None
+    assert fb == [("relogio", "data de referência não gravada")]
+
+
+def test_relogio_record_refaz_cassete_sem_data_e_reproduz(tmp_path, monkeypatch):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    _cassete_relogio("texto Y", {"outra": 1})
+    with replay.modo("record"):
+        assert replay.hoje("texto Y") == "2026-10-09"  # grava o que falta (cassete ruim é refeito)
+    with replay.modo("replay"):
+        assert replay.hoje("texto Y") == "2026-10-09"
+
+
+def test_relogio_live_devolve_a_data_de_hoje_brt(monkeypatch):
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    with replay.modo("live"):
+        assert replay.hoje("qualquer texto") == "2026-10-09"

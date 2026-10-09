@@ -304,3 +304,48 @@ def test_paginas_reais_de_checagem(nome, metodo, veredito, eventos):
     assert r.metodo == metodo and r.ok, r.avisos
     assert ex.parece_navegacao(r.texto) is None and r.titulo
     assert (r.veredito_pagina or {}).get("veredito") == veredito
+
+
+# --- E4 revisão (item 4): a FONTE real da data fica registrada (jsonld | trafilatura | readerlm) ---
+def test_data_pub_fonte_jsonld(eventos):
+    ld = {"@type": "NewsArticle", "headline": "x", "datePublished": "2025-08-12T09:00:00-03:00",
+          "articleBody": CORPO_LONGO}
+    r = ex.extrair(_pagina("<p>curto</p>", ld), "https://exemplo.com/x")
+    assert r.data_pub == "2025-08-12T09:00:00-03:00" and r.data_pub_fonte == "jsonld"
+
+
+def test_data_pub_fonte_trafilatura_quando_o_jsonld_nao_trouxe_data(monkeypatch, eventos):
+    monkeypatch.setattr(ex, "_trafilatura", lambda h, u: ({"date": "2025-08-12", "text": CORPO_LONGO,
+                                                           "title": "T"}, None))
+    r = ex.extrair(_pagina(_ps()), "https://exemplo.com/x")
+    assert r.data_pub == "2025-08-12" and r.data_pub_fonte == "trafilatura"
+
+
+def test_data_pub_fonte_nao_muda_quando_a_data_ja_veio_do_jsonld(monkeypatch, eventos):
+    ld = {"@type": "NewsArticle", "headline": "x", "datePublished": "2025-08-12T09:00:00-03:00"}
+    monkeypatch.setattr(ex, "_trafilatura", lambda h, u: ({"date": "2020-01-01", "text": CORPO_LONGO,
+                                                           "title": "T"}, None))
+    r = ex.extrair(_pagina(_ps(), ld), "https://exemplo.com/x")
+    assert r.data_pub == "2025-08-12T09:00:00-03:00" and r.data_pub_fonte == "jsonld"
+
+
+def test_data_pub_fonte_readerlm(monkeypatch, eventos):
+    monkeypatch.setenv("EXTRACAO_READERLM", "1")
+    _sem_niveis_deterministicos(monkeypatch)
+
+    def falso_post(url, payload, **kw):
+        saida = {"titulo": "Título da página", "data_publicacao": "2025-08-12", "corpo": (FRASE * 6).strip()}
+        return _RespLLM("```json\n" + json.dumps(saida, ensure_ascii=False) + "\n```")
+
+    monkeypatch.setattr(replay, "llm_post", falso_post)
+    r = ex.extrair(_pagina(f"<article><p>Publicado em 2025-08-12.</p>{_ps(6)}</article>"))  # data ancorada no HTML
+    assert r.metodo == "readerlm" and r.data_pub == "2025-08-12" and r.data_pub_fonte == "readerlm"
+
+
+def test_corpo_lido_carrega_a_fonte_da_data():
+    import asyncio as _asyncio
+    url = "https://exemplo.com/x"
+    ld = {"@type": "NewsArticle", "headline": "x", "datePublished": "2025-08-12T09:00:00-03:00",
+          "articleBody": CORPO_LONGO}
+    corpo = _asyncio.run(ap.corpo_de_html(url, url, _pagina("<p>curto</p>", ld)))
+    assert corpo.corpo_lido and corpo.data_pub_fonte == "jsonld" and corpo.data_pub.startswith("2025-08-12")

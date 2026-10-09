@@ -63,6 +63,7 @@ class CorpoLido:
     metodo: str = ""                # jsonld|trafilatura|seletor|regex|readerlm|falha ("" = nem baixou)
     titulo: str = ""
     data_pub: Optional[str] = None
+    data_pub_fonte: Optional[str] = None  # jsonld|trafilatura|readerlm: fonte REAL de data_pub (não o metodo)
     veredito_pagina: Optional[dict] = None  # ClaimReview da própria página (jsonld.veredito_da_pagina)
 
 
@@ -219,7 +220,7 @@ async def corpo_de_html(url: str, final_url: str, html: str, seletor: Optional[s
                       trecho_corpo=montar_trecho(ex.texto, afirmacao) if lido else "",
                       corpo_lido=lido, erro=erro, texto_completo=ex.texto if lido else "",
                       metodo=ex.metodo, titulo=ex.titulo, data_pub=ex.data_pub,
-                      veredito_pagina=ex.veredito_pagina)
+                      data_pub_fonte=ex.data_pub_fonte, veredito_pagina=ex.veredito_pagina)
     telemetria.evento("fonte", url=url, estagio=estagio,
                       decisao="mantida" if lido else "descartada",
                       motivo=(f"corpo lido via {ex.metodo}" if lido else erro),

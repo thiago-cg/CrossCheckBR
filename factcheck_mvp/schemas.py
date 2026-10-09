@@ -1,10 +1,11 @@
 """Contratos do MVP (Pydantic v2). Valem para Telegram, API e futura web (RNF05)."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 TipoEntrada = Literal["texto", "titulo", "link"]
 Propensao = Literal["baixa", "media", "alta", "indeterminada"]
@@ -26,14 +27,25 @@ class EntradaConsulta(BaseModel):
     idioma: str = "pt-BR"
     # E4: "hoje" do texto (YYYY-MM-DD); None = desconhecida (relógio via replay.*).
     data_referencia: Optional[str] = None
+    # E4 (A5): entrada por link cuja página não tem data: E4 desligado de forma explícita,
+    # sem cair no relógio de hoje. Exclusivo com `data_referencia`.
+    sem_referencia_temporal: bool = False
 
     @field_validator("data_referencia")
     @classmethod
     def _validar_data_referencia(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
-        datetime.strptime(v[:10], "%Y-%m-%d")
-        return v[:10]
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", v):
+            raise ValueError("data_referencia deve ser YYYY-MM-DD (sem hora, sem sufixo)")
+        datetime.strptime(v, "%Y-%m-%d")  # ValueError para data inexistente (2026-02-30)
+        return v
+
+    @model_validator(mode="after")
+    def _referencia_unica(self) -> "EntradaConsulta":
+        if self.sem_referencia_temporal and self.data_referencia is not None:
+            raise ValueError("sem_referencia_temporal e data_referencia são excludentes")
+        return self
 
 
 class Afirmacao(BaseModel):

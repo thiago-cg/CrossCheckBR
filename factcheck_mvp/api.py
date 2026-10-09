@@ -20,7 +20,7 @@ from .serpapi_layer import SerpAPIClient
 
 try:
     from .telegram_bot import (LINK_SEM_TEXTO_MSG, _texto_link, _urls_nao_analisadas,
-                               classificar_entrada, formatar)
+                               classificar_entrada, entrada_de_link, formatar)
 except Exception:  # telegram opcional p/ API/web (bot não quebra API)
     def classificar_entrada(texto: str) -> EntradaConsulta:  # type: ignore
         t = (texto or "").strip()
@@ -41,6 +41,7 @@ except Exception:  # telegram opcional p/ API/web (bot não quebra API)
             return set()
 
     _texto_link = None  # type: ignore
+    entrada_de_link = None  # type: ignore
     LINK_SEM_TEXTO_MSG = "Não consegui ler esse link. Cole aqui o título e o texto da notícia."
 
 log = logging.getLogger("factcheck.api")
@@ -126,7 +127,8 @@ async def _ler_link(entrada: EntradaConsulta) -> EntradaConsulta | None:
     texto = await asyncio.to_thread(_texto_link, entrada.conteudo, pipeline().catalogo)
     if not texto:
         return None
-    return EntradaConsulta(tipo="texto", conteudo=f"{entrada.conteudo}\n\n{texto}"[:20000])
+    # "Hoje" da matéria = data da própria página; sem data, E4 desligado (A5).
+    return entrada_de_link(entrada.conteudo, texto)
 
 
 @app.post("/checar", response_model=RelatorioChecagem)

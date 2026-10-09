@@ -48,3 +48,24 @@ def test_relatorio_serializa_com_decisao_e_postura():
     d = rel.model_dump()
     assert d["versao"].startswith("mvp-") and d["decisao"]["nivel"] == "alta"
     assert d["fontes"][0]["postura"] == "REFUTA"
+
+
+# --- E4 revisão (itens 6 e 9): data_referencia estrita; link sem data = referência explicitamente ausente ---
+@pytest.mark.parametrize("valor", ["2026-1-9", "2026-10-09xyz", "2026-02-30", "09/10/2026", "2026-10-9",
+                                   " 2026-10-09", "2026-10-09T00:00:00"])
+def test_data_referencia_rejeita_o_que_nao_e_yyyy_mm_dd(valor):
+    with pytest.raises(ValueError):  # pydantic.ValidationError é subclasse de ValueError
+        EntradaConsulta(tipo="texto", conteudo="fato de hoje", data_referencia=valor)
+
+
+def test_data_referencia_aceita_yyyy_mm_dd():
+    assert EntradaConsulta(tipo="texto", conteudo="fato de hoje", data_referencia="2026-10-09").data_referencia == "2026-10-09"
+
+
+def test_sem_referencia_temporal_e_exclusivo_com_data_e_padrao_false():
+    e = EntradaConsulta(tipo="texto", conteudo="texto de página sem data")
+    assert e.sem_referencia_temporal is False and e.data_referencia is None
+    e2 = EntradaConsulta(tipo="texto", conteudo="texto de página sem data", sem_referencia_temporal=True)
+    assert e2.sem_referencia_temporal is True and e2.data_referencia is None
+    with pytest.raises(ValueError):
+        EntradaConsulta(tipo="texto", conteudo="texto", data_referencia="2026-10-09", sem_referencia_temporal=True)

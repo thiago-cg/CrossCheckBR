@@ -539,7 +539,7 @@ def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
         return {url: _CorpoLido(
             url=url, final_url=url, trecho_corpo="É falso que X. " * 100,
             corpo_lido=True, texto_completo="É falso que X. " * 500, metodo="jsonld",
-            titulo="Checa X", data_pub="2025-08-11T09:00:00-03:00")}
+            titulo="Checa X", data_pub="2025-08-11T09:00:00-03:00", data_pub_fonte="jsonld")}
 
     monkeypatch.setattr(pl, "aprofundar", fake_aprofundar)
     pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
@@ -921,3 +921,122 @@ def test_avaliador_uma_vez_por_par_com_base_sem_pular_web(amb, monkeypatch):
                                serpapi=FakeSerp([]), detector=MockDetector()).executar(_entrada_bolsonaro_hoje()))
     assert not any(e.nome == "descoberta" and e.status == "pulada" for e in rel.etapas)  # guarda: web não pulada
     assert chamadas.count(url) == 1, chamadas
+
+
+# --- E4 revisão (itens 4, 7, 8, 9): fonte real da data, rótulo do fallback, recebimento e link sem data ---
+_URL_CHECA_Z = "https://www.exemplo.com.br/2025/08/checa-z"
+
+
+def _peca_serpapi_11_ago(url):
+    """Peça web com a data textual da SerpAPI ("11 de ago. de 2025" -> dia, tier absoluto)."""
+    parcial = camada.normalizar_item(
+        {"link": url, "title": "Checa Z", "snippet": "checagem", "date": "11 de ago. de 2025"},
+        engine="google")
+    return pl.Pipeline._peca_web(parcial, {0})
+
+
+def _ler_com_pagina(monkeypatch, peca, url, **campos_pagina):
+    """Roda `_ler` com uma página lida (CorpoLido com `campos_pagina`) e devolve a peça."""
+    async def fake_aprofundar(cands, catalogo, **kw):
+        return {url: CorpoLido(url=url, final_url=url, trecho_corpo="É falso que X. " * 100,
+                               corpo_lido=campos_pagina.get("metodo") != "falha",
+                                texto_completo="É falso que X. " * 500
+                                if campos_pagina.get("metodo") != "falha" else "",
+                                titulo="Checa Z", **campos_pagina)}
+    monkeypatch.setattr(pl, "aprofundar", fake_aprofundar)
+    pipe = Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                    serpapi=FakeSerp([]), detector=MockDetector())
+
+    async def avisar(msg):
+        return None
+
+    afs = [Afirmacao(texto="X aconteceu", nucleo="X aconteceu", polaridade="afirma", consulta="x")]
+    asyncio.run(pipe._ler(afs, [peca], avisar))
+    return peca
+
+
+@pytest.mark.parametrize("metodo", ["jsonld", "seletor", "regex", "falha", "readerlm", "trafilatura"])
+def test_data_jsonld_prevalece_sobre_a_textual_qualquer_que_seja_o_metodo_do_texto(amb, monkeypatch, metodo):
+    """A fonte da data é o JSON-LD (campo próprio), não o método que extraiu o texto (I-3)."""
+    peca = _peca_serpapi_11_ago(_URL_CHECA_Z)
+    assert peca["data_pub"] == "2025-08-11" and peca["data_pub_precisao"] == "dia"  # guarda anti-vácuo
+    _ler_com_pagina(monkeypatch, peca, _URL_CHECA_Z, metodo=metodo, data_pub="2025-08-12T09:00:00-03:00",
+                    data_pub_fonte="jsonld")
+    assert peca["data_pub"] == "2025-08-12"
+    assert peca["data_pub_precisao"] == "dia"
+    assert peca["data_pub_bruta"] == "2025-08-12T09:00:00-03:00"
+
+
+@pytest.mark.parametrize("fonte", ["trafilatura", "readerlm"])
+def test_data_de_trafilatura_ou_readerlm_nao_troca_a_data_absoluta_da_serpapi(amb, monkeypatch, fonte):
+    peca = _peca_serpapi_11_ago(_URL_CHECA_Z)
+    _ler_com_pagina(monkeypatch, peca, _URL_CHECA_Z, metodo="jsonld", data_pub="2025-08-12",
+                    data_pub_fonte=fonte)
+    assert peca["data_pub"] == "2025-08-11"  # SerpAPI absoluta (dia) vence trafilatura (dia) e ReaderLM
+
+
+def test_fallback_de_data_relativa_sem_ancora_diz_sem_ancora(monkeypatch):
+    capturados = []
+    monkeypatch.setattr(pl.telemetria, "fallback",
+                        lambda onde, motivo="", /, **kw: capturados.append((onde, motivo)))
+    relativa = {"url": "https://g1.globo.com/a", "titulo": "t", "fonte": {}, "data_pub": None,
+                "data_pub_bruta": "há 3 dias"}
+    ilegivel = {"url": "https://g1.globo.com/b", "titulo": "t", "fonte": {}, "data_pub": None,
+                "data_pub_bruta": "ontem à tarde"}
+    pl.Pipeline._peca_web(relativa, {0})
+    pl.Pipeline._peca_web(ilegivel, {0})
+    assert capturados == [("data_pub", "sem âncora"), ("data_pub", "formato não reconhecido")]
+
+
+def _recebimento(rel):
+    return [e for e in rel.etapas if e.nome == "recebimento"][0].detalhe
+
+
+def _executar(entrada, usar_llm=False):
+    return asyncio.run(Pipeline(Catalogo.carregar(), Indice.de_checagens([]), Indice(),
+                                serpapi=FakeSerp([]), detector=MockDetector()).executar(entrada, usar_llm=usar_llm))
+
+
+def test_recebimento_mostra_marcador_janela_referencia_e_origem(amb):
+    rel = _executar(EntradaConsulta(tipo="titulo", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                                    data_referencia="2026-10-09"))
+    assert _recebimento(rel).endswith(
+        "marcador temporal: hoje (janela 2d); referência 2026-10-09 (origem: entrada).")
+
+
+def test_recebimento_origem_relogio_e_ausente(amb, monkeypatch):
+    from factcheck_mvp import replay as _replay
+    monkeypatch.setattr(_replay, "hoje", lambda contexto: "2026-10-09")
+    rel = _executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer"))
+    assert _recebimento(rel).endswith("marcador temporal: ausente; referência 2026-10-09 (origem: relogio).")
+    monkeypatch.setattr(_replay, "hoje", lambda contexto: None)
+    rel2 = _executar(EntradaConsulta(tipo="titulo", conteudo="Café cura câncer"))
+    assert _recebimento(rel2).endswith("marcador temporal: ausente; referência ausente (origem: ausente).")
+
+
+def test_link_sem_data_desliga_o_e4_e_nao_consulta_o_relogio(amb, monkeypatch):
+    """A5: entrada por link cuja página não tem data: referência explicitamente ausente, sem relógio."""
+    from factcheck_mvp import replay as _replay
+    from factcheck_mvp import decisao as _dec
+    chamadas = []
+
+    def _relogio_proibido(contexto):
+        chamadas.append(contexto)
+        return "2026-10-09"
+
+    monkeypatch.setattr(_replay, "hoje", _relogio_proibido)
+    vistos = []
+    _orig = _dec.decidir
+
+    def _espiar(ev):
+        vistos.append(ev)
+        return _orig(ev)
+
+    monkeypatch.setattr(_dec, "decidir", _espiar)
+    rel = _executar(EntradaConsulta(tipo="texto", conteudo="Bolsonaro recebeu alta do hospital hoje",
+                                    sem_referencia_temporal=True))
+    assert chamadas == []
+    assert vistos and vistos[-1].data_referencia is None
+    assert _recebimento(rel).endswith(
+        "marcador temporal: hoje (janela 2d); referência ausente (origem: ausente (link sem data)).")
+    assert rel.decisao["descontos_temporais"] == []
