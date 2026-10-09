@@ -583,3 +583,12 @@ def test_normalizar_data_formatos_de_m7(valor, ancora, esperado):
 ])
 def test_relativa_em_anos_e_meses_usa_o_fim_do_intervalo(valor, esperado):
     assert aplicabilidade.normalizar_data(valor, "2026-10-09") == esperado
+
+
+# --- E4 revisão (M-8): motivo do fallback com âncora: relativa fora do intervalo não é "sem âncora" ---
+def test_motivo_relativa_com_ancora_fora_do_intervalo():
+    assert aplicabilidade.motivo_data_ilegivel("há 999999 dias", "2026-10-09") == "fora do intervalo"
+    assert aplicabilidade.motivo_data_ilegivel("há 999999999 dias", "2026-10-09") == "fora do intervalo"
+    assert aplicabilidade.motivo_data_ilegivel("há 3 dias") == "sem âncora"
+    assert aplicabilidade.motivo_data_ilegivel("há 3 dias", "lixo") == "âncora inválida"
+    assert aplicabilidade.motivo_data_ilegivel("ontem à tarde", "2026-10-09") == "formato não reconhecido"

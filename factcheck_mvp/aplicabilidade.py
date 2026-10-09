@@ -373,9 +373,17 @@ def e_relativa(valor: str | None) -> bool:
     return isinstance(valor, str) and _relativa(_normalizar(valor)) is not None
 
 
-def motivo_data_ilegivel(valor: str | None) -> str:
-    """Motivo do fallback `data_pub` para um valor não-vazio que normalizar_data não leu."""
-    return "sem âncora" if e_relativa(valor) else "formato não reconhecido"
+def motivo_data_ilegivel(valor: str | None, ancora: str | None = None) -> str:
+    """Motivo do fallback `data_pub` para um valor não-vazio que normalizar_data não leu (M-8): relativa
+    sem âncora, com âncora inválida, relativa fora do intervalo (N absurdo, com âncora válida) ou formato
+    não reconhecido. Sem `ancora`, uma relativa diz "sem âncora" (o chamador não a conhece)."""
+    if not e_relativa(valor):
+        return "formato não reconhecido"
+    if ancora is None:
+        return "sem âncora"
+    if _data_de_ancora(ancora) is None:
+        return "âncora inválida"
+    return "fora do intervalo"
 
 
 def _offset(tz: str) -> timedelta:
