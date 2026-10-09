@@ -277,7 +277,6 @@ class Decisao:
             "descontos": [f"{d.get('url', '')[:60]} +{d.get('dias_alem_da_janela')}d "
                           f"r={d.get('r')} −{d.get('bits_descartados')}b"
                           for d in self.descontos_temporais][:6],
-            "L": round(self.log_odds, 3), "p": round(self.prob, 3), "motivo": self.motivo,
             "votos": [f"af{v.afirmacao}:{v.cluster} {v.valor:+.2f} [{','.join(v.classes)}"
                       f"{'|' + ','.join(v.vereditos) if v.vereditos else ''}] {v.motivo}" for v in self.votos],
             "vereditos": [f"{v['veredito']}@{v['url'][:60]}" for v in self.vereditos_aplicados],

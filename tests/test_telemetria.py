@@ -192,6 +192,19 @@ def test_e4_resumo_trace_traz_contrafactual_e_descontos(tdir, monkeypatch):
     assert r["descontos"][0] == f"{x['url'][:60]} +{x['dias_alem_da_janela']}d r={x['r']} −{x['bits_descartados']}b"
 
 
+def test_resumo_trace_nao_tem_chave_repetida():
+    """Chave repetida num dict literal some em silêncio (L, p e motivo estavam duas vezes):
+    confere a fonte, porque em tempo de execução a duplicata já não aparece."""
+    import ast
+    import inspect
+    import textwrap
+    from factcheck_mvp.decisao import Decisao
+    arvore = ast.parse(textwrap.dedent(inspect.getsource(Decisao.resumo_trace)))
+    retorno = next(n for n in ast.walk(arvore) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict))
+    chaves = [k.value for k in retorno.value.keys if isinstance(k, ast.Constant)]
+    assert len(chaves) == len(set(chaves)), sorted({c for c in chaves if chaves.count(c) > 1})
+
+
 def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
     from factcheck_mvp.pipeline import Pipeline
     # Peça com placeholder de ano: a bruta vem como "2021-01-01" e a normalizada é o fim do ano.
