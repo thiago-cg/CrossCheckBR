@@ -216,11 +216,23 @@ def test_bot_placeholder_de_ano_mostra_so_o_ano():
     assert verificar_neutralidade(t) == []
 
 
-def test_bot_data_relativa_mostra_a_data_normalizada():
+def test_bot_data_relativa_mostra_a_data_aproximada():
+    """M5: "há 3 dias" não é data exata. A normalizada vem da âncora (a busca), então sai aproximada."""
     from factcheck_mvp.telegram_bot import formatar
     t = formatar(_rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
                                             data_pub_bruta="há 3 dias")))
-    assert "📅 publicada em 06/10/2026" in t and "há 3 dias" not in t
+    assert "📅 publicada há cerca de 3 dias (≈06/10/2026) · anterior ao período do texto" in t
+    assert "publicada em 06/10/2026" not in t and "há 3 dias" not in t
+
+
+def test_data_exibida_absoluta_e_relativa():
+    from factcheck_mvp.agregador import data_publicacao_exibida
+    assert data_publicacao_exibida("2026-10-06", "dia", "2026-10-06T10:00:00+00:00") == "publicada em 06/10/2026"
+    assert data_publicacao_exibida("2026-10-06", "dia", "há 3 dias") == "publicada há cerca de 3 dias (≈06/10/2026)"
+    assert data_publicacao_exibida("2026-10-08", "dia", "há 1 dia") == "publicada há cerca de 1 dia (≈08/10/2026)"
+    assert data_publicacao_exibida("2026-10-06", "dia", "3 days ago") == "publicada há cerca de 3 dias (≈06/10/2026)"
+    assert data_publicacao_exibida("2026-07-18", "ano", "há 2 meses") == "publicada há cerca de 2 meses (≈2026)"
+    assert data_publicacao_exibida(None, "dia", "há 3 dias") == ""  # sem data reconhecível: nada
 
 
 def test_bot_iso_com_fuso_mostra_o_dia_brt_usado_na_decisao():
@@ -238,7 +250,7 @@ def test_web_data_respeita_a_precisao_e_a_normalizada():
     assert "📅 publicada em 2021 · anterior ao período do texto" in h and "01/01/2021" not in h
     h2 = _visivel(_render_html("x", _rel_com_fonte(_fonte_data(data_pub="2026-10-06", data_pub_precisao="dia",
                                                                data_pub_bruta="há 3 dias"))))
-    assert "📅 publicada em 06/10/2026" in h2 and "há 3 dias" not in h2
+    assert "📅 publicada há cerca de 3 dias (≈06/10/2026)" in h2 and "há 3 dias" not in h2
 
 
 def test_fontes_leva_a_precisao_da_data_da_peca():

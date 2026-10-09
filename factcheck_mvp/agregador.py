@@ -138,6 +138,48 @@ def data_publicacao_legivel(data_pub: Optional[str], precisao: Optional[str] = N
     return ano if precisao == "ano" else f"{dia}/{mes}/{ano}"
 
 
+# M5: unidade relativa normalizada (as chaves de aplicabilidade) -> (singular, plural) em português.
+_UNIDADES_RELATIVAS_PT = {
+    "minuto": ("minuto", "minutos"), "minutos": ("minuto", "minutos"),
+    "minute": ("minuto", "minutos"), "minutes": ("minuto", "minutos"),
+    "hora": ("hora", "horas"), "horas": ("hora", "horas"),
+    "hour": ("hora", "horas"), "hours": ("hora", "horas"),
+    "dia": ("dia", "dias"), "dias": ("dia", "dias"),
+    "day": ("dia", "dias"), "days": ("dia", "dias"),
+    "semana": ("semana", "semanas"), "semanas": ("semana", "semanas"),
+    "week": ("semana", "semanas"), "weeks": ("semana", "semanas"),
+    "mes": ("mês", "meses"), "meses": ("mês", "meses"),
+    "month": ("mês", "meses"), "months": ("mês", "meses"),
+    "ano": ("ano", "anos"), "anos": ("ano", "anos"),
+    "year": ("ano", "anos"), "years": ("ano", "anos"),
+}
+
+
+def _tempo_relativo_pt(bruta: Optional[str]) -> Optional[str]:
+    """"3 dias", "1 semana", "2 meses" a partir da data relativa bruta ("há 3 dias", "3 days ago").
+    None se a bruta não é relativa. Só chama a detecção e o parser de aplicabilidade."""
+    from .aplicabilidade import _normalizar, _relativa, e_relativa
+    if not e_relativa(bruta):
+        return None
+    qtd, unidade = _relativa(_normalizar(bruta))
+    sing, plur = _UNIDADES_RELATIVAS_PT.get(unidade, (unidade, unidade))
+    return f"{qtd} {sing if qtd == 1 else plur}"
+
+
+def data_publicacao_exibida(data_pub: Optional[str], precisao: Optional[str] = None,
+                            bruta: Optional[str] = None) -> str:
+    """Data de publicação para o usuário (bot e web). Bruta absoluta: "publicada em 06/10/2026".
+    Bruta relativa ("há 3 dias"): a data normalizada veio da âncora (a data da busca), não da página,
+    então sai aproximada: "publicada há cerca de 3 dias (≈06/10/2026)". "" sem data reconhecível."""
+    dtxt = data_publicacao_legivel(data_pub, precisao)
+    if not dtxt:
+        return ""
+    tempo = _tempo_relativo_pt(bruta)
+    if tempo is None:
+        return f"publicada em {dtxt}"
+    return f"publicada há cerca de {tempo} (≈{dtxt})"
+
+
 def _agencias_checagem() -> frozenset:
     """Nomes normalizados das agências de checagem do catálogo (leitura fresca)."""
     nomes = set()

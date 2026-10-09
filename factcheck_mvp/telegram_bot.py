@@ -289,7 +289,7 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import (data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel,
+        from .agregador import (data_publicacao_exibida, direcoes_por_url, linha_raciocinio, postura_legivel,
                                 texto_de_linha)
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
@@ -320,9 +320,11 @@ def formatar(rel: RelatorioChecagem) -> str:
             # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
             _r = getattr(f, "relevancia_temporal", None)
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
+                # M5: data relativa da página ("há 3 dias") sai aproximada, não como data exata.
+                _dtxt = data_publicacao_exibida(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None),
+                                                getattr(f, "data_pub_bruta", None))
                 if _dtxt:
-                    linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
+                    linhas.append(f"   📅 {_dtxt} · anterior ao período do texto")
                 else:
                     linhas.append("   📅 anterior ao período do texto")
             # B1a: porquê do avaliador, atribuído; só quando há raciocínio.

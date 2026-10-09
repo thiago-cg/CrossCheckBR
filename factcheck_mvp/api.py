@@ -184,7 +184,7 @@ def _link_html(url: str) -> str:
 
 
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
-    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
+    from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_exibida, direcoes_por_url,
                             linha_raciocinio, postura_legivel, texto_de_linha)
     from .confiabilidade import ROTULO
     esc = html.escape
@@ -212,9 +212,11 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             _r = getattr(f, "relevancia_temporal", None)
             _linha_data = ""
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
-                _dtxt = data_publicacao_legivel(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None))
+                # M5: data relativa da página ("há 3 dias") sai aproximada, não como data exata.
+                _dtxt = data_publicacao_exibida(getattr(f, "data_pub", None), getattr(f, "data_pub_precisao", None),
+                                                getattr(f, "data_pub_bruta", None))
                 if _dtxt:
-                    _linha_data = f"<br/>📅 publicada em {esc(_dtxt)} · anterior ao período do texto"
+                    _linha_data = f"<br/>📅 {esc(_dtxt)} · anterior ao período do texto"
                 else:
                     _linha_data = "<br/>📅 anterior ao período do texto"
             # B1a: porquê do avaliador, atribuído e escapado; só quando há raciocínio.
