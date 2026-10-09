@@ -256,6 +256,8 @@ _MESES_EN = {
 
 # Placeholders do extrator para "data desconhecida": nunca são data real. Valem só SEM hora.
 _SENTINELAS_DATA = frozenset({"1970-01-01", "1900-01-01", "2000-01-01"})
+# Mesmas sentinelas como INSTANTE UTC à meia-noite (I-6): placeholder exibido em outro fuso continua sendo.
+_EPOCAS_SENTINELA = frozenset(datetime(ano, 1, 1, tzinfo=timezone.utc) for ano in (1900, 1970, 2000))
 # Data de publicação antes disso é ruído de extrator (ou N relativo absurdo): não é data.
 _ANO_MINIMO = 1900
 # Teto de N em "há N unidades": acima disso é absurdo (e evita estouro de calendário).
@@ -355,16 +357,20 @@ def _dt_iso(ano: str, mes: str, dia: str, hh: str | None, mi: str | None,
 def _dia_de_datetime(dt: datetime) -> tuple[date, bool]:
     """(dia de publicação, sem_hora) de um datetime.
 
-    Sem fuso: a data escrita. Meia-noite UTC exata: a data literal (é "só data" serializada;
+    Sem fuso ou meia-noite LOCAL exata (qualquer offset): a data escrita (é "só data" serializada;
     converter p/ BRT recuaria 1 dia, o erro para o lado de DESCONTAR mais). Outros casos com
     fuso: convertidos p/ BRT (UTC−3, A2). `sem_hora` = meia-noite ou só data.
     """
     meia_noite = (dt.hour, dt.minute, dt.second) == (0, 0, 0)
-    if dt.tzinfo is None:
+    if dt.tzinfo is None or meia_noite:
         return dt.date(), meia_noite
-    if dt.utcoffset() == timedelta(0) and meia_noite:
-        return dt.date(), True
-    return dt.astimezone(_BRT).date(), meia_noite
+    return dt.astimezone(_BRT).date(), False
+
+
+def _eh_sentinela_instante(dt: datetime) -> bool:
+    """True se o INSTANTE é um placeholder à meia-noite UTC (epoch 1970, 1900, 2000), mesmo exibido em
+    outro fuso: "1970-01-01T03:00:00+03:00" é o epoch (I-6). Naive não tem instante: False."""
+    return dt.tzinfo is not None and dt.astimezone(timezone.utc) in _EPOCAS_SENTINELA
 
 
 def _data_de_ancora(ancora: str | None) -> date | None:
@@ -431,10 +437,16 @@ def _normalizar_data(valor: str | None, ancora: str | None) -> tuple[str, str] |
                 return None
             ano_i, mes_i = int(ano), int(mes)
             return _fechar(date(ano_i, mes_i, calendar.monthrange(ano_i, mes_i)[1]), "ano")
-        dia_pub, sem_hora = _dia_de_datetime(_dt_iso(ano, mes, dia, hh, mi, ss, tz))
+        dt = _dt_iso(ano, mes, dia, hh, mi, ss, tz)
+        if _eh_sentinela_instante(dt):
+            return None
+        dia_pub, sem_hora = _dia_de_datetime(dt)
         return _fechar_absoluta(dia_pub, sem_hora)
     if _RFC2822_RE.fullmatch(s) is not None:
-        dia_pub, sem_hora = _dia_de_datetime(parsedate_to_datetime(s))
+        dt = parsedate_to_datetime(s)
+        if _eh_sentinela_instante(dt):
+            return None
+        dia_pub, sem_hora = _dia_de_datetime(dt)
         return _fechar_absoluta(dia_pub, sem_hora)
 
     # 3. Textual: PT-BR ("26 de jan. de 2012", "1º de março de 2020") e EN ("06 Sep 2022", "Mar 3, 2024").

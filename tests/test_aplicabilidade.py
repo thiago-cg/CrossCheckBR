@@ -539,3 +539,19 @@ def test_marcador_com_travessao_colado_devolve_so_a_palavra():
 ])
 def test_falsos_marcadores_m2_nao_contam(texto):
     assert aplicabilidade.janela_temporal(texto) is None
+
+
+# --- E4 revisão (I-6, M-1): meia-noite LOCAL exata (qualquer offset) é a data literal; sentinela na
+#     data literal ou no instante UTC do epoch (1970-01-01T03:00+03:00 é o epoch exibido em +03) ---
+@pytest.mark.parametrize("valor,esperado", [
+    ("2000-01-01T00:00:00+03:00", None),                      # sentinela na data literal
+    ("2000-01-01T00:00:00+01:00", None),
+    ("1970-01-01T03:00:00+03:00", None),                      # instante = epoch UTC
+    ("2026-01-01T00:00:00+01:00", ("2026-12-31", "ano")),     # -01-01 à data literal = placeholder de ano
+    ("2026-09-22T00:00:00+02:00", ("2026-09-22", "dia")),     # meia-noite local: sem converter p/ BRT
+    ("2026-09-22T00:00:00+05:30", ("2026-09-22", "dia")),
+    ("Tue, 06 Sep 2022 00:00:00 +0100", ("2022-09-06", "dia")),   # RFC meia-noite local
+    ("2026-09-22T02:00:00+00:00", ("2026-09-21", "dia")),     # hora real converte (23h BRT do dia 21)
+])
+def test_meia_noite_local_e_data_literal(valor, esperado):
+    assert aplicabilidade.normalizar_data(valor, None) == esperado
