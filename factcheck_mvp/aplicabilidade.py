@@ -79,20 +79,31 @@ def _cfg_janela(variavel: str, default: int) -> int:
         return default
 
 
-def janela_temporal(texto_usuario: str) -> int | None:
-    """Menor janela (dias) entre os marcadores temporais do texto; None se não há marcador."""
-    janela = None
+def _nucleo_temporal(texto_usuario: str) -> tuple[str, int] | None:
+    """Núcleo único do E4: (trecho normalizado do marcador, janela em dias) do marcador de MENOR
+    janela do texto, ou None se não há marcador. `janela_temporal` e `marcador_temporal` derivam
+    daqui, para que nunca divirjam. Empate de janela: vale o primeiro na ordem de busca."""
+    melhor: tuple[str, int] | None = None
     texto = _normalizar(texto_usuario)
-    if _AGORA_EM_MES.search(texto):
-        janela = _cfg_janela("E4_JANELA_MES", 32)
+    m_mes = _AGORA_EM_MES.search(texto)
+    if m_mes:
+        melhor = (m_mes.group(0), _cfg_janela("E4_JANELA_MES", 32))
         texto = _AGORA_EM_MES.sub(" ", texto)
     for exclusao in _EXCLUSOES:
         texto = exclusao.sub(" ", texto)
     for padrao, variavel, default in _MARCADORES:
-        if padrao.search(texto):
+        m = padrao.search(texto)
+        if m:
             dias = _cfg_janela(variavel, default)
-            janela = dias if janela is None else min(janela, dias)
-    return janela
+            if melhor is None or dias < melhor[1]:
+                melhor = (m.group(0), dias)
+    return melhor
+
+
+def janela_temporal(texto_usuario: str) -> int | None:
+    """Menor janela (dias) entre os marcadores temporais do texto; None se não há marcador."""
+    achado = _nucleo_temporal(texto_usuario)
+    return None if achado is None else achado[1]
 
 
 def janelas_efetivas() -> dict[str, int]:
@@ -478,33 +489,11 @@ def referencia_de_pagina(data_bruta: str | None) -> str | None:
 def marcador_temporal(texto_usuario: str) -> str | None:
     """Literal (normalizado) do marcador que define `janela_temporal(texto)`: o de menor janela.
 
-    Mesma busca de `janela_temporal` (exclusões, "agora em <mês>", _MARCADORES_JANELA e
-    _JANELA_REGEX), mas devolve o trecho casado, não a janela. Usado só para a etapa de
-    recebimento; test_marcador_temporal_acompanha_janela_temporal_em_todos_os_casos guarda
-    a equivalência com `janela_temporal`.
+    Devolve o trecho casado pelo mesmo núcleo (`_nucleo_temporal`) que calcula a janela, então
+    os dois nunca divergem. Usado na etapa de recebimento do pipeline.
     """
-    melhor: tuple[int, str] | None = None
-    texto = _normalizar(texto_usuario)
-
-    def _candidato(dias: int, trecho: str) -> None:
-        nonlocal melhor
-        if melhor is None or dias < melhor[0]:
-            melhor = (dias, trecho)
-
-    m_mes = _AGORA_EM_MES.search(texto)
-    if m_mes:
-        _candidato(_cfg_janela("E4_JANELA_MES", 32), m_mes.group(0))
-        texto = _AGORA_EM_MES.sub(" ", texto)
-    for exclusao in _EXCLUSOES:
-        texto = exclusao.sub(" ", texto)
-    for marcador, variavel, default in _MARCADORES_JANELA:
-        if re.search(r"\b" + re.escape(marcador) + r"\b", texto):
-            _candidato(_cfg_janela(variavel, default), marcador)
-    for padrao, variavel, default in _JANELA_REGEX:
-        m = padrao.search(texto)
-        if m:
-            _candidato(_cfg_janela(variavel, default), m.group(0))
-    return melhor[1] if melhor is not None else None
+    achado = _nucleo_temporal(texto_usuario)
+    return None if achado is None else achado[0]
 
 
 # ------------------------------------------------------------------ Task 4b (E4): data explícita do evento (pura, sem I/O)
