@@ -20,6 +20,7 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
     contrib   = s_a * d * w
       postura : d = +1 REFUTA, -1 SUSTENTA (RELATA/NAO_TRATA não votam)
                 w = W_POSTURA * f_fonte * (1 − prob_fake_pagina)  (T6; sem modelo real, fator 1,0)
+                w < 5% de W_POSTURA·f_fonte (prob_fake > 0,95): não vota (D-c, FRACAO_MIN_VOTO)
       veredito: d = selos.direcao(veredito) (FALSO +1 … VERDADEIRO -1; SATIRA 0 = não vota)
                 w = W_VEREDITO * f_fonte; só selo do ÍNDICE (origem "pagina" não vota: T6)
       f_fonte = confiabilidade da fonte (confiabilidade.FATOR_POSTURA / FATOR_VEREDITO):
@@ -92,6 +93,9 @@ from . import aplicabilidade, confiabilidade, selos
 TAU = math.log(3)            # faixa média: |L| < ln 3  <=>  0,25 < p < 0,75
 W_POSTURA = 1.0              # postura com citação verificada, fonte curada, corpo lido
 W_VEREDITO = 1.5             # selo de checagem tipado, aplicável à afirmação
+# D-c (09/10): postura cujo peso ficou abaixo desta fração do peso sem o BERT (1 − prob_fake < 5%) não vota,
+# como se não existisse. Sem isso, um voto de valor ≈0 entrava na conjunção com σ(0) = 0,5.
+FRACAO_MIN_VOTO = 0.05
 # Fonte fora do catálogo: o fator vem do nível de confiabilidade (confiabilidade.py).
 F_NAO_CURADA = confiabilidade.FATOR_POSTURA[confiabilidade.ALTO_TRAFEGO]            # 0,6 (como antes)
 F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEGO]  # 0,8 (como antes)
@@ -177,6 +181,7 @@ class Decisao:
     conflitos: List[Dict[str, Any]] = field(default_factory=list)
     nao_analisadas: List[Dict[str, Any]] = field(default_factory=list)       # E3: só título, não vota
     descontos_temporais: List[Dict[str, Any]] = field(default_factory=list)  # E4: evidência de outro episódio
+    posturas_fracas: List[Dict[str, Any]] = field(default_factory=list)      # D-c: postura abaixo de 5% do peso
     contagem: Dict[str, int] = field(default_factory=dict)
     travas: Dict[str, bool] = field(default_factory=dict)
     parametros: Dict[str, Any] = field(default_factory=dict)
@@ -314,6 +319,8 @@ class Decisao:
             "vereditos": [f"{v['veredito']}@{v['url'][:60]}" for v in self.vereditos_aplicados],
             "vereditos_ignorados": [f"{v.get('veredito')}@{v['url'][:60]}: {v['motivo']}"
                                     for v in self.vereditos_ignorados][:6],
+            "posturas_fracas": [f"af{x['afirmacao']} {x['classe']}@{x['url'][:60]} pf={x['prob_fake_pagina']}"
+                                for x in self.posturas_fracas][:6],
             "conflitos": [c["url"][:70] for c in self.conflitos],
             "contagem": self.contagem, **self.travas,
         }
@@ -403,9 +410,16 @@ def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
     post = None
     if it.classe in CLASSES_VOTO:
         d = 1.0 if it.classe == "REFUTA" else -1.0
-        w = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()] * _fator_credibilidade(it)
-        if w > 0:  # prob_fake 1,0: a página não vota na postura
+        base = W_POSTURA * confiabilidade.FATOR_POSTURA[it.nivel_confiabilidade()]  # peso sem o BERT
+        w = base * _fator_credibilidade(it)
+        if base > 0 and w >= FRACAO_MIN_VOTO * base:
             post = (s * d * w, f"postura {it.classe}")
+        else:
+            # D-c (09/10): com o BERT quase certo de que a página é fake (menos de 5% do peso), a postura
+            # não vota, como se não existisse. O trace guarda o caso em `posturas_fracas`.
+            dec.posturas_fracas.append({"url": it.url, "afirmacao": it.afirmacao, "classe": it.classe,
+                                        "prob_fake_pagina": it.prob_fake_pagina,
+                                        "fracao": round(_fator_credibilidade(it), 4)})
     ver = None
     if it.veredito:
         if it.classe not in CLASSES_TRATA:
@@ -564,6 +578,7 @@ def decidir(ev: Evidencias) -> Decisao:
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
                               "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
                               "postura": "W_POSTURA·f_fonte·(1−prob_fake_pagina)",
+                              "fracao_min_voto": FRACAO_MIN_VOTO,
                               "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre as partes com L_a≥0 (com voto); "
                                              "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto; "
                                              "se nenhuma parte é ≥0, max(L_a)")})

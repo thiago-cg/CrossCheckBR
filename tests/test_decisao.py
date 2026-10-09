@@ -716,6 +716,57 @@ def test_t6_formula_registrada_em_parametros():
     assert d.parametros["postura"] == "W_POSTURA·f_fonte·(1−prob_fake_pagina)"
 
 
+# ------------------------------------------------------------------ D-c (09/10): voto < 5% do peso não conta
+def _d_c_texto(pf):
+    """Repro do revisor: P1 com 1 REFUTA curada (prob_fake = pf) e P2 com 2 SUSTENTA curadas."""
+    itens = [_it("https://g1.globo.com/a", "REFUTA", cluster="g1", af=0, pf=pf)]
+    itens += [_it("https://estadao.com.br/b", "SUSTENTA", cluster="estadao", af=1),
+              _it("https://bbc.com/b", "SUSTENTA", cluster="bbc", af=1)]
+    return decidir(_ev_afs(itens, ["Parte 1", "Parte 2"]))
+
+
+@pytest.mark.parametrize("pf", [1.0, 0.99999, 0.9999, 0.96])
+def test_d_c_postura_com_menos_de_5_por_cento_nao_vota(pf):
+    """Peso da postura < 5% do peso sem o BERT (1 − prob_fake < 0,05): não vota, como se não existisse. P1 sai
+    da conjunção e o texto é o de P2 (baixa)."""
+    d = _d_c_texto(pf)
+    assert d.por_afirmacao[0]["n_votos"] == 0
+    assert d.nivel == "baixa" and d.log_odds == pytest.approx(-2.0)
+    assert len(d.posturas_fracas) == 1 and d.posturas_fracas[0]["url"] == "https://g1.globo.com/a"
+
+
+def test_d_c_prob_fake_9999_e_1_dao_o_mesmo_nivel():
+    """O caso do revisor: antes, 1,0 dava baixa e 0,99999 dava média. Agora os dois dão o mesmo resultado."""
+    assert _d_c_texto(0.99999).nivel == _d_c_texto(1.0).nivel == "baixa"
+    assert _d_c_texto(0.99999).log_odds == _d_c_texto(1.0).log_odds
+
+
+@pytest.mark.parametrize("pf", [0.9, 0.94])
+def test_d_c_postura_com_mais_de_5_por_cento_ainda_vota(pf):
+    """Com 10% (prob_fake 0,9) ou 6% do peso, a postura ainda vota: P1 é contestada, com L = 1 − prob_fake.
+    Não some e não é tratada como 'sem voto'."""
+    d = _d_c_texto(pf)
+    assert d.por_afirmacao[0]["n_votos"] == 1
+    assert d.por_afirmacao[0]["L"] == pytest.approx(1.0 - pf, abs=1e-4)
+    assert d.posturas_fracas == []
+
+
+def test_d_c_nao_afeta_veredito_do_indice():
+    """O fator BERT só reduz a postura. Um selo do índice (1,5, sem BERT) continua votando com prob_fake 1,0."""
+    it = _it("https://lupa.uol.com.br/x", "REFUTA", veredito="FALSO", origem="indice", pf=1.0)
+    d = decidir(_ev([it]))
+    assert d.nivel == "alta" and len(d.vereditos_aplicados) == 1
+    assert len(d.posturas_fracas) == 1
+
+
+def test_d_c_constante_e_trace_registram_o_caso():
+    """A fração mínima fica nomeada em `parametros` e o caso sem voto aparece no trace (`posturas_fracas`)."""
+    d = _d_c_texto(1.0)
+    assert d.parametros["fracao_min_voto"] == decisao.FRACAO_MIN_VOTO == 0.05
+    r = d.resumo_trace()
+    assert r["posturas_fracas"] == ["af0 REFUTA@https://g1.globo.com/a pf=1.0"]
+
+
 # ------------------------------------------------------------------ T7 (B2): conjunção entre afirmações (D2)
 def _it_nivel(url, classe, nivel, af=0, cluster=None):
     """Item com nível de confiabilidade explícito (pesos exatos: curada 1,0; institucional/alto 0,6; baixo 0,3)."""
