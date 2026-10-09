@@ -34,7 +34,7 @@ def avaliar(afirmacao_nucleo: str, peca: Dict[str, Any]) -> Dict[str, Any]:
     Entrada `peca`: `{url, titulo, corpo|texto_completo|trecho_juiz, snippet,
     veiculo, dominio, data_pub, veredito_pagina, corpo_lido}`.
     Saída: `{posicao, citacao, citacao_score, citacao_verificada, pagina_diz,
-    motor, erro, corpo_lido}`. Nunca levanta.
+    raciocinio, motor, erro, corpo_lido}`. Nunca levanta.
     """
     peca = peca or {}
     titulo = (peca.get("titulo") or "").strip()
@@ -44,6 +44,7 @@ def avaliar(afirmacao_nucleo: str, peca: Dict[str, Any]) -> Dict[str, Any]:
         telemetria.fallback("avaliador", ERRO_SEM_CORPO)
         return {"posicao": None, "citacao": "", "citacao_score": None,
                 "citacao_verificada": None, "pagina_diz": "",
+                "raciocinio": "",
                 "motor": MOTOR_SEM_CORPO, "erro": ERRO_SEM_CORPO,
                 "corpo_lido": False}
     nucleo = (afirmacao_nucleo or "").strip()
@@ -67,5 +68,6 @@ def avaliar(afirmacao_nucleo: str, peca: Dict[str, Any]) -> Dict[str, Any]:
             "citacao_score": r.get("citacao_score"),
             "citacao_verificada": r.get("citacao_verificada"),
             "pagina_diz": r.get("pagina_diz") or "",
+            "raciocinio": r.get("raciocinio") or "",
             "motor": r.get("motor") or "", "erro": r.get("erro"),
             "corpo_lido": True}

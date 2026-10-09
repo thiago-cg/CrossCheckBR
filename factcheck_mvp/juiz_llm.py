@@ -130,6 +130,8 @@ class ItemJuiz(BaseModel):
     # Opcional: item sem classe vira "não julgado" em vez de derrubar o lote inteiro
     classe: Optional[Literal["SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO", "NAO_TRATA"]] = None
     citacao: str = ""
+    # B1a: porquê da classe (direção). O limite de ~240 chars vive SÓ no prompt; sem corte no código.
+    raciocinio: str = ""
 
     @field_validator("classe", mode="before")
     @classmethod
@@ -143,7 +145,7 @@ class ItemJuiz(BaseModel):
             return "NAO_TRATA"
         return k
 
-    @field_validator("citacao", "pagina_diz", mode="before")
+    @field_validator("citacao", "pagina_diz", "raciocinio", mode="before")
     @classmethod
     def _cit(cls, v):
         return "" if v is None else str(v)
@@ -181,8 +183,9 @@ Regras:
 4. "veredito_pagina", quando existe, é o selo que a própria página deu à alegação que ela checou; considere-o só se essa alegação for a mesma da AFIRMAÇÃO.
 5. "pagina_diz": uma frase curta, em português, com o que a página afirma sobre o assunto.
 6. "citacao": copie LITERALMENTE, sem mudar nenhuma palavra e sem usar reticências, um trecho contínuo e curto (10 a 30 palavras) do título ou do trecho do item que justifique a classe. Não parafraseie e não traduza. Para NAO_TRATA use "".
-7. Responda SOMENTE com JSON, em português, neste formato, com um objeto por item, na ordem:
-{{"itens": [{{"i": 0, "pagina_diz": "<frase curta>", "classe": "<SUSTENTA|REFUTA|RELATA_SEM_ENDOSSO|NAO_TRATA>", "citacao": "<trecho copiado do item>"}}]}}
+7. "raciocinio": em português, em até ~240 caracteres, o porquê da classe — o que a página afirma sobre a AFIRMAÇÃO que justifica a direção (sustenta, refuta, só relata ou não trata). Não avalie a credibilidade da fonte (isso é de outro módulo).
+8. Responda SOMENTE com JSON, em português, neste formato, com um objeto por item, na ordem:
+{{"itens": [{{"i": 0, "pagina_diz": "<frase curta>", "classe": "<SUSTENTA|REFUTA|RELATA_SEM_ENDOSSO|NAO_TRATA>", "citacao": "<trecho copiado do item>", "raciocinio": "<porquê da classe em até ~240 caracteres>"}}]}}
 
 ITENS:
 {itens}"""
@@ -200,13 +203,14 @@ def _item_prompt(i: int, it: Dict[str, Any]) -> Dict[str, Any]:
 
 def _vazio(motivo: str, motor: str = MOTOR_FALLBACK) -> Dict[str, Any]:
     return {"classe": None, "citacao": "", "citacao_score": None, "citacao_verificada": None,
-            "rebaixado": False, "motor": motor, "modelo": "", "erro": motivo}
+            "rebaixado": False, "motor": motor, "modelo": "", "erro": motivo, "raciocinio": ""}
 
 
 def julgar_lote(afirmacao: str, itens: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Julga até JUIZ_LOTE itens numa chamada. Cada item precisa de `trecho` (texto que o
     juiz verá e contra o qual a citação é conferida). Retorna, por item, na ordem:
-    {classe, citacao, citacao_score, citacao_verificada, rebaixado, motor, modelo, erro}."""
+    {classe, citacao, citacao_score, citacao_verificada, rebaixado, motor, modelo, erro,
+    raciocinio (sem corte: o limite de ~240 chars vive só no prompt)}."""
     if not itens:
         return []
     n = len(itens)
@@ -239,7 +243,7 @@ def julgar_lote(afirmacao: str, itens: List[Dict[str, Any]]) -> List[Dict[str, A
             saida.append(_vazio("juiz não devolveu este item", motor="fallback-juiz-item"))
             continue
         out = {"classe": x.classe, "citacao": x.citacao.strip()[:400], "pagina_diz": x.pagina_diz[:300],
-               "citacao_score": None,
+               "citacao_score": None, "raciocinio": x.raciocinio or "",
                "citacao_verificada": None, "rebaixado": False, "motor": motor, "modelo": res.modelo,
                "erro": None, "classe_original": x.classe}
         if x.classe in TRATA:
