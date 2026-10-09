@@ -21,3 +21,4 @@ eval/cassettes/
 eval/serpapi_uso.json
 # Resultados da avaliação golden do PR2 (gerados localmente)
 avaliacao/resultados/
+reports/
