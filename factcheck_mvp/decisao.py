@@ -35,14 +35,17 @@ Fórmula (log-odds, prior neutro L0 = 0), por afirmação a:
           ficam em `descontos_temporais`.
     voto do cluster = sinal(Σ contrib dos itens) * max(|contrib| dos itens que concordam)
     L_a       = Σ_clusters voto  (um cluster = um voto: republicação não soma)
-    p_texto   = 1 − Π_a (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se QUALQUER parte for)
-    L         = logit(p_texto)          (0 se nenhuma afirmação tem voto)
+    p_texto   = 1 − Π_{a: L_a ≥ 0} (1 − σ(L_a))   (conjunção, D2: o texto é desinformação se alguma
+                parte contestada for; só partes contestadas ou divididas somam, decisão de 09/10)
+    L         = logit(p_texto)  (max(L_a) se nenhuma parte tem L_a ≥ 0; 0 se nenhuma tem voto)
     p         = σ(L)  (probabilidade de desinformação, só informativa)
 
-Conjunção (D2): só afirmações COM voto (n_votos > 0) entram no produto. Afirmação sem voto
-fica fora (ausência de evidência não é evidência); votos que se anulam (L_a = 0) entram com
-p = 0,5. Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal) usa o mesmo
-critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
+Conjunção (D2, decisão da usuária 09/10: só partes contestadas somam). Entram no produto só as
+afirmações COM voto (n_votos > 0) com L_a ≥ 0 (contestadas, ou divididas com L_a = 0). Uma
+afirmação confirmada (L_a < 0) não soma: confirmações nunca dão alta. Se nenhuma parte tem
+L_a ≥ 0, L = max(L_a), a confirmação mais fraca. Afirmação sem voto fica fora (ausência de
+evidência não é evidência). Com uma afirmação, L = L_a. O contrafactual (sem desconto temporal)
+usa o mesmo critério sobre os votos brutos. Ver `_combinar_afirmacoes`.
 T7 (E4 × D2): com 2+ afirmações com voto, sai do produto a afirmação cujos votos vêm SÓ de
 fontes fora da janela (descontadas) e cujo |L_a| < τ ("só evidência de outro período" em
 `por_afirmacao[i]`): evidência de outro episódio que não chega a um nível não informa o fato
@@ -68,8 +71,8 @@ Consequências: 1 fonte curada sozinha (w=1,0) → média (não satura); 2 clust
 concordes → alta/baixa; 1 selo do índice aplicável (1,5) → alta/baixa; fontes em
 conflito → média. Sinais `fallback-*` (sem juiz) são ignorados. Ausência de
 evidência não é evidência: nada empurra o nível sem uma fonte com postura.
-Conjunção: uma parte com L ≥ τ e outra com L ≤ −τ dão alta, e a justificativa cita as duas
-partes; a parte verdadeira não apaga a falsa (L ≥ max L_a).
+Conjunção: uma parte com L ≥ τ (contestada) e outra com L ≤ −τ (confirmada) dão alta, e a
+justificativa cita as duas partes; a confirmação não apaga a contestação (L ≥ max L_a).
 
 A justificativa, o header e o why são gerados DO MESMO objeto `Decisao`.
 """
@@ -482,21 +485,33 @@ def _clusters_com_voto(clusters: Dict[str, List[tuple]]) -> int:
 
 
 def _combinar_afirmacoes(valores: List[float]) -> float:
-    """Conjunção entre afirmações (D2): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto).
+    """Conjunção entre afirmações (D2, com a decisão da usuária de 09/10: só partes contestadas somam).
 
-    `valores` são os L_a só das afirmações COM voto (quem chama filtra: ausência de evidência
-    não entra no produto; no caminho com desconto, sai também a só-descontada com |L_a| < τ,
-    T7, ver `decidir`). Lista vazia → 0. Uma parte só → o próprio L_a, porque σ e logit se
-    cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
+    `valores` são os L_a das afirmações COM voto (quem chama tira as que não contam: sem voto e a
+    só-descontada de T7, ver `decidir`). Só entram no produto as partes com L_a ≥ 0 (contestadas e
+    divididas, com L_a = 0): p_texto = 1 − Π(1 − σ(L_a)) e L = logit(p_texto). Uma confirmação
+    (L_a < 0) não soma, então confirmações nunca dão alta. Se nenhuma parte tem L_a ≥ 0,
+    L = max(L_a): a confirmação mais fraca. Lista vazia → 0; uma parte só → o próprio L_a, porque σ
+    e logit se cancelam (atalho exato, sem o clamp de p). No ramo geral, 1 − σ(L) = σ(−L) (sem
     cancelamento) e p é limitado em [1e-12, 1 − 1e-12] antes do logit.
-    Propriedade: L ≥ max(L_a); duas partes com p≈0,7 cada dão p_texto≈0,91.
+    Propriedades: L ≥ max(valores) (a parte falsa não some por causa de parte verdadeira); com só
+    confirmações, L ≤ max < 0. Caso (b) do T7: p≈0,70 (falsa) + p≈0,10 (verdadeira) dão L = logit(0,70)
+    ≈ 0,85, isto é, média. Duas partes contestadas com p≈0,70 cada dão p_texto≈0,91.
+    Comportamento conhecido: duas partes divididas (L_a = 0) dão p_texto = 0,75, então L = τ e o
+    nível é alta. Pela decisão de 09/10, L = 0 conta como contestada; o teste documenta isso e não
+    muda o critério.
     """
     if not valores:
         return 0.0
     if len(valores) == 1:
         return valores[0]
-    descrenca = 1.0  # Π(1 − σ(L_a))
-    for L_a in valores:
+    contestadas = [v for v in valores if v >= 0]
+    if not contestadas:
+        return max(valores)
+    if len(contestadas) == 1:
+        return contestadas[0]  # σ e logit se cancelam: o L da única parte contestada
+    descrenca = 1.0  # Π(1 − σ(L_a)) sobre as contestadas
+    for L_a in contestadas:
         descrenca *= _sig(-L_a)
     p = min(max(1.0 - descrenca, 1e-12), 1.0 - 1e-12)
     return math.log(p / (1.0 - p))
@@ -534,8 +549,9 @@ def decidir(ev: Evidencias) -> Decisao:
                               "f_postura_por_nivel": dict(confiabilidade.FATOR_POSTURA),
                               "f_veredito_por_nivel": dict(confiabilidade.FATOR_VEREDITO),
                               "postura": "W_POSTURA·f_fonte·(1−prob_fake_pagina)",
-                              "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre afirmações com voto; "
-                                             "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto")})
+                              "combinacao": ("conjuncao: 1−Π(1−σ(L_a)) sobre as partes com L_a≥0 (com voto); "
+                                             "sem as só-descontadas (E4) com |L_a|<τ, se 2+ com voto; "
+                                             "se nenhuma parte é ≥0, max(L_a)")})
     julgados = [i for i in ev.itens if i.classe is not None and not (i.motor or "").startswith("fallback")]
     dec.contagem = {
         "consultadas": ev.n_consultadas, "lidas": ev.n_lidas, "julgadas": len(julgados),
@@ -602,9 +618,9 @@ def decidir(ev: Evidencias) -> Decisao:
         so_descontada[a_idx] = (contribuiu_descontado and not contribuiu_atual) or cortou_so
         dec.por_afirmacao.append({"afirmacao": af.texto, "nucleo": af.nucleo, "polaridade": af.polaridade,
                                   "L": round(L_a, 4), "n_votos": n_votos[a_idx]})
-    # combinação entre afirmações (D2, conjunção): o texto é desinformação se QUALQUER parte for.
-    # "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o mesmo critério sobre
-    # os votos brutos, isto é, o caso sem o desconto temporal.
+    # combinação entre afirmações (D2, conjunção; decisão 09/10: só partes contestadas somam, ver
+    # `_combinar_afirmacoes`). "Sem voto" (n_votos == 0) fica fora do produto. O contrafactual usa o
+    # mesmo critério sobre os votos brutos, isto é, o caso sem o desconto temporal.
     # T7 (E4 × D2): também fica fora a afirmação só com fontes fora da janela (descontadas) cujo
     # |L_a| (já com a trava de confiabilidade) ficou abaixo de τ: evidência de outro episódio que,
     # sozinha, não chega a um nível não informa o fato atual. Só vale com 2+ afirmações com voto;

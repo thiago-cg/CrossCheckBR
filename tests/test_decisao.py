@@ -775,12 +775,15 @@ def test_t7_parte_falsa_abaixo_do_tau_com_parte_verdadeira_forte_nao_baixa():
 
 
 def test_t7_formula_da_conjuncao_com_os_numeros_do_spec():
-    """Números do spec: (b) p=0,70 e p=0,10 => p_texto=0,73 (media); (a) A=+2, B=-5 (alta)."""
-    valores = [math.log(0.7 / 0.3), math.log(0.1 / 0.9)]
-    assert decisao._combinar_afirmacoes(valores) == pytest.approx(_conj_ref(valores), abs=1e-9)
-    assert _conj_ref(valores) == pytest.approx(math.log(0.73 / 0.27), abs=1e-9)
-    assert decisao.nivel_de(decisao._combinar_afirmacoes(valores)) == "media"
-    assert decisao._combinar_afirmacoes([2.0, -5.0]) == pytest.approx(_conj_ref([2.0, -5.0]), abs=1e-9)
+    """Números do spec, com a decisão de 09/10 (só partes contestadas somam). (b) p=0,70 (contestada) e
+    p=0,10 (confirmada): só a contestada entra, L = logit(0,70) ≈ 0,85 → média. Duas contestadas seguem o
+    produto 1 − Π(1 − σ(L_a)). (a) A=+2 (contestada) e B=−5 (confirmada): L = 2 → alta."""
+    contestada, confirmada = math.log(0.7 / 0.3), math.log(0.1 / 0.9)
+    assert decisao._combinar_afirmacoes([contestada, confirmada]) == pytest.approx(contestada, abs=1e-9)
+    assert decisao.nivel_de(decisao._combinar_afirmacoes([contestada, confirmada])) == "media"
+    duas = [math.log(0.7 / 0.3), math.log(0.6 / 0.4)]
+    assert decisao._combinar_afirmacoes(duas) == pytest.approx(_conj_ref(duas), abs=1e-9)
+    assert decisao._combinar_afirmacoes([2.0, -5.0]) == pytest.approx(2.0, abs=1e-9)
     assert decisao.nivel_de(decisao._combinar_afirmacoes([2.0, -5.0])) == "alta"
 
 
@@ -792,9 +795,16 @@ def test_t7_uma_afirmacao_devolve_o_mesmo_L(valor):
 
 
 @pytest.mark.parametrize("valor", [-4.0, -1.2, 0.3, 1.0, 2.5, 4.0])
-def test_t7_ramo_geral_reproduz_a_unica_parte_quando_a_outra_nao_pesa(valor):
-    """O caminho geral (produto + logit) bate com o L da parte única se a outra é fortemente confirmada."""
-    assert decisao._combinar_afirmacoes([valor, -40.0]) == pytest.approx(valor, abs=1e-6)
+def test_t7_confirmacao_forte_nao_entra_no_produto(valor):
+    """Decisão de 09/10: a confirmação (L=−40) não soma. A outra parte fica como está: contestada, o próprio
+    L; confirmada, o máximo, que é o L dela."""
+    assert decisao._combinar_afirmacoes([valor, -40.0]) == pytest.approx(valor, abs=1e-9)
+
+
+@pytest.mark.parametrize("valores", [[1.0, 0.5], [0.3, 2.5, 0.0], [0.9, 0.9]])
+def test_t7_ramo_geral_so_entre_contestadas(valores):
+    """O produto 1 − Π(1 − σ(L_a)) vale entre as partes contestadas (L ≥ 0); a confirmação não entra."""
+    assert decisao._combinar_afirmacoes(valores + [-40.0]) == pytest.approx(_conj_ref(valores), abs=1e-6)
 
 
 @pytest.mark.parametrize("valores", [[2.0, -5.0], [0.9, -2.3], [1.0, 1.0], [-3.0, -0.2], [0.5, 0.0, -4.0]])
@@ -823,13 +833,15 @@ def test_t7_afirmacao_sem_voto_fica_fora_do_produto():
 
 
 def test_t7_afirmacao_com_votos_que_se_anulam_tem_voto_e_entra_no_produto():
-    """Votos que se anulam (L=0) não são 'sem voto': a parte entra com p=0,5 (critério n_votos > 0)."""
+    """Votos que se anulam (L=0) não são 'sem voto' (n_votos > 0): a parte dividida conta como L_a ≥ 0
+    (decisão de 09/10). B, confirmada (L=−2), não soma: o texto fica no L da dividida, 0 (média)."""
     itens = [_it("https://g1.globo.com/a", "SUSTENTA", cluster="g1", af=0),
              _it("https://estadao.com.br/a", "REFUTA", cluster="estadao", af=0)]
     itens += [_it(f"https://{d}/b", "SUSTENTA", cluster=d, af=1) for d in ("bbc.com", "folha.uol.com.br")]
     d = decidir(_ev_afs(itens, ["A", "B"]))
     assert d.por_afirmacao[0]["L"] == 0 and d.por_afirmacao[0]["n_votos"] == 2
-    assert d.log_odds == pytest.approx(_conj_ref([0.0, -2.0]), abs=1e-4)
+    assert d.por_afirmacao[1]["L"] == pytest.approx(-2.0)
+    assert d.log_odds == 0 and d.nivel == "media"
 
 
 def test_t7_contrafactual_usa_votos_brutos_quando_o_desconto_zera_uma_afirmacao(monkeypatch):
@@ -849,7 +861,8 @@ def test_t7_contrafactual_usa_votos_brutos_quando_o_desconto_zera_uma_afirmacao(
     assert d.descontos_temporais and d.por_afirmacao[0]["n_votos"] == 0
     assert d.nivel == "baixa" and d.log_odds == pytest.approx(-5.0)
     assert d.nivel_sem_desconto == "alta"
-    assert d.log_odds_sem_desconto == pytest.approx(_conj_ref([2.0, -5.0]), abs=1e-3)
+    # decisão de 09/10: no contrafactual só a contestada (A, +2) soma; a confirmada (B, −5) não entra
+    assert d.log_odds_sem_desconto == pytest.approx(2.0, abs=1e-3)
 
 
 def test_t7_citacao_com_expressao_proibida_vira_numero_e_o_texto_segue_neutro():
@@ -863,6 +876,71 @@ def test_t7_citacao_com_expressao_proibida_vira_numero_e_o_texto_segue_neutro():
     j = d.justificativa()
     assert "a afirmação 1" in j and "é falso" not in j.lower()
     assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
+# ------------------------------------------------------------------ D-a (09/10): só partes contestadas somam
+def test_t7_cinco_confirmadas_com_uma_fonte_cada_nao_dao_alta():
+    """Caso do revisor: 5 afirmações, cada uma confirmada por 1 curada, nenhuma contestada. Antes o produto dava
+    alta (L≈+1,33, '0 fontes contestam e 5 confirmam'). Agora só confirmações: L = max = −1,0, que é média."""
+    itens = [_it(f"https://fonte{k}.com.br/a", "SUSTENTA", cluster=f"f{k}", af=k) for k in range(5)]
+    d = decidir(_ev_afs(itens, [f"Afirmacao {k}" for k in range(5)]))
+    assert d.log_odds == pytest.approx(-1.0) and d.nivel == "media"
+    assert d.n_clusters(+1) == 0 and d.n_clusters(-1) == 5
+
+
+def test_t7_cinco_confirmadas_com_duas_fontes_cada_dao_baixa():
+    """Com 2 curadas por afirmação (L = −2,0 cada), as cinco confirmam e o nível é baixa, pela confirmação mais fraca."""
+    itens = [_it(f"https://f{k}-{j}.com.br/x", "SUSTENTA", cluster=f"f{k}-{j}", af=k) for k in range(5) for j in range(2)]
+    d = decidir(_ev_afs(itens, [f"Afirmacao {k}" for k in range(5)]))
+    assert d.log_odds == pytest.approx(-2.0) and d.nivel == "baixa"
+
+
+@pytest.mark.parametrize("n", list(range(1, 13)))
+def test_t7_so_confirmacoes_nunca_dao_alta(n):
+    """Propriedade (decisão de 09/10): só confirmações nunca dão alta, com qualquer número de partes e qualquer
+    mistura de pesos. Cada afirmação recebe 1 a 3 fontes confirmando (curada −1,0; institucional −0,6;
+    baixo tráfego −0,3). O texto é baixa ou média, e o L é o da confirmação mais fraca."""
+    def fontes(k):
+        return [_it(f"https://c{k}.com.br/a", "SUSTENTA", cluster=f"c{k}", af=k),
+                _it_nivel(f"https://i{k}.gov.br/a", "SUSTENTA", confiabilidade.INSTITUCIONAL, af=k, cluster=f"i{k}"),
+                _it_nivel(f"https://b{k}.com/a", "SUSTENTA", confiabilidade.BAIXO_TRAFEGO, af=k, cluster=f"b{k}")]
+    itens = [it for k in range(n) for it in fontes(k)[: 1 + (k % 3)]]
+    d = decidir(_ev_afs(itens, [f"Afirmacao {k}" for k in range(n)]))
+    assert all(p["L"] < 0 for p in d.por_afirmacao)
+    assert d.log_odds < 0 and d.nivel in ("media", "baixa")
+    assert d.log_odds == pytest.approx(max(p["L"] for p in d.por_afirmacao), abs=1e-4)
+
+
+@pytest.mark.parametrize("valores", [[-0.3, -1.0], [-2.5, -0.1, -4.0], [-1.0] * 12])
+def test_t7_so_confirmacoes_nao_dao_alta_na_funcao(valores):
+    """Mesma propriedade na função: com L_a < 0 em todas as partes, o resultado é max(L_a), sempre < τ."""
+    assert decisao._combinar_afirmacoes(valores) == pytest.approx(max(valores))
+    assert decisao.nivel_de(decisao._combinar_afirmacoes(valores)) != "alta"
+
+
+def test_t7_duas_partes_divididas_dao_alta_comportamento_conhecido():
+    """Comportamento conhecido (decisão de 09/10): L = 0 conta como contestada. Duas partes divididas (um voto a
+    favor e um contra cada) dão p_texto = 1 − 0,5·0,5 = 0,75, isto é, L = τ, e o nível é alta. Documentado aqui;
+    o critério não muda nesta rodada."""
+    itens = [_it("https://g1.globo.com/a", "SUSTENTA", cluster="g1", af=0),
+             _it("https://estadao.com.br/a", "REFUTA", cluster="estadao", af=0),
+             _it("https://bbc.com/b", "SUSTENTA", cluster="bbc", af=1),
+             _it("https://folha.uol.com.br/b", "REFUTA", cluster="folha", af=1)]
+    d = decidir(_ev_afs(itens, ["A", "B"]))
+    assert d.por_afirmacao[0]["L"] == 0 and d.por_afirmacao[1]["L"] == 0
+    assert d.log_odds == pytest.approx(decisao.TAU, abs=1e-4) and d.nivel == "alta"
+
+
+def test_t7_parte_dividida_entra_no_produto_ao_lado_da_contestada():
+    """Consequência de L_a ≥ 0 entrar no produto (decisão de 09/10): a dividida (L=0, p=0,5) soma com a contestada
+    (A, L=+1,0): p_texto = 1 − 0,5·σ(−1,0) ≈ 0,866 e L ≈ 1,86, alta. Sem a dividida, o L seria 1,0 (média)."""
+    itens = [_it("https://g1.globo.com/a", "SUSTENTA", cluster="g1", af=0),
+             _it("https://estadao.com.br/a", "REFUTA", cluster="estadao", af=0),
+             _it("https://bbc.com/b", "REFUTA", cluster="bbc", af=1)]
+    d = decidir(_ev_afs(itens, ["A dividida", "B contestada"]))
+    assert d.por_afirmacao[0]["L"] == 0 and d.por_afirmacao[1]["L"] == pytest.approx(1.0)
+    assert d.log_odds == pytest.approx(_conj_ref([0.0, 1.0]), abs=1e-4)
+    assert d.log_odds == pytest.approx(1.8614, abs=1e-3) and d.nivel == "alta"
 
 
 # ------------------------------------------------------------------ T7 + E4: só evidência descontada fora da conjunção
@@ -893,14 +971,16 @@ def test_t7_so_evidencia_descontada_sai_da_conjuncao(monkeypatch):
     assert "fora_da_conjuncao" not in d.por_afirmacao[0]
     assert d.log_odds == pytest.approx(-3.0) and d.nivel == "baixa"
     assert "E4" in d.parametros["combinacao"]
-    # o contrafactual (sem desconto) não muda: lá B conta com o voto bruto (REFUTA, +1)
-    assert d.log_odds_sem_desconto == pytest.approx(_conj_ref([-3.0, 1.0]), abs=1e-3)
+    # o contrafactual (sem desconto) usa o mesmo critério (decisão de 09/10): lá B conta com o voto bruto
+    # (REFUTA, +1, contestada) e é a única parte que soma; A, confirmada (−3), não entra
+    assert d.log_odds_sem_desconto == pytest.approx(1.0, abs=1e-3)
     assert {x["afirmacao"] for x in d.descontos_temporais} == {1}
 
 
 def test_t7_votos_atuais_que_se_anulam_continuam_no_produto():
-    """Disputa real dentro da janela: B tem uma REFUTA e uma SUSTENTA atuais (L_b=0, n_votos=2).
-    Entra no produto com p=0,5: o texto fica media, não baixa."""
+    """Disputa real dentro da janela: B tem uma REFUTA e uma SUSTENTA atuais (L_b=0, n_votos=2). A parte
+    dividida é contestada (L ≥ 0) e entra no produto; A, confirmada (−3), não soma (decisão de 09/10).
+    O texto fica média, não baixa."""
     a = [_it(f"https://{dom}/a", "SUSTENTA", cluster=dom, af=0) for dom in ("g1.globo.com", "estadao.com.br", "bbc.com")]
     b = [_it_datada("https://uol.com.br/b", "REFUTA", "2026-10-08", af=1, cluster="uol"),
          _it_datada("https://folha.uol.com.br/b", "SUSTENTA", "2026-10-08", af=1, cluster="folha")]
@@ -909,7 +989,7 @@ def test_t7_votos_atuais_que_se_anulam_continuam_no_produto():
     assert d.por_afirmacao[1]["L"] == 0 and d.por_afirmacao[1]["n_votos"] == 2
     assert "fora_da_conjuncao" not in d.por_afirmacao[1]
     assert d.nivel == "media"
-    assert d.log_odds == pytest.approx(_conj_ref([-3.0, 0.0]), abs=1e-4)
+    assert d.log_odds == pytest.approx(0.0, abs=1e-4)
 
 
 def test_t7_so_descontada_forte_e_cortada_e_sai_da_conjuncao(monkeypatch):
