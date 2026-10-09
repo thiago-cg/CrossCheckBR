@@ -217,6 +217,12 @@ def _urls_nao_analisadas(rel) -> set:
         return set()
 
 
+# B1a: o raciocínio do avaliador vira uma linha por fonte. A EXIBIÇÃO do bot corta em
+# RACIOCINIO_MAX_BOT chars (com "…"), o mesmo alvo (~240) que o prompt pede ao avaliador:
+# só corta resposta fora do contrato. O dado em Fonte é inteiro, e a web mostra inteiro.
+RACIOCINIO_MAX_BOT = 240
+
+
 def formatar(rel: RelatorioChecagem) -> str:
     emoji = {"baixa": "🟢", "media": "🟡", "alta": "🔴", "indeterminada": "⚪"}.get(rel.propensao, "⚪")
     header = getattr(rel, "header", "") or f"{emoji} Propensão {rel.propensao.upper()}"
@@ -243,7 +249,7 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import direcoes_por_url, postura_legivel
+        from .agregador import direcoes_por_url, linha_raciocinio, postura_legivel
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
@@ -283,6 +289,10 @@ def formatar(rel: RelatorioChecagem) -> str:
                     linhas.append(f"   📅 publicada em {_dtxt} · anterior ao período do texto")
                 else:
                     linhas.append("   📅 anterior ao período do texto")
+            # B1a: porquê do avaliador, atribuído; só quando há raciocínio.
+            _rac = linha_raciocinio(getattr(f, "raciocinio", None), limite=RACIOCINIO_MAX_BOT)
+            if _rac:
+                linhas.append(f"   {_rac}")
         if len(uteis) > 3:
             linhas.append(f"+{len(uteis)-3} fonte(s) no relatório completo.")
         linhas.append("")
