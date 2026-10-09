@@ -221,6 +221,8 @@ def _urls_nao_analisadas(rel) -> set:
 # RACIOCINIO_MAX_BOT chars (com "…"), o mesmo alvo (~240) que o prompt pede ao avaliador:
 # só corta resposta fora do contrato. O dado em Fonte é inteiro, e a web mostra inteiro.
 RACIOCINIO_MAX_BOT = 240
+# Teto de caracteres de uma mensagem do bot (folga sobre o limite de 4096 do Telegram).
+LIMITE_TELEGRAM = 3900
 
 
 def formatar(rel: RelatorioChecagem) -> str:
@@ -319,7 +321,10 @@ def formatar(rel: RelatorioChecagem) -> str:
     linhas.append("Para avaliar você mesmo:")
     linhas += [f"• {p}" for p in rel.perguntas_guia[:3]]
     texto = "\n".join(linhas)
-    return texto[:3900].rsplit("\n", 1)[0]  # corta em quebra de linha, nunca no meio da URL
+    if len(texto) <= LIMITE_TELEGRAM:
+        return texto
+    # Acima do limite do Telegram: corta em quebra de linha, nunca no meio da URL.
+    return texto[:LIMITE_TELEGRAM].rsplit("\n", 1)[0]
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

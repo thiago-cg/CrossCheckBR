@@ -152,6 +152,21 @@ def test_bot_raciocinio_longo_e_cortado_so_na_exibicao():
     assert rel.fontes[0].raciocinio == longo  # o dado em Fonte não muda
 
 
+def test_bot_nao_corta_a_ultima_linha_quando_o_texto_cabe():
+    """Bug: `texto[:3900].rsplit("\\n", 1)[0]` tirava SEMPRE a última linha (a última pergunta-guia).
+    O corte só existe acima de 3900 caracteres."""
+    from factcheck_mvp.telegram_bot import formatar
+    rel = RelatorioChecagem(
+        propensao="alta", justificativa="Alta propensão de ser fake news.",
+        header="🔴 Alta propensão de ser fake news",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        perguntas_guia=["Pergunta um?", "Pergunta dois?", "Última pergunta-guia?"])
+    t = formatar(rel)
+    assert len(t) <= 3900
+    assert "• Última pergunta-guia?" in t
+    assert verificar_neutralidade(t) == []
+
+
 def test_bot_pior_caso_cabe_no_limite_e_mantem_o_fim():
     from factcheck_mvp.telegram_bot import formatar
     rac = "A página afirma que o café cura o câncer, citando um estudo de dois anos. " * 4  # > cap
