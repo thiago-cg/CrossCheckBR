@@ -117,3 +117,42 @@ def test_marco_do_evento_citada_ambigua_ou_futura_nao_ancora():
 def test_dias_excedentes_sem_marco_mantem_comportamento():
     assert aplicabilidade.dias_excedentes("recebeu alta hoje", "2026-10-01", "2026-10-09") == (2, 6)
     assert aplicabilidade.dias_excedentes("recebeu alta hoje", "2026-10-01", "2026-10-09", None) == (2, 6)
+
+
+# --- Task 5 (E4): gate E1 usa a mesma janela, referência e data da decisão (continua binário) ---
+def test_gate_usa_o_hoje_do_texto_quando_a_afirmacao_perdeu_o_marcador():
+    """O extrator pode reescrever a afirmação sem o "hoje": a janela vem do texto do usuário
+    (1 afirmação) e a checagem de 2025 não é aplicável a um fato de 2026-10-09."""
+    af = "Bolsonaro recebeu alta do hospital"
+    janela = aplicabilidade.janela_da_afirmacao(af, "Bolsonaro recebeu alta do hospital hoje", 1)
+    assert janela == 2
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", af, "2025-04-23",
+                                      "2026-10-09", janela) == (False, "data incompatível")
+
+
+def test_gate_sem_referencia_desconhecida_nao_barra_por_data():
+    af = "Bolsonaro recebeu alta do hospital"
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", af, "2025-04-23",
+                                      referencia=None, janela=2) == (True, "aplicável")
+
+
+def test_gate_janela_none_explicita_nao_herda_o_hoje_de_outra_frase():
+    """Afirmação sem marcador (janela None): o "hoje" de outra frase não barra a checagem."""
+    texto = "A ponte caiu em 2019. Bolsonaro recebeu alta do hospital hoje."
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "A ponte caiu em 2019", "2019-06-01",
+                                      referencia="2026-10-09", janela=None) == (True, "aplicável")
+    # sem `janela`, o E1 anterior continua: a janela vem do texto recebido
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", texto, "2025-04-23",
+                                      referencia="2026-10-09") == (False, "data incompatível")
+
+
+def test_gate_defaults_mantem_e1_sem_marcador():
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2020-01-01")[0] is True
+
+
+def test_dias_excedentes_da_janela_mede_com_janela_explicita():
+    assert aplicabilidade.dias_excedentes_da_janela(2, "2026-10-01", "2026-10-09") == (2, 6)
+    assert aplicabilidade.dias_excedentes_da_janela(2, "2026-10-08", "2026-10-09") == (2, 0)
+    assert aplicabilidade.dias_excedentes_da_janela(None, "2026-10-01", "2026-10-09") is None
+    assert aplicabilidade.dias_excedentes_da_janela(2, "2026-10-01", None) is None
+    assert aplicabilidade.dias_excedentes_da_janela(2, None, "2026-10-09") is None

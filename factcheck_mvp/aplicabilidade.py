@@ -126,6 +126,9 @@ def hoje_brt() -> str:
 
 #: Sentinela de `referencia` = "agora" (resolve para `hoje_brt()` na chamada).
 AGORA: object = object()
+#: Sentinela de `janela` em `e_aplicavel`: deriva a janela do texto recebido (compat E1).
+#: Distinta de None, que significa "a afirmação não tem marcador" (nunca herdar o do texto).
+JANELA_DO_TEXTO: object = object()
 
 
 def dias_excedentes(texto_usuario: str, data_pub: str | None,
@@ -150,7 +153,17 @@ def dias_excedentes(texto_usuario: str, data_pub: str | None,
         except (ValueError, TypeError, IndexError, AttributeError):
             return None
         return folga, max(0, (evento - data).days - folga)
-    janela = janela_temporal(texto_usuario)
+    return dias_excedentes_da_janela(janela_temporal(texto_usuario), data_pub, referencia)
+
+
+def dias_excedentes_da_janela(janela: int | None, data_pub: str | None,
+                              referencia: str | None = None) -> tuple[int, int] | None:
+    """(janela, dias além da janela) para UMA janela já resolvida (E4: a da afirmação).
+
+    None quando não dá para medir: sem janela (sem marcador), sem data ou data ilegível,
+    ou referência desconhecida (None; a sentinela `AGORA` = hoje BRT). É o núcleo das
+    medidas de data: `dias_excedentes` e o gate `e_aplicavel` passam por aqui.
+    """
     if janela is None or not data_pub:
         return None
     if referencia is None:
@@ -180,8 +193,18 @@ def e_aplicavel(
     veredito: str | None,
     texto_usuario: str,
     data_pub: str | None,
+    referencia: str | None = AGORA,  # type: ignore[assignment]
+    janela: object = JANELA_DO_TEXTO,
 ) -> tuple[bool, str]:
-    """Aplica as 5 regras em ordem; o primeiro False vence."""
+    """Aplica as 5 regras em ordem; o primeiro False vence.
+
+    Regra de data (E1, binária): barra se a fonte está além da janela (excedente > 0,
+    isto é, relevancia_temporal < 1; sem limiar). Usa as MESMAS entradas da decisão
+    (E4): `janela` da afirmação (`janela_da_afirmacao`; None = a afirmação não tem
+    marcador), `referencia` já resolvida (entrada → relógio → None) e `data_pub`
+    normalizada. `referencia=None` (desconhecida) não barra por data. Sem `janela`,
+    mantém o E1 anterior: a janela é a do próprio `texto_usuario`.
+    """
     if corpo_lido is False:
         return (False, "corpo não lido")
     if classe not in TRATA:
@@ -190,7 +213,9 @@ def e_aplicavel(
         return (False, "sem citação verificada")
     if direcao(veredito) == 0.0:
         return (False, "sem selo com direção")
-    if data_compativel(texto_usuario, data_pub) is False:
+    j = janela_temporal(texto_usuario) if janela is JANELA_DO_TEXTO else janela
+    medida = dias_excedentes_da_janela(j, data_pub, referencia)  # type: ignore[arg-type]
+    if medida is not None and medida[1] > 0:
         return (False, "data incompatível")
     return (True, "aplicável")
 
