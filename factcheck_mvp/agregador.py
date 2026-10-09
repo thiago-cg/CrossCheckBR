@@ -8,6 +8,7 @@ direção de selo por substring) foi removido.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 # Qualquer conclusão binária é proibida na saída (RF12). Varredura em testes.
@@ -37,10 +38,63 @@ _PERGUNTAS_GUIA = [
 ]
 
 
+# E5 (opção b): selo sempre atribuído à agência ("Selo da Lupa: FALSO");
+# a NOSSA conclusão continua em escala de propensão, nunca binária.
+_SELO_ATRIBUIDO_RE = re.compile(
+    r"selo\s+d[ao]\s+(?P<agencia>.+?)\s*:\s*(?P<selo>(?:(?!\bselo\s+d[ao]\b)[^.,;:])+)",
+    re.IGNORECASE,
+)
+
+_AGENCIAS_CHECAGEM: Optional[frozenset] = None
+
+
+def formatar_selo(agencia: str, selo: str, artigo: str = "da") -> str:
+    """Selo sempre atribuído à agência: "Selo da Lupa: FALSO"."""
+    if artigo not in ("da", "do"):
+        raise ValueError(f"artigo deve ser 'da' ou 'do', recebido: {artigo!r}")
+    return f"Selo {artigo} {(agencia or '').strip()}: {(selo or '').strip()}"
+
+
+def _agencias_checagem() -> frozenset:
+    """Nomes normalizados das agências de checagem do catálogo (lazy, com cache)."""
+    global _AGENCIAS_CHECAGEM
+    if _AGENCIAS_CHECAGEM is None:
+        nomes = set()
+        try:
+            from .catalogo import Catalogo, normalizar_nome
+            for p in Catalogo.carregar().checagem():
+                for n in [p.get("nome"), p.get("id")] + list(p.get("aliases_nome") or []):
+                    k = normalizar_nome(n)
+                    if k:
+                        nomes.add(k)
+        except Exception as e:
+            from . import telemetria
+            telemetria.fallback("agregador", f"catalogo indisponivel p/ selo atribuido: {e}")
+        _AGENCIAS_CHECAGEM = frozenset(nomes)
+    return _AGENCIAS_CHECAGEM
+
+
 def verificar_neutralidade(texto: str) -> List[str]:
-    """Retorna expressões proibidas encontradas (vazio = neutro)."""
-    base = (texto or "").lower()
-    return [e for e in EXPRESSOES_PROIBIDAS if e in base]
+    """Retorna expressões proibidas encontradas (vazio = neutro).
+
+    E5: o selo atribuído ("Selo da Lupa: FALSO", com agência do catálogo) é
+    citação, não veredito nosso — é ignorado. Selo em outro formato (agência
+    não cadastrada) é sinalizado com o trecho correspondente.
+    """
+    base = texto or ""
+    registradas = _agencias_checagem()
+
+    def _corta(m: re.Match) -> str:
+        from .catalogo import normalizar_nome
+        if normalizar_nome(m.group(1)) in registradas:
+            return " "
+        return m.group(0)
+
+    resto = _SELO_ATRIBUIDO_RE.sub(_corta, base)
+    achadas = [e for e in EXPRESSOES_PROIBIDAS if e in resto.lower()]
+    for m in _SELO_ATRIBUIDO_RE.finditer(resto):
+        achadas.append(m.group(0).strip())
+    return achadas
 
 
 def perguntas_guia() -> List[str]:
