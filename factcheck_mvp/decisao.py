@@ -163,7 +163,7 @@ class Voto:
     classes: List[str]
     vereditos: List[str]
     motivo: str
-    confiavel: bool = True     # algum item do cluster é curado, institucional ou muito acessado
+    confiavel: bool = True     # algum item ATUAL (não descontado por data) do cluster é curado, institucional ou muito acessado
 
 
 @dataclass
@@ -438,7 +438,8 @@ def _fator_credibilidade(it: ItemEvidencia) -> float:
 
 
 def _contribuicoes(it: ItemEvidencia, s: float, dec: Decisao) -> List[tuple]:
-    """(valor, descrição) de um item; registra vereditos aplicados/ignorados e conflitos."""
+    """(valor, descrição) de um item; registra vereditos aplicados/ignorados, conflitos, não analisadas
+    (E3) e posturas fracas (D-c: postura com menos de 5% do peso, não vota)."""
     if (it.motor or "").startswith("fallback") or it.classe is None:
         if it.veredito:
             dec.vereditos_ignorados.append({"url": it.url, "veredito": it.veredito,
@@ -536,7 +537,7 @@ def _agregar(clusters: Dict[str, List[tuple]], a_idx: int, dec: Decisao, registr
     # Duas travas leem o MESMO L_a bruto e cortam para o MESMO 0,99τ: idempotentes, então a ordem
     # não muda o nível nem as flags; cada flag é registrada quando a própria condição vale.
     # 1) sem_fonte_confiavel: fontes pouco confiáveis (rede social, site pouco acessado) votam, mas
-    #    sozinhas não cravam alta/baixa: sem ao menos 1 voto confiável no mesmo sentido, fica na média.
+    #    sozinhas não cravam alta/baixa: sem ao menos 1 voto de fonte confiável ATUAL no mesmo sentido, fica na média.
     # 2) so_fontes_de_outro_periodo (E4, só com `atuais`): nenhum voto na direção de L_a tem
     #    contribuição de item NÃO descontado; o extremo é só de fonte de outro período.
     corta_sem = corta_so = False
