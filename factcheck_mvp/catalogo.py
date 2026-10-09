@@ -37,6 +37,22 @@ STATUS_CURADO = "curado"
 STATUS_CANDIDATO = "candidato"
 _ORIGENS_CANDIDATAS = frozenset({"descoberta-automatica"})
 
+# Primeira etiqueta de subdomínios de participação do leitor (comentários, fóruns,
+# comunidades): conteúdo gerado pelo usuário, não redação — não herdam a curadoria
+# do portal (ex.: comentarios1.folha.uol.com.br ≠ Folha curada). Vale p/ qualquer
+# portal (regra geral); prefixo explicitamente declarado no catálogo vence.
+_UGC_SUBDOMINIO_RE = re.compile(
+    r"^(comentarios?|comments?|forums?|foruns?|comunidades?|communit(y|ies)|leitores?|readers?)\d*$",
+    re.I)
+
+
+def _eh_subdominio_ugc(host: str, declarados: Optional[set] = None) -> bool:
+    """True se o host é subdomínio UGC não declarado (primeira etiqueta de leitor)."""
+    host = (host or "").lower()
+    if not host or not _UGC_SUBDOMINIO_RE.match(host.split(".")[0]):
+        return False
+    return host not in (declarados or set())
+
 
 def _dominio(url_ou_nome: str) -> str:
     texto = (url_ou_nome or "").strip().lower()
@@ -172,9 +188,14 @@ class Catalogo:
     def por_url(self, url: str, apenas_curados: bool = False) -> Optional[Dict[str, Any]]:
         """URL -> portal pelo prefixo mais específico (host, depois caminho) da homepage
         ou de um alias. Sem prefixo: domínio registrável, se um único portal o usa
-        (globo.com/uol.com.br são compartilhados -> None)."""
+        (globo.com/uol.com.br são compartilhados -> None).
+        Subdomínio de participação do leitor (comentarios*, forum*, ...) não roteia
+        para o portal — salvo prefixo declarado — pois "curada" exige host exato
+        ou prefixo declarado, não herança por curinga de subdomínio."""
         host, caminho = _host_caminho(url)
         if not host:
+            return None
+        if _eh_subdominio_ugc(host, {h for h, _, _ in self._prefixos}):
             return None
         melhor, chave_melhor = None, (-1, -1)
         for h, c, portal in self._prefixos:
@@ -195,12 +216,16 @@ class Catalogo:
         return next(iter(donos.values())) if len(donos) == 1 else None
 
     def por_dominio(self, url_ou_dominio: str) -> Optional[Dict[str, Any]]:
-        """Roteia URL/dominio -> portal. Inclui match por sufixo (subdomínios) e aliases."""
+        """Roteia URL/dominio -> portal. Inclui match por sufixo (subdomínios) e aliases.
+        Subdomínio UGC não herda pelo sufixo (mesma regra de `por_url`); host exato
+        declarado continua valendo."""
         dom = _dominio(url_ou_dominio)
         if not dom:
             return None
         if dom in self._por_dominio:
             return self._por_dominio[dom]
+        if _eh_subdominio_ugc(dom, set(self._por_dominio)):
+            return None
         for conhecido, portal in self._por_dominio.items():
             if dom.endswith("." + conhecido):
                 return portal

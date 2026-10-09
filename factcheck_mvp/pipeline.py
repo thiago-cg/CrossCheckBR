@@ -52,6 +52,13 @@ OPINIAO_SATIRA_RE = re.compile(r"\b(opinião|opina|coluna|editorial|charge|humor
 # Claim vago (round C): comparativo sem métrica/período não é falsificável
 # ("só piorou" — qual indicador? quando?). Pede especificação, não busca lixo.
 VAGO_RE = re.compile(r"\b(piorou|piora|pior|melhorou|melhora|melhor|cada vez (pior|melhor))\b", re.I)
+# B5: o comparativo vago só trava quando o SUJEITO é genérico (entidade coletiva
+# sem referente contável: economia, país, governo, vida, situação). Sujeito
+# específico (fármaco, doença, pessoa) é checável mesmo com "piora/melhora"
+# ("Ibuprofeno piora o quadro de dengue" tem referente verificável).
+SUJEITO_GENERICO_RE = re.compile(
+    r"\b(economia|pa[íi]s(es)?|brasil|na[çc][ãa]o(es)?|governos?|gest[ãa]o|administra[çc][ãa]o|"
+    r"vida|situa[çc][ãa]o|cen[áa]rio|momento|tudo|coisas?)\b", re.I)
 INDICADOR_RE = re.compile(
     r"\d|\b(pib|infla\w*|ipca|igp-?m|desemprego|emprego|renda|sal[aá]rio\w*|"
     r"juros|selic|d[oó]lar|c[âa]mbio|bolsa|ibovespa|pobreza|fome|crescimento|"
@@ -262,7 +269,9 @@ class Pipeline:
         texto_base = entrada.conteudo.strip()
         eh_rumor = bool(RUMOR_RE.search(texto_base))
         eh_opiniao = bool(OPINIAO_SATIRA_RE.search(texto_base[:500]))
-        eh_vago = bool(VAGO_RE.search(texto_base[:500])) and not INDICADOR_RE.search(texto_base[:800])
+        eh_vago = (bool(VAGO_RE.search(texto_base[:500]))
+                   and bool(SUJEITO_GENERICO_RE.search(texto_base[:500]))
+                   and not INDICADOR_RE.search(texto_base[:800]))
         if eh_rumor:
             limitacoes.append("Relato de segunda-mão sem fonte verificável: busca feita sobre o núcleo factual.")
         if eh_opiniao:
