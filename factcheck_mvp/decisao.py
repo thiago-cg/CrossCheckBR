@@ -78,6 +78,9 @@ F_VEREDITO_NAO_CURADA = confiabilidade.FATOR_VEREDITO[confiabilidade.ALTO_TRAFEG
 
 CLASSES_VOTO = ("SUSTENTA", "REFUTA")
 CLASSES_TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
+# Trecho do `motivo` de `decidir` quando o desconto temporal zera a evidência (indeterminada):
+# a justificativa e o why já trazem o aviso de data por esse motivo (ver `_motivo_avisa_data`).
+_MARCA_OUTRO_EPISODIO = "outro episódio"
 
 
 @dataclass
@@ -170,6 +173,11 @@ class Decisao:
         """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
         return len({x.get("url") for x in self.descontos_temporais if x.get("url")})
 
+    def _motivo_avisa_data(self) -> bool:
+        """Indeterminada cujo motivo já é o aviso de data (desconto zerou a evidência): o bloco E4
+        da justificativa e o sufixo do why não repetem o aviso."""
+        return self.nivel == "indeterminada" and _MARCA_OUTRO_EPISODIO in self.motivo
+
     def limitacao_datas(self) -> str:
         """Limitação neutra sobre datas (o bot mostra as 3 primeiras; o pipeline a põe no início)."""
         n = self.n_fontes_descontadas()
@@ -223,7 +231,7 @@ class Decisao:
                          if c.get("citacao_invalida") else "")
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
         # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
-        if self.travas.get("data_incompativel") and self.descontos_temporais:
+        if self.travas.get("data_incompativel") and self.descontos_temporais and not self._motivo_avisa_data():
             n_dt = self.n_fontes_descontadas()
             if n_dt == 1:
                 partes.append("1 fonte foi publicada antes do período que o texto descreve "
@@ -251,7 +259,8 @@ class Decisao:
             if conflito:
                 base += " " + conflito
         # E4 Task 6: sufixo curto só quando o desconto mudou o nível (neutro, sobre datas).
-        if self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto:
+        if (self.travas.get("data_incompativel") and self.nivel != self.nivel_sem_desconto
+                and not self._motivo_avisa_data()):
             base += " Datas anteriores ao período do texto tiveram o peso reduzido."
         return base
 

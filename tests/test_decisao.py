@@ -328,6 +328,21 @@ def test_e4_tudo_descontado_motivo_fala_de_periodo(monkeypatch):
     assert "outro episódio" in d.motivo and "se anulam" not in d.motivo
 
 
+def test_e4_aviso_nao_se_repete_quando_o_desconto_leva_a_indeterminada(monkeypatch):
+    """O motivo já diz 'outro episódio' e 'recirculando'; a justificativa e o why não repetem."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
+    itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-01-01")
+             for d in ("g1.globo.com", "bbc.com")]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "indeterminada" and "outro episódio" in d.motivo
+    j = d.justificativa()
+    assert j.count("outro episódio") == 1 and j.count("recirculando") == 1
+    assert "Datas anteriores" not in d.why_1linha()
+    assert d.why_1linha().count("outro episódio") == 1
+    assert verificar_neutralidade(f"{d.header()} {d.why_1linha()} {j}") == []
+
+
 def test_e4_motivo_so_quando_o_desconto_muda_o_nivel(monkeypatch):
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     recente = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,
