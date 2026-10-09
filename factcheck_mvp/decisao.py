@@ -524,7 +524,7 @@ def decidir(ev: Evidencias) -> Decisao:
     dec.log_odds_sem_desconto = round(L_sem, 4)
     dec.nivel_sem_desconto = nivel_de(L_sem)
     dec.prob = round(_sig(L), 4)
-    dec.parametros["e4"] = {"janelas": dict(aplicabilidade._JANELAS),
+    dec.parametros["e4"] = {"janelas": aplicabilidade.janelas_efetivas(),
                             "formula": "sinal·ln(r·e^|c| + 1 − r)"}
 
     # elegibilidade (antes: travas espalhadas no pipeline)

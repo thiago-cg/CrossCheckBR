@@ -70,6 +70,49 @@ def test_normalizar_data_desconhecida_vira_none(valor):
 def test_janela_marcadores(texto, janela):
     assert aplicabilidade.janela_temporal(texto) == janela
 
+@pytest.mark.parametrize("texto,janela", [
+    # falsos positivos excluídos: "há pouco mais de N…" é quantidade, e "nos dias de hoje" é
+    # a mesma classe de "hoje em dia" (não marca o momento do fato)
+    ("Há pouco mais de dez anos o país mudou", None),
+    ("Nos dias de hoje ninguém lê jornal impresso", None),
+    # lacunas da mesma razão linguística das já existentes (semana / fim de semana / mês)
+    ("Neste final de semana houve jogo", 8),
+    ("Este domingo houve apagão em SP", 8),
+    ("Esta segunda-feira o STF decidiu", 8),
+    ("Esta semana o governo anunciou o pacote", 8),
+    ("Nessa segunda o presidente viajou", 8),
+    ("Nesse domingo houve apagão", 8),
+    ("Na última semana o dólar caiu", 15),   # = "semana passada": mesmo período (semana anterior)
+    ("Agora, em outubro, a inflação subiu", 32),
+    ("Agora em outubro a inflação subiu", 32),
+    ("Nesse mês houve queda da renda", 32),
+    # "segunda" ordinal não é dia da semana
+    ("Esta segunda parte do documentário é ruim", None),
+])
+def test_janela_marcadores_exclusoes_e_lacunas(texto, janela):
+    assert aplicabilidade.janela_temporal(texto) == janela
+
+
+def test_config_janela_invalida_cai_no_default_e_avisa(monkeypatch):
+    from factcheck_mvp import config
+    for bruto in ("0", "-3", "abc"):
+        monkeypatch.setenv("X_TESTE_JANELA_E4", bruto)
+        avisos = []
+        assert config._janela_positiva("X_TESTE_JANELA_E4", 2, avisos=avisos) == 2
+        assert len(avisos) == 1 and "X_TESTE_JANELA_E4" in avisos[0]
+    monkeypatch.setenv("X_TESTE_JANELA_E4", "5")
+    avisos = []
+    assert config._janela_positiva("X_TESTE_JANELA_E4", 2, avisos=avisos) == 5 and not avisos
+
+
+def test_janelas_efetivas_vem_da_config(monkeypatch):
+    from factcheck_mvp import config
+    monkeypatch.setattr(config, "E4_JANELA_SEMANA", 11)
+    efetivas = aplicabilidade.janelas_efetivas()
+    assert efetivas["E4_JANELA_SEMANA"] == 11 and efetivas["E4_JANELA_HOJE"] == config.E4_JANELA_HOJE
+    assert aplicabilidade.janela_temporal("Nesta semana houve chuva") == 11
+
+
 def test_janela_por_afirmacao_nao_vaza_para_outra_frase():
     t = "O deputado disse hoje que a ponte caiu em 2019. A obra custou 2 bilhões."
     assert aplicabilidade.janela_da_afirmacao("A obra custou 2 bilhões", t, 2) is None

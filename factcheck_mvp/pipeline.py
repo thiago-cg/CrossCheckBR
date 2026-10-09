@@ -260,6 +260,8 @@ class Pipeline:
         from . import indice as _indice
         etapas: List[EtapaRecibo] = []
         limitacoes: List[str] = []
+        for aviso in config.AVISOS_CONFIG:  # E4: valor inválido no env cai no default, com rastro
+            telemetria.fallback("config", aviso)
 
         def etapa(nome: str, status: str, detalhe: str = "", fontes_urls: Optional[List[str]] = None):
             etapas.append(EtapaRecibo(nome=nome, status=status, detalhe=detalhe, fontes=fontes_urls or []))

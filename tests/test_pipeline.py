@@ -505,6 +505,22 @@ def test_pipeline_usa_data_referencia_da_entrada(amb, monkeypatch):
     assert "2026-01-15" in rec.detalhe and "origem: entrada" in rec.detalhe
 
 
+def test_config_invalida_vira_fallback_no_trace(amb, monkeypatch):
+    """Janela E4 inválida na config cai no default com aviso; o pipeline grava fallback("config")."""
+    from factcheck_mvp import telemetria as _tel
+    monkeypatch.setattr(config, "AVISOS_CONFIG", ["E4_JANELA_HOJE='0' inválido (esperado inteiro > 0); usando 2"])
+    capturados = []
+    _original = _tel.evento
+
+    def _espiar(tipo, /, **dados):
+        capturados.append((tipo, dados))
+        return _original(tipo, **dados)
+
+    monkeypatch.setattr(_tel, "evento", _espiar)
+    _rodar("Café cura câncer", [])
+    assert any(t == "fallback" and d.get("onde") == "config" for t, d in capturados)
+
+
 def test_data_da_pagina_substitui_data_textual_da_serpapi(amb, monkeypatch):
     """A string '11 de ago. de 2025' do Google não pode bloquear o datePublished ISO da página."""
     from factcheck_mvp.aprofundar import CorpoLido as _CorpoLido

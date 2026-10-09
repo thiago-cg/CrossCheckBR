@@ -14,64 +14,54 @@ from factcheck_mvp.selos import direcao
 # Classes do juiz que indicam que a checagem trata do fato alegado.
 TRATA = ("SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO")
 
-# Marcador literal normalizado (minúsculo, sem acento) -> (variável config.E4_JANELA_*, default em dias).
-_MARCADORES_JANELA = (
-    ("hoje", "E4_JANELA_HOJE", 2),
-    ("agora", "E4_JANELA_HOJE", 2),
-    ("acaba de", "E4_JANELA_HOJE", 2),
-    ("acabou de", "E4_JANELA_HOJE", 2),
-    ("ha pouco", "E4_JANELA_HOJE", 2),
-    ("ha instantes", "E4_JANELA_HOJE", 2),
-    ("ha poucas horas", "E4_JANELA_HOJE", 2),
-    ("agora ha pouco", "E4_JANELA_HOJE", 2),
-    ("ontem", "E4_JANELA_ONTEM", 3),
-    ("anteontem", "E4_JANELA_ANTEONTEM", 4),
-    ("nesta semana", "E4_JANELA_SEMANA", 8),
-    ("neste semana", "E4_JANELA_SEMANA", 8),
-    ("neste fim de semana", "E4_JANELA_SEMANA", 8),
-    ("semana passada", "E4_JANELA_SEMANA_PASSADA", 15),
-    ("neste mes", "E4_JANELA_MES", 32),
-    ("este mes", "E4_JANELA_MES", 32),
-)
-
-# Marcador normalizado (minúsculo, sem acento) -> janela em dias (da data atual UTC).
-# Compat: defaults literais (o valor efetivo vem de config.E4_JANELA_* em janela_temporal).
-_JANELAS = {marcador: default for marcador, _, default in _MARCADORES_JANELA}
-
-_JANELA_PADROES = tuple(
-    (re.compile(r"\b" + re.escape(marcador) + r"\b"), janela)
-    for marcador, janela in _JANELAS.items()
-)
-
-# Dia da semana normalizado (sem acento); "-feira"/" feira" opcionais.
+# Dia da semana normalizado (sem acento); "-feira"/" feira" opcionais. O lookahead exclui o
+# ordinal ("esta segunda parte", "a segunda vez"), que não é dia da semana.
 _SEMANA_DIA = (r"(?:domingo|segunda(?:-feira| feira)?|terca(?:-feira| feira)?|"
                r"quarta(?:-feira| feira)?|quinta(?:-feira| feira)?|"
-               r"sexta(?:-feira| feira)?|sabado)")
+               r"sexta(?:-feira| feira)?|sabado)"
+               r"(?!\s+(?:vez|parte|etapa|fase|tentativa|edicao|rodada|turno|onda)\b)")
+_DETERMINANTE_SEMANA = r"(?:neste|nesta|nesse|nessa|este|esta|esse|essa)"
 
-# Padrões sobre o texto normalizado -> (variável config.E4_JANELA_*, default em dias).
-_JANELA_REGEX = tuple(
-    (re.compile(padrao), variavel, default)
+# Marcadores relativos do TEXTO (E4): (padrão sobre o texto normalizado — minúsculo, sem acento —,
+# variável config.E4_JANELA_*, default em dias). Vale a menor janela achada. Cada um diz QUANDO o
+# fato ocorreu em relação a quem escreve.
+_MARCADORES = tuple(
+    (re.compile(r"\b(?:" + padrao + r")\b"), variavel, default)
     for padrao, variavel, default in (
-        (r"\b(esta|nesta)\s+(manha|tarde|noite|madrugada)\b", "E4_JANELA_HOJE", 2),
-        (r"\b(neste|nesta)\s+" + _SEMANA_DIA + r"\b", "E4_JANELA_SEMANA", 8),
-        (r"\b(na\s+ultima|no\s+ultimo)\s+" + _SEMANA_DIA + r"\b", "E4_JANELA_SEMANA", 8),
+        (r"hoje|agora|acaba de|acabou de|ha pouco|ha instantes|ha poucas horas|agora ha pouco|"
+         r"(?:esta|nesta) (?:manha|tarde|noite|madrugada)", "E4_JANELA_HOJE", 2),
+        (r"ontem", "E4_JANELA_ONTEM", 3),
+        (r"anteontem", "E4_JANELA_ANTEONTEM", 4),
+        # semana corrente, fim de semana e dia da semana com determinante ("este domingo",
+        # "esta segunda-feira"); "na última <dia>" é a última ocorrência desse dia (mesma janela)
+        (_DETERMINANTE_SEMANA + r" semana|(?:neste|nesse|este|esse) (?:fim|final) de semana|"
+         r"(?:na|no) ultim[oa] " + _SEMANA_DIA + r"|" + _DETERMINANTE_SEMANA + r" " + _SEMANA_DIA,
+         "E4_JANELA_SEMANA", 8),
+        # "na última semana" = "semana passada": o mesmo período (a semana anterior)
+        (r"na ultima semana|semana passada", "E4_JANELA_SEMANA_PASSADA", 15),
+        (r"(?:neste|nesse|este|esse) mes", "E4_JANELA_MES", 32),
     )
 )
+# Padrão -> default, por variável (o valor efetivo vem de config em `janelas_efetivas`).
+_DEFAULTS_JANELA = {variavel: default for _, variavel, default in _MARCADORES}
 
-# Trechos que NÃO são marcador de momento ("hoje em dia", "até agora", ...):
-# apagados antes da busca p/ o "hoje"/"agora" dentro deles não contar.
+# Trechos que NÃO são marcador de momento ("hoje em dia", "até agora", "há pouco mais de dez
+# anos" = quantidade, "nos dias de hoje" = mesma classe de "hoje em dia"): apagados antes da
+# busca para o "hoje"/"agora"/"há pouco" dentro deles não contar.
 _EXCLUSOES = tuple(re.compile(padrao) for padrao in (
     r"\bhoje\s+em\s+dia\b",
+    r"\bnos\s+dias\s+de\s+hoje\b",
     r"\bate\s+hoje\b",
     r"\bate\s+agora\b",
     r"\ba\s+partir\s+de\s+agora\b",
     r"\bde\s+agora\s+em\s+diante\b",
+    r"\bha\s+pouco\s+(?:mais|menos)\s+de\b",
 ))
 
 _MESES_PT = (r"(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|"
              r"outubro|novembro|dezembro)")
-# "agora em <mês>" é marcador de mês (janela E4_JANELA_MES), não de "agora".
-_AGORA_EM_MES = re.compile(r"\bagora\s+em\s+" + _MESES_PT + r"\b")
+# "agora em <mês>" (também "agora, em <mês>") é marcador de mês (E4_JANELA_MES), não de "agora".
+_AGORA_EM_MES = re.compile(r"\bagora,?\s+em\s+" + _MESES_PT + r"\b")
 
 
 def _normalizar(texto: str | None) -> str:
@@ -96,15 +86,17 @@ def janela_temporal(texto_usuario: str) -> int | None:
         texto = _AGORA_EM_MES.sub(" ", texto)
     for exclusao in _EXCLUSOES:
         texto = exclusao.sub(" ", texto)
-    for marcador, variavel, default in _MARCADORES_JANELA:
-        if re.search(r"\b" + re.escape(marcador) + r"\b", texto):
-            dias = _cfg_janela(variavel, default)
-            janela = dias if janela is None else min(janela, dias)
-    for padrao, variavel, default in _JANELA_REGEX:
+    for padrao, variavel, default in _MARCADORES:
         if padrao.search(texto):
             dias = _cfg_janela(variavel, default)
             janela = dias if janela is None else min(janela, dias)
     return janela
+
+
+def janelas_efetivas() -> dict[str, int]:
+    """Janela (dias) efetiva de cada variável config.E4_JANELA_* nesta execução (já validada).
+    Vai para `parametros["e4"]["janelas"]` da decisão: o que valeu de fato, não os literais."""
+    return {variavel: _cfg_janela(variavel, default) for variavel, default in _DEFAULTS_JANELA.items()}
 
 
 def janela_da_afirmacao(af_texto: str, texto_usuario: str, n_afirmacoes: int) -> int | None:
