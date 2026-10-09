@@ -393,6 +393,32 @@ def test_e4_aviso_chega_ao_usuario_e_e_neutro(monkeypatch):
     assert verificar_neutralidade(texto) == []
 
 
+def _decisao_com_descontos(urls_por_afirmacao, nivel="media", nivel_sem="alta"):
+    """Decisao montada à mão (só o que o texto usa): descontos por (url, afirmação)."""
+    return decisao.Decisao(
+        nivel=nivel, log_odds=0.5, prob=0.6, motivo="evidência fraca ou dividida",
+        descontos_temporais=[{"url": u, "afirmacao": a} for u, a in urls_por_afirmacao],
+        travas={"data_incompativel": True}, nivel_sem_desconto=nivel_sem)
+
+
+def test_e4_plural_concorda_e_conta_url_unica_na_justificativa():
+    # A mesma URL em duas afirmações é UMA fonte: "1 fonte foi publicada ... o peso dela".
+    uma = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://g1.globo.com/a", 1)])
+    j = uma.justificativa()
+    assert "1 fonte foi publicada antes do período" in j and "o peso dela foi reduzido" in j
+    assert "fontes foram" not in j and "delas" not in j
+    duas = _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)])
+    j2 = duas.justificativa()
+    assert "2 fontes foram publicadas antes do período" in j2 and "o peso delas foi reduzido" in j2
+
+
+def test_e4_limitacao_de_datas_concorda_e_conta_url_unica():
+    assert _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://g1.globo.com/a", 1)]).limitacao_datas() \
+        == "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
+    assert _decisao_com_descontos([("https://g1.globo.com/a", 0), ("https://bbc.com/b", 0)]).limitacao_datas() \
+        == "Datas: 2 fontes anteriores ao período do texto tiveram o peso reduzido."
+
+
 def test_e4_bot_mostra_data_quando_descontada_e_neutro():
     from factcheck_mvp.schemas import EntradaConsulta, FonteEvidencia, RelatorioChecagem
     from factcheck_mvp.telegram_bot import formatar

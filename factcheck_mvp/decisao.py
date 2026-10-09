@@ -166,6 +166,17 @@ class Decisao:
     def n_clusters(self, sinal: int) -> int:
         return len({(v.afirmacao, v.cluster) for v in self.votos if v.valor * sinal > 0})
 
+    def n_fontes_descontadas(self) -> int:
+        """Fontes com desconto por data, contadas por URL: a mesma URL em 2 afirmações é 1 fonte."""
+        return len({x.get("url") for x in self.descontos_temporais if x.get("url")})
+
+    def limitacao_datas(self) -> str:
+        """Limitação neutra sobre datas (o bot mostra as 3 primeiras; o pipeline a põe no início)."""
+        n = self.n_fontes_descontadas()
+        if n == 1:
+            return "Datas: 1 fonte anterior ao período do texto teve o peso reduzido."
+        return f"Datas: {n} fontes anteriores ao período do texto tiveram o peso reduzido."
+
     def _partes_em_conflito(self) -> str:
         """D2: em alta, uma afirmação contestada (L_a ≥ τ) e outra confirmada (L_a ≤ −τ) são
         citadas, cada uma pelo próprio texto. "" quando não se aplica."""
@@ -213,10 +224,15 @@ class Decisao:
                       + (f"; {c.get('sem_juiz', 0)} sem julgamento" if c.get("sem_juiz") else "") + ".")
         # E4 Task 6: aviso neutro de data (sobre DATAS, nunca veracidade; sem "falso/verdadeiro").
         if self.travas.get("data_incompativel") and self.descontos_temporais:
-            n_dt = len(self.descontos_temporais)
-            partes.append(f"{n_dt} fonte(s) foram publicadas antes do período que o texto descreve "
-                          "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
-                          "de outro episódio.")
+            n_dt = self.n_fontes_descontadas()
+            if n_dt == 1:
+                partes.append("1 fonte foi publicada antes do período que o texto descreve "
+                              "(\"hoje\", \"ontem\"…); o peso dela foi reduzido porque pode tratar "
+                              "de outro episódio.")
+            else:
+                partes.append(f"{n_dt} fontes foram publicadas antes do período que o texto descreve "
+                              "(\"hoje\", \"ontem\"…); o peso delas foi reduzido porque podem tratar "
+                              "de outro episódio.")
             if self.nivel != self.nivel_sem_desconto:
                 partes.append("Verifique se não é notícia antiga recirculando.")
         partes.append("Isso não é um veredito: compare as fontes abaixo e tire sua própria conclusão.")
