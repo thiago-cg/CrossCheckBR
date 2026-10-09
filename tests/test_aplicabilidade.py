@@ -5,19 +5,19 @@ from factcheck_mvp import aplicabilidade
 
 def test_aplicavel_exige_corpo_citacao_selo_data():
     from factcheck_mvp import aplicabilidade
-    ok, motivo = aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22")
+    ok, motivo = aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")
     assert ok is True
-    assert aplicabilidade.e_aplicavel("REFUTA", True, False, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("REFUTA", True, True, None, "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("NAO_TRATA", True, True, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
-    assert aplicabilidade.e_aplicavel("REFUTA", False, True, "FALSO", "Café cura câncer", "2026-09-22")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", True, False, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, None, "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("NAO_TRATA", True, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
+    assert aplicabilidade.e_aplicavel("REFUTA", False, True, "FALSO", "Café cura câncer", "2026-09-22", "2026-10-09")[0] is False
 
 
 def test_data_incompativel_barra_bolsonaro():
     from factcheck_mvp import aplicabilidade
-    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", "2020-01-01") is False
-    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", None) is True
-    assert aplicabilidade.data_compativel("Café cura câncer", "2020-01-01") is True
+    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", "2020-01-01", "2026-10-09") is False
+    assert aplicabilidade.data_compativel("Bolsonaro recebeu alta do hospital hoje", None, "2026-10-09") is True
+    assert aplicabilidade.data_compativel("Café cura câncer", "2020-01-01", "2026-10-09") is True
 
 
 def test_dias_excedentes_mede_alem_da_janela():
@@ -271,7 +271,7 @@ def test_gate_janela_none_explicita_nao_herda_o_hoje_de_outra_frase():
 
 
 def test_gate_defaults_mantem_e1_sem_marcador():
-    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2020-01-01")[0] is True
+    assert aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2020-01-01", "2026-10-09")[0] is True
 
 
 def test_dias_excedentes_da_janela_mede_com_janela_explicita():
@@ -384,3 +384,22 @@ def test_normalizar_data_total_em_entrada_aleatoria_determinista():
         ancora = rnd.choice([None, "2026-10-09", "2026-09-28 20:40:30 UTC", "lixo", "0001-01-01T00:00:00+05:00"])
         resultado = aplicabilidade.normalizar_data(valor, ancora)  # não pode levantar
         assert resultado is None or (isinstance(resultado, tuple) and resultado[1] in ("dia", "ano"))
+
+
+# --- E4 revisão (M6): nada do gate lê o dia de hoje; M-9: limite do marco nas janelas efetivas ---
+def test_referencia_e_obrigatoria_no_gate_e_em_data_compativel():
+    """M6 (relógio latente): sem `referencia` explícita não há medida por data (o gate não usa o relógio)."""
+    with pytest.raises(TypeError):
+        aplicabilidade.e_aplicavel("REFUTA", True, True, "FALSO", "Café cura câncer", "2026-09-22")
+    with pytest.raises(TypeError):
+        aplicabilidade.data_compativel("Café cura câncer", "2026-09-22")
+
+
+def test_janelas_efetivas_registram_o_limite_do_marco(monkeypatch):
+    """M-9: E4_MARCO_MAX_DIAS é parâmetro efetivo da medida e vai para `parametros["e4"]["janelas"]`."""
+    from factcheck_mvp import config
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-04-20") == ("2026-03-08", 2)  # 43 dias, limite 60
+    assert "E4_MARCO_MAX_DIAS" in aplicabilidade.janelas_efetivas()
+    monkeypatch.setattr(config, "E4_MARCO_MAX_DIAS", 30)
+    assert aplicabilidade.janelas_efetivas()["E4_MARCO_MAX_DIAS"] == 30
+    assert aplicabilidade.marco_do_evento("A festa foi dia 8 de março", "2026-04-20") is None  # 43 > 30
