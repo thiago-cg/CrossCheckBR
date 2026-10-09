@@ -339,6 +339,24 @@ def test_e4_contrafactual_nunca_menor_em_modulo(monkeypatch):
     assert abs(d.log_odds) <= abs(d.log_odds_sem_desconto)
 
 
+# ------------------------------------------------------------------ E4 (review): reancoragem da medida
+def test_e4_medida_usa_a_janela_da_afirmacao_e_nao_a_do_texto():
+    """Review: o texto diz 'nesta semana' (8) e a afirmação diz 'hoje' (2). Fonte de 2026-10-04 está
+    5 dias antes da referência: 3 dias além de 'hoje' (e não 6); fonte do mesmo dia não é descontada."""
+    texto = "Nesta semana o ministro caiu."
+    af = AfirmacaoDecisao(texto="Hoje o ministro caiu", nucleo="ministro caiu", janela=2)
+
+    def _ev_com_fonte(data_pub):
+        it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                           citacao_verificada=True, curada=True, corpo_lido=True, data_pub=data_pub)
+        return Evidencias(afirmacoes=[af], itens=[it], texto_usuario=texto, data_referencia="2026-10-09")
+
+    d = decidir(_ev_com_fonte("2026-10-04"))
+    assert len(d.descontos_temporais) == 1
+    assert d.descontos_temporais[0]["janela"] == 2 and d.descontos_temporais[0]["dias_alem_da_janela"] == 3
+    assert not decidir(_ev_com_fonte("2026-10-09")).descontos_temporais
+
+
 # ------------------------------------------------------------------ Task 4: janela por afirmação
 def test_e4_decidir_desconto_por_afirmacao_nao_vaza():
     """Só a afirmação com marcador próprio é descontada; a sem marcador (n=2) não,
