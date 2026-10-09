@@ -48,6 +48,9 @@ class Extracao:
     texto: str = ""                 # corpo principal limpo (entidades decodificadas)
     titulo: str = ""
     data_pub: Optional[str] = None
+    # De onde veio data_pub: jsonld | trafilatura | readerlm (None = sem data). É a fonte da
+    # DATA, independente do método que extraiu o texto (`metodo`): a prioridade do E4 usa esta.
+    data_pub_fonte: Optional[str] = None
     autor: Optional[str] = None
     metodo: str = "falha"           # um de METODOS
     veredito_pagina: Optional[dict] = None  # ClaimReview da página (ou ReaderLM ancorado)
@@ -426,6 +429,7 @@ def extrair(html: str, url: str = "", seletor_corpo: Optional[str] = None) -> Ex
             telemetria.fallback("extracao.jsonld", f"{type(e).__name__}: {e}", url=url)
         ex.titulo = limpar_texto(info_ld.get("headline") or "")
         ex.data_pub = info_ld.get("data_pub") or None
+        ex.data_pub_fonte = "jsonld" if ex.data_pub else None
         ex.autor = info_ld.get("autor") or None
         corpo_ld = info_ld.get("article_body") or ""
         if corpo_ld:
@@ -442,7 +446,8 @@ def extrair(html: str, url: str = "", seletor_corpo: Optional[str] = None) -> Ex
             telemetria.fallback("extracao.trafilatura", erro, url=url)
         doc = doc or {}
         ex.titulo = ex.titulo or limpar_texto(doc.get("title") or "")
-        ex.data_pub = ex.data_pub or doc.get("date") or None
+        if not ex.data_pub and doc.get("date"):
+            ex.data_pub, ex.data_pub_fonte = doc["date"], "trafilatura"
         ex.autor = ex.autor or (limpar_texto(doc.get("author") or "") or None)
         if ex.metodo == "falha":
             if doc.get("text"):
@@ -477,7 +482,8 @@ def extrair(html: str, url: str = "", seletor_corpo: Optional[str] = None) -> Ex
             else:
                 ex.avisos.append("readerlm: sem corpo ancorado")
             ex.titulo = ex.titulo or campos.get("titulo", "")
-            ex.data_pub = ex.data_pub or campos.get("data_publicacao")
+            if not ex.data_pub and campos.get("data_publicacao"):
+                ex.data_pub, ex.data_pub_fonte = campos["data_publicacao"], "readerlm"
             ex.autor = ex.autor or campos.get("autor")
             if ex.veredito_pagina is None:
                 ex.veredito_pagina = _veredito_readerlm(campos)
