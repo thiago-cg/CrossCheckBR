@@ -170,7 +170,7 @@ def _descontos_html(decisao: dict | None) -> str:
 
 def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
     from .agregador import (NOMES_ETAPAS, STATUS_ETAPA, data_publicacao_legivel, direcoes_por_url,
-                            linha_raciocinio, postura_legivel)
+                            linha_raciocinio, postura_legivel, texto_de_linha)
     from .confiabilidade import ROTULO
     esc = html.escape
     corpo = f"<form method='post' action='/checar-web'>" \
@@ -205,14 +205,16 @@ def _render_html(entrada_txt: str, rel: RelatorioChecagem | None = None) -> str:
             # B1a: porquê do avaliador, atribuído e escapado; só quando há raciocínio.
             _rac = linha_raciocinio(getattr(f, "raciocinio", None))
             _html_rac = f"<span style='color:#444'>{esc(_rac)}</span><br/>" if _rac else ""
+            # I1: título e citação de página entram achatados (uma linha), antes do escape.
+            _cit = texto_de_linha(f.quote)[:300]
             return (f"<div style='border:1px solid #ccc;border-radius:6px;padding:8px;margin:6px 0'>"
-                    f"<b>{esc(f.portal_nome or 'web')}</b> "
+                    f"<b>{esc(texto_de_linha(f.portal_nome) or 'web')}</b> "
                     f"<span style='color:{cor.get(post, '#555')}'>{esc(post)}</span>"
-                    f"{' · selo da agência: ' + esc(f.veredito) if f.veredito else ''}"
+                    f"{' · selo da agência: ' + esc(texto_de_linha(f.veredito)) if f.veredito else ''}"
                     f" · {leitura}"
                     f"{' · ' + esc(ROTULO[f.confiabilidade]) if f.confiabilidade in ROTULO else ''}<br/>"
-                    f"{esc(f.titulo[:200])}<br/>"
-                    f"{'<i>“' + esc((f.quote or '')[:300]) + '”</i><br/>' if f.quote else ''}"
+                    f"{esc(texto_de_linha(f.titulo)[:200])}<br/>"
+                    f"{'<i>“' + esc(_cit) + '”</i><br/>' if _cit else ''}"
                     f"{_html_rac}"
                     f"{_linha_data}"
                     f"<a href=\"{esc(f.url)}\" target='_blank' rel='noopener'>{esc(f.url[:80])}</a></div>")

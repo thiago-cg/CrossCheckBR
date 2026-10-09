@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tupl
 from . import (afirmacoes, aplicabilidade, avaliador, confiabilidade, config, corroboracao, decisao, juiz_llm,
                padroes_llm, replay, selos, telemetria)
 from . import agente as _agente
-from .agregador import perguntas_guia
+from .agregador import perguntas_guia, texto_de_linha
 from .aprofundar import aprofundar
 from .catalogo import Catalogo
 from .indice import Indice
@@ -1149,14 +1149,15 @@ class Pipeline:
             corpo = p.get("corpo") or p.get("trecho") or ""
             fontes.append((ordem[classe] if pi in melhor else 4, not bool(p.get("corpo")), not p.get("curada"),
                            FonteEvidencia(
-                url=p["url"], titulo=p.get("titulo") or "", portal_id=p.get("portal_id"),
+                url=p["url"], titulo=texto_de_linha(p.get("titulo")), portal_id=p.get("portal_id"),
                 portal_nome=p.get("veiculo") or p.get("dominio") or "",
                 tipo_fonte="veredito" if p.get("veredito") else "corroboracao",
                 veredito=p.get("veredito"), selo_original=p.get("selo_original"),
                 veredito_normalizado=p.get("veredito"),
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
-                data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
+                data_pub=p.get("data_pub"),
+                quote=texto_de_linha(r.get("citacao") or (p.get("snippet") or corpo)[:140]) or None,
                 data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao"),
                 relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",

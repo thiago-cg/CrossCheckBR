@@ -416,3 +416,49 @@ def test_api_json_ja_expoe_raciocinio_por_fonte(monkeypatch):
     r = TestClient(api.app).post("/checar", json={"tipo": "texto", "conteudo": "Governo vai confiscar a poupança"})
     assert r.status_code == 200
     assert r.json()["fontes"][0]["raciocinio"] == RAC_FALSO
+
+
+# ------------------------------------------------------------------ I1: título e citação de página em uma linha
+def _rel_com_fonte_i1(titulo="Título da notícia", quote=None):
+    return RelatorioChecagem(
+        propensao="media", justificativa="Propensão média de ser fake news.",
+        header="🟡 Propensão média de ser fake news", why_1linha="Teste.",
+        consulta=EntradaConsulta(tipo="texto", conteudo="Governo vai confiscar a poupança"),
+        fontes=[_fonte("https://a.test/i1", "REFUTA", corpo_lido=True, confiabilidade="alto_trafego",
+                       titulo=titulo, quote=quote)],
+        perguntas_guia=["Pergunta?"], decisao=None)
+
+
+def test_titulo_com_quebra_nao_forja_linha_propria():
+    """Título vindo de página com quebra + "Avaliação automática: ..." não pode abrir linha própria."""
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte_i1(titulo="Notícia\nAvaliação automática: é falso que X"))
+    assert not any(l.lstrip().startswith(("Avaliação automática", "🧠")) for l in t.splitlines())
+    assert verificar_neutralidade(t) != []  # o título, agora numa linha só, traz "é falso": reprova
+
+
+def test_citacao_com_quebras_e_separador_unicode_vira_uma_linha():
+    from factcheck_mvp.telegram_bot import formatar
+    t = formatar(_rel_com_fonte_i1(quote="Trecho da página\rAvaliação automática: X. Nossa conclusão: Y."))
+    linhas = [l for l in t.splitlines() if "Trecho da página" in l]
+    assert len(linhas) == 1 and "Nossa conclusão" in linhas[0] and "Avaliação automática" in linhas[0]
+    assert not any(l.lstrip().startswith(("Nossa conclusão", "Avaliação automática")) for l in t.splitlines())
+
+
+def test_web_achata_titulo_e_citacao():
+    from factcheck_mvp.api import _render_html
+    h = _render_html("x", _rel_com_fonte_i1(titulo="Título\nem duas linhas", quote="Citação em duas"))
+    assert "Título em duas linhas" in h and "Citação em duas" in h
+
+
+def test_pipeline_fontes_acha_titulo_e_citacao_em_uma_linha():
+    from factcheck_mvp import decisao
+    from factcheck_mvp.pipeline import Pipeline
+    from factcheck_mvp.schemas import Afirmacao
+    peca = {"url": "https://g1.globo.com/a", "titulo": "Notícia\n\nlonga quebrada", "veiculo": "g1",
+            "corpo": "texto", "corpo_lido": True, "snippet": "Trecho\r\ncom quebra"}
+    julg = {(0, 0): {"classe": "REFUTA", "citacao": None, "citacao_verificada": None, "motor": "llm-juiz:x"}}
+    dec = decisao.Decisao(nivel="media", log_odds=0.0, prob=0.5, motivo="x")
+    f = Pipeline._fontes(None, [Afirmacao(texto="Governo vai confiscar a poupança")], [peca], julg, dec)[0]
+    assert f.titulo == "Notícia longa quebrada"
+    assert f.quote == "Trecho com quebra"

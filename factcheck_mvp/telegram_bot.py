@@ -286,7 +286,8 @@ def formatar(rel: RelatorioChecagem) -> str:
         linhas.append("")
     # Top 2-3 lado a lado: portal | o que a fonte faz | lida ou só manchete | link + citação
     if uteis:
-        from .agregador import data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel
+        from .agregador import (data_publicacao_legivel, direcoes_por_url, linha_raciocinio, postura_legivel,
+                                texto_de_linha)
         from .confiabilidade import ROTULO
         direcoes = direcoes_por_url(getattr(rel, "decisao", None))
         nao_lidas = _urls_nao_analisadas(rel)
@@ -297,19 +298,22 @@ def formatar(rel: RelatorioChecagem) -> str:
         _descontadas = {x.get("url") for x in _dec.get("descontos_temporais", []) or [] if x.get("url")}
         linhas.append("O que as fontes dizem:")
         for i, f in enumerate(uteis[:3], 1):
-            selo = f" [selo da agência: {f.veredito}]" if f.veredito else ""
+            # I1: nome, selo, título, citação e URL vindos da página entram achatados (uma linha cada).
+            selo = f" [selo da agência: {texto_de_linha(f.veredito)}]" if f.veredito else ""
             if getattr(f, "corpo_lido", False) and f.url not in nao_lidas:
                 corpo = "📄 texto lido"
             else:
                 # E3: só título/snippet não foi analisada integralmente (não vota).
                 corpo = "📰 só manchete — não analisada integralmente"
             nivel = ROTULO.get(getattr(f, "confiabilidade", None) or "")
-            linhas.append(f"{i}. {f.portal_nome or 'web'} {postura_legivel(f, direcoes)}{selo} "
-                          f"({corpo}{' · ' + nivel if nivel else ''}): {f.titulo[:90]}")
-            if getattr(f, "quote", None):
-                linhas.append(f"   “{f.quote[:140]}”")
-            if f.url:
-                linhas.append(f"   {f.url}")
+            linhas.append(f"{i}. {texto_de_linha(f.portal_nome) or 'web'} {postura_legivel(f, direcoes)}{selo} "
+                          f"({corpo}{' · ' + nivel if nivel else ''}): {texto_de_linha(f.titulo)[:90]}")
+            citacao = texto_de_linha(getattr(f, "quote", None))[:140]
+            if citacao:
+                linhas.append(f"   “{citacao}”")
+            url = texto_de_linha(f.url)
+            if url:
+                linhas.append(f"   {url}")
             # E4 Task 6: aviso neutro de data por fonte (sobre DATAS, nunca veracidade; sem bits).
             _r = getattr(f, "relevancia_temporal", None)
             if (_r is not None and _r < 1.0) or (f.url in _descontadas):
