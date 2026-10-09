@@ -595,30 +595,51 @@ def _fracao_depois(texto_n: str, pos: int) -> bool:
     return _FRACAO_DEPOIS_RE.match(texto_n, pos) is not None
 
 
+# I-3: recorrência ("todo dia 5", "cada dia 5", "dia 5 do mês", "dia 5 de cada mês", "mensal") e
+# data comemorativa ("Dia das Mães", "Dia Internacional da Mulher", "Dia 8 de março é o Dia da Mulher")
+# não são data do fato. A comemorativa vale na MESMA frase (sem depender de maiúscula).
+_RECORRENTE_ANTES_RE = re.compile(r"\b(?:todo|todos\s+os|todas\s+as|cada)\s+$")
+_RECORRENTE_DEPOIS_RE = re.compile(r"\s+(?:do\s+mes|por\s+mes|de\s+cada\s+mes|mensal)\b")
+_COMEMORATIVA_RE = re.compile(r"\bdia\s+(?:de|da|do|das|dos|internacional|nacional|mundial)\b")
+_FRASE_FIM_RE = re.compile(r"[.!?;\n]")
+
+
+def _recorrente_ou_comemorativa(texto_n: str, ini: int, fim: int) -> bool:
+    """True se a data em texto_n[ini:fim] é recorrente ou comemorativa (I-3), e não data do fato."""
+    if _RECORRENTE_ANTES_RE.search(texto_n[max(0, ini - 16):ini]) or _RECORRENTE_DEPOIS_RE.match(texto_n, fim):
+        return True
+    ini_frase = max((m.end() for m in _FRASE_FIM_RE.finditer(texto_n, 0, ini)), default=0)
+    m_fim = _FRASE_FIM_RE.search(texto_n, fim)
+    fim_frase = m_fim.start() if m_fim else len(texto_n)
+    return _COMEMORATIVA_RE.search(texto_n[ini_frase:fim_frase]) is not None
+
+
 def _ocorrencias(texto_n: str, bare: bool) -> list[tuple[int | None, int, str | None, bool]]:
     """Ocorrências de data (mes|None, dia, ano|None, dia_solto) do texto normalizado, antes de inferir
-    mês/ano. Descarta a FRAÇÃO (dd/mm sem ano seguido de palavra de quantidade, I-2). `bare` inclui
-    dd/mm sem contexto nem ano, que é data explícita do "hoje" (M-4) mas não ancora o marco.
-    `dia_solto` = "dia 8" sem mês (ano inferido por `_marco_dia_bare`)."""
-    achadas: list[tuple[int | None, int, str | None, bool]] = []
+    mês/ano. Descarta a FRAÇÃO (dd/mm sem ano seguido de palavra de quantidade, I-2) e a recorrente ou
+    comemorativa (I-3). `bare` inclui dd/mm sem contexto nem ano, que é data explícita do "hoje" (M-4)
+    mas não ancora o marco. `dia_solto` = "dia 8" sem mês (ano inferido por `_marco_dia_bare`)."""
+    brutas: list[tuple[int, int, int | None, int | None, str | None, bool]] = []  # (ini, fim, mes, dia, ano, solto)
     for m in _MARCO_DD_MM_CTX_RE.finditer(texto_n):
         if m.group(3) is None and _fracao_depois(texto_n, m.end()):
             continue
-        achadas.append((int(m.group(2)), int(m.group(1)), m.group(3), False))
+        brutas.append((m.start(), m.end(), int(m.group(2)), int(m.group(1)), m.group(3), False))
     for m in _MARCO_DD_MM_ANO_RE.finditer(texto_n):
-        achadas.append((int(m.group(2)), int(m.group(1)), m.group(3), False))
+        brutas.append((m.start(), m.end(), int(m.group(2)), int(m.group(1)), m.group(3), False))
     if bare:
         for m in _MARCO_DD_MM_NU_RE.finditer(texto_n):
             if not _fracao_depois(texto_n, m.end()):
-                achadas.append((int(m.group(2)), int(m.group(1)), None, False))
+                brutas.append((m.start(), m.end(), int(m.group(2)), int(m.group(1)), None, False))
     for m in _MARCO_ISO_RE.finditer(texto_n):
-        achadas.append((int(m.group(2)), int(m.group(3)), m.group(1), False))
+        brutas.append((m.start(), m.end(), int(m.group(2)), int(m.group(3)), m.group(1), False))
     for m in _MARCO_DIA_MES_RE.finditer(texto_n):
-        achadas.append((_MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False))
+        brutas.append((m.start(), m.end(), _MESES_DATA.get(m.group(2)), int(m.group(1)), m.group(3), False))
     for m in _MARCO_DIA_RE.finditer(texto_n):
         mes_nome = m.group(2)
-        achadas.append((_MESES_DATA.get(mes_nome) if mes_nome else None, int(m.group(1)), m.group(3), True))
-    return achadas
+        brutas.append((m.start(), m.end(), _MESES_DATA.get(mes_nome) if mes_nome else None,
+                       int(m.group(1)), m.group(3), True))
+    return [(mes, dia, ano, solto) for ini, fim, mes, dia, ano, solto in brutas
+            if not _recorrente_ou_comemorativa(texto_n, ini, fim)]
 
 
 def _datas_citadas(texto_n: str, ref: date, bare: bool = False) -> list[tuple[date, bool]]:

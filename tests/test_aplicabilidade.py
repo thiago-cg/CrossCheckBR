@@ -467,3 +467,37 @@ def test_iso_sem_contexto_e_data_explicita_no_hoje():
 
 def test_iso_completa_ancora_o_marco_como_data_com_ano():
     assert aplicabilidade.marco_do_evento("O ato foi em 2026-10-08", "2026-10-09") == ("2026-10-08", 2)
+
+
+# --- E4 revisão (I-3): recorrente ("todo dia 5") e comemorativa não são data do fato ---
+@pytest.mark.parametrize("texto,ref", [
+    ("A taxa cai todo dia 5", "2026-09-07"),
+    ("O imposto é pago todo dia 5", "2026-09-07"),
+    ("O benefício é pago todo dia 10", "2026-10-09"),
+    ("A taxa cai dia 5 do mês", "2026-09-07"),
+    ("A taxa cai dia 5 de cada mês", "2026-09-07"),
+])
+def test_data_recorrente_nao_ancora_o_marco(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+@pytest.mark.parametrize("texto,ref", [
+    ("Dia Internacional da Mulher: 8 de março", "2026-03-10"),
+    ("O Dia das Mães cai em 8 de maio", "2026-05-10"),
+    ("Dia das Mães: 8 de maio", "2026-05-10"),
+    ("A cerimônia de 8 de março, Dia Internacional da Mulher", "2026-03-10"),
+    ("Dia 8 de março é o Dia da Mulher", "2026-03-10"),
+])
+def test_data_comemorativa_nao_ancora_o_marco(texto, ref):
+    assert aplicabilidade.marco_do_evento(texto, ref) is None
+
+
+def test_comemorativa_nao_desliga_o_hoje():
+    t = "Hoje, Dia Internacional da Mulher, 8 de março, o ministro falou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-03-10") == 2
+
+
+def test_recorrente_nao_desliga_o_hoje():
+    t = "O benefício é pago todo dia 10 e hoje o banco falhou"
+    assert aplicabilidade.janela_da_afirmacao(t, t, 1, "2026-10-09") == 2
+    assert aplicabilidade.marco_da_afirmacao(t, t, 1, "2026-10-09") is None
