@@ -3,8 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fonte publicada fora da janela do "hoje/ontem/nesta semana…" do texto perde peso de evidência
-(mistura de razões de verossimilhança), sem nunca elevar a propensão por si; o desconto é medido em bits,
-determinístico no eval e visível ao usuário como aviso neutro.
+(mistura de razões de verossimilhança); E4 só remove informação de fonte de outro episódio (ver Global
+Constraints); o desconto é medido em bits, determinístico no eval e visível ao usuário como aviso neutro.
 
 **Architecture:** `aplicabilidade.py` (puro) mede a janela do texto e normaliza datas; `decisao.decidir` (puro)
 desconta cada contribuição com `r = relevancia_temporal(e, janela)` → `sinal·ln(r·e^|c| + 1 − r)`;
@@ -15,7 +15,7 @@ o pipeline resolve a **data de referência** (entrada explícita → relógio gr
 `runs/<id>/trace.jsonl`, eval nível 0 (`python3 -m eval.decisao`).
 
 **Spec:** `docs/PROXIMOS_PASSOS.md` §4 E4 + §5.2, **substituído** pelas decisões da usuária de 09/10:
-E4 **não eleva** a propensão; desconto informacional simétrico; bits descartados reportados
+E4 só remove informação de fonte de outro episódio (formulação de 09/10, Global Constraints); desconto informacional simétrico; bits descartados reportados
 (`Decisao.descontos_temporais`, `travas['data_incompativel']`); motivo "podem tratar de outro episódio —
 verifique se não é notícia antiga recirculando" quando o nível fica `media` por isso. E3 aprovado e já no código.
 
@@ -52,6 +52,13 @@ verifique se não é notícia antiga recirculando" quando o nível fica `media` 
   (`data_referencia`) só com justificativa na `nota` + registro em `eval/ITERACOES.md`, decidido **antes** de rodar.
 - Não ajustar janelas/curva para acertar um caso do eval; marcadores novos precisam de razão linguística geral e
   teste próprio (frases fora do eval).
+- **Guarda do sinal (decisão da usuária, 09/10, após review):** E4 só remove informação de fonte de outro
+  episódio. O nível pode ficar mais extremo apenas na direção de fontes dentro do período, nunca sustentado só
+  por fonte descontada. Consequência aceita: quando uma fonte antiga de sinal oposto perde peso, o nível pode
+  subir (ou descer) se o resultado vier de fontes atuais. Testes em `tests/test_decisao.py`
+  (`test_e4_guarda_*`: sinais opostos em clusters distintos e no mesmo cluster; só fontes descontadas). Contraexemplo
+  conhecido e **pendente de decisão** (xfail estrito): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
+  somam ≥ τ e viram alta sem voto do período. Não corrigido aqui (guarda, sem mudança de lógica).
 - Todo fallback novo → `telemetria.fallback(onde, motivo)`; todo I/O novo (inclusive relógio) → `replay.*`.
 - Sem rede live; **sem eval `--modo record`** neste plano sem aprovação explícita (Task 8 só *pede*; custo
   estimado ~50 buscas SerpAPI, nível 3 da escada de custo em `PROXIMOS_PASSOS.md` §3).
@@ -147,8 +154,10 @@ O teste existente só cobre a direção SUSTENTA→"não baixa"; falta a direç�
 
 ## Review Focus
 
-- E4 nunca eleva nem baixa o nível sozinho: `|L|` só diminui item a item; teste de simetria + teste de que o
-  contrafactual sem desconto tem `|L|` ≥ com desconto.
+- E4 só remove informação de fonte de outro episódio: o nível pode ficar mais extremo apenas na direção de
+  fontes dentro do período, nunca sustentado só por fonte descontada (decisão da usuária, 09/10, após review;
+  ver Global Constraints). Testes: `test_e4_guarda_*` (sinais opostos em clusters distintos e no mesmo cluster;
+  só fontes descontadas) e `test_e4_simetrico_nao_eleva_propensao` (uma fonte descontada não empurra sozinha).
 - Datas: precisão conservadora (usar o **fim** do intervalo: "2021" → 2021-12-31; "há 3 dias" ancorado na data
   da busca), nunca descontar mais do que a data permite afirmar.
 - Determinismo: replay de outro dia dá o mesmo nível; relógio ausente no cassete → `fallback onde=relogio` e E4
@@ -628,11 +637,11 @@ novo), `docs/PROXIMOS_PASSOS.md` (E4 ✅, §5.2 resolvida pela decisão de 09/10
   - sub20: **nenhum erro grave novo** com E4 vs `--sem-e4`; todo caso que mudou de nível tem desconto
     explicado no trace (data da fonte, janela, r) e foi para `media`/`indeterminada` ou para a direção das
     fontes **dentro** da janela — nunca para um extremo sustentado só por fonte descontada;
-  - `|L|` com E4 ≤ `|L_sem_desconto|` em todos os casos (simetria na prática);
+  - `|L|` com E4 só excede `|L_sem_desconto|` na direção de um voto não descontado (guarda de 09/10, Global Constraints);
   - replay determinístico (Step 4);
   - regressão Bolsonaro nas duas direções verde.
 - [ ] **Step 7: Registrar em `eval/ITERACOES.md`:** "Iteração E3+E4" com hipótese (fonte de outro episódio
-  não deve decidir fato apresentado como atual; desconto informacional não eleva propensão), mudanças
+  não deve decidir fato apresentado como atual; E4 só remove informação de fonte de outro episódio), mudanças
   (Tasks 0-7), métricas antes/depois (a3-dev; sub20 com/sem E4), cobertura de datas (Task 2 Step 5), `run_ids`
   olhados, e o que **não** foi validado: holdout (nível 4; só `cr_video_lula_ministros_stf_atual` tem
   marcador), amostra pequena (2 casos dev com marcador), curva `r` não calibrada.

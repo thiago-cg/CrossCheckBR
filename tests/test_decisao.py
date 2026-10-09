@@ -394,6 +394,69 @@ def test_e4_data_explicita_da_afirmacao_nao_desconta_por_hoje(monkeypatch):
                                            data_pub="2021-07-18")])).descontos_temporais
 
 
+# ------------------------------------------------------------------ E4 (item 5): guarda do sinal
+# Decisão da usuária (09/10, após review): E4 só remove informação de fonte de outro episódio. O nível
+# pode ficar mais extremo quando a fonte antiga de sinal oposto perde peso, desde que haja voto NÃO
+# descontado (fonte do período) na direção do resultado; nunca sustentado só por fonte descontada.
+_RECENTE, _ANTIGA = "2026-10-08", "2021-07-18"  # "ontem" e 2021 em relação a 2026-10-09
+
+
+def _it_e4(url, cluster, classe, data, veredito=None):
+    return ItemEvidencia(url=url, cluster=cluster, classe=classe, motor=JUIZ, citacao_verificada=True,
+                         curada=True, corpo_lido=True, data_pub=data, veredito=veredito,
+                         origem_veredito="indice" if veredito else None)
+
+
+def _voto_nao_descontado_na_direcao(d):
+    descontadas = {x["url"] for x in d.descontos_temporais}
+    sinal = 1 if d.log_odds > 0 else -1
+    return any(v.direcao == sinal and any(u not in descontadas for u in v.urls) for v in d.votos)
+
+
+def test_e4_guarda_sinais_opostos_em_clusters_distintos(monkeypatch):
+    """Caso A: g1 SUSTENTA de 2021 (perde peso) + bbc e estadão REFUTAM de ontem. O nível sobe de
+    media para alta, e isso vem de fontes do período (voto não descontado na direção de L)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4("https://g1.globo.com/a", "g1", "SUSTENTA", _ANTIGA),
+             _it_e4("https://bbc.com/a", "bbc", "REFUTA", _RECENTE),
+             _it_e4("https://estadao.com.br/a", "estadao", "REFUTA", _RECENTE)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel_sem_desconto == "media" and d.nivel == "alta"
+    assert _voto_nao_descontado_na_direcao(d)
+
+
+def test_e4_guarda_sinais_opostos_no_mesmo_cluster(monkeypatch):
+    """Caso B: a mesma mistura (g1 SUSTENTA de 2021 + bbc REFUTA de ontem) no MESMO cluster. O voto do
+    cluster passa a ser o da fonte do período (+1,0), que é não descontado: a magnitude sobe na direção dele."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4("https://g1.globo.com/a", "x", "SUSTENTA", _ANTIGA),
+             _it_e4("https://bbc.com/a", "x", "REFUTA", _RECENTE)]
+    d = decidir(_ev_hoje(itens))
+    assert d.log_odds > 0 and abs(d.log_odds) > abs(d.log_odds_sem_desconto)
+    assert _voto_nao_descontado_na_direcao(d)
+
+
+@pytest.mark.parametrize("sinais", [("SUSTENTA", "REFUTA", "REFUTA"), ("SUSTENTA", "SUSTENTA", "SUSTENTA")])
+def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_nem_baixa(monkeypatch, sinais):
+    """Só fontes de outro episódio (3 clusters, r = 0,05): nenhum nível extremo, nem com sinais mistos."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4(f"https://{dom}/a", dom, classe, _ANTIGA)
+             for dom, classe in zip(("g1.globo.com", "estadao.com.br", "bbc.com"), sinais)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "media" and d.travas["data_incompativel"]
+
+
+@pytest.mark.xfail(strict=True, reason="contraexemplo à guarda, decisão pendente da usuária: fontes "
+                   "descontadas independentes podem somar até τ (14 posturas ou 7 selos FALSO do índice, "
+                   "a ~38 dias da janela, r=0,05) e virar alta sem nenhum voto do período")
+@pytest.mark.parametrize("veredito,n", [(None, 14), ("FALSO", 7)])
+def test_e4_guarda_so_fontes_descontadas_nao_viram_alta_com_muitas_fontes(monkeypatch, veredito, n):
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    itens = [_it_e4(f"https://s{i}.com/a", f"c{i}", "REFUTA", _ANTIGA, veredito=veredito) for i in range(n)]
+    d = decidir(_ev_hoje(itens))
+    assert d.nivel == "media"
+
+
 def test_e4_parametros_registram_as_janelas_efetivas_da_config(monkeypatch):
     from factcheck_mvp import config
     monkeypatch.setattr(config, "E4_JANELA_HOJE", 5)
