@@ -167,14 +167,14 @@ def test_trace_avaliador_por_peca_tem_campos(tdir):
 _JUIZ_E4 = "llm-juiz:llm-local"
 
 
-def _dec_e4_com_desconto(monkeypatch):
+def _dec_e4_com_desconto(monkeypatch, data_pub="2021-01-01", bruta=None, precisao=None):
     from factcheck_mvp import decisao
     from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     texto = "Bolsonaro recebeu alta do hospital hoje"
     it = ItemEvidencia(url="https://g1.globo.com/noticia-sobre-alta-do-hospital-hoje", cluster="g1",
                        classe="REFUTA", motor=_JUIZ_E4, citacao_verificada=True, curada=True,
-                       corpo_lido=True, data_pub="2021-01-01")
+                       corpo_lido=True, data_pub=data_pub, data_pub_bruta=bruta, data_pub_precisao=precisao)
     ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=texto, nucleo=texto)], itens=[it],
                     texto_usuario=texto, data_referencia="2026-10-09")
     d = decidir(ev)
@@ -194,7 +194,8 @@ def test_e4_resumo_trace_traz_contrafactual_e_descontos(tdir, monkeypatch):
 
 def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
     from factcheck_mvp.pipeline import Pipeline
-    d = _dec_e4_com_desconto(monkeypatch)
+    # Peça com placeholder de ano: a bruta vem como "2021-01-01" e a normalizada é o fim do ano.
+    d = _dec_e4_com_desconto(monkeypatch, data_pub="2021-12-31", bruta="2021-01-01", precisao="ano")
     with tel.run({"entrada": "Bolsonaro recebeu alta do hospital hoje"}):
         Pipeline._emitir_decisao(d)
     ev = _eventos(tdir, tel.ultimo_run_id())
@@ -204,5 +205,6 @@ def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
     x = d.descontos_temporais[0]
     assert f["decisao"] == "descontada"
     assert f["motivo"] == f"{x['dias_alem_da_janela']} dias além da janela de {x['janela']}"
-    assert f["afirmacao"] == 0 and f["data_pub"] == "2021-01-01"
+    assert f["afirmacao"] == 0 and f["data_pub"] == "2021-12-31"
+    assert f["data_pub_bruta"] == "2021-01-01" and f["precisao"] == "ano"
     assert f["r"] == x["r"] and f["bits"] == x["bits_descartados"]

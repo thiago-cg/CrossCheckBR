@@ -308,6 +308,16 @@ def test_e4_direcao_e_bits_medidos_antes_do_desconto(monkeypatch):
     assert x["bits_descartados"] == pytest.approx(decisao.W_VEREDITO / math.log(2), rel=1e-3)
 
 
+def test_e4_desconto_carrega_data_bruta_e_precisao(monkeypatch):
+    """A telemetria `fonte estagio=data` lê a bruta e a precisão do item descontado (antes: None)."""
+    monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
+    it = ItemEvidencia(url="https://g1.globo.com/a", cluster="g1", classe="REFUTA", motor=JUIZ,
+                       citacao_verificada=True, curada=True, corpo_lido=True, data_pub="2021-12-31",
+                       data_pub_bruta="2021-01-01", data_pub_precisao="ano")
+    x = decidir(_ev_hoje([it])).descontos_temporais[0]
+    assert (x["data_pub"], x["data_pub_bruta"], x["data_pub_precisao"]) == ("2021-12-31", "2021-01-01", "ano")
+
+
 def test_e4_tudo_descontado_motivo_fala_de_periodo(monkeypatch):
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.0)
     itens = [ItemEvidencia(url=f"https://{d}/a", cluster=d, classe="REFUTA", motor=JUIZ,

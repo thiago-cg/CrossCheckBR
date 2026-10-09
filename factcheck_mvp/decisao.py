@@ -97,6 +97,8 @@ class ItemEvidencia:
     confiabilidade: Optional[str] = None   # confiabilidade.NIVEIS; None = calcula pela URL
     data_pub: Optional[str] = None         # YYYY-MM-DD da peça (E4: relevância temporal)
     prob_fake_pagina: Optional[float] = None  # T6/B1c: P(fake) da página (BERTimbau); None = sem modelo real
+    data_pub_bruta: Optional[str] = None      # E4: data como veio da fonte (só telemetria/auditoria; não decide)
+    data_pub_precisao: Optional[str] = None   # E4: dia|ano da data normalizada (telemetria; não decide)
 
     def nivel_confiabilidade(self) -> str:
         return self.confiabilidade or confiabilidade.classificar(self.url, self.curada)
@@ -507,6 +509,7 @@ def decidir(ev: Evidencias) -> Decisao:
                 bits = (nats_antes - nats_depois) / math.log(2)
                 dec.descontos_temporais.append({
                     "url": it.url, "afirmacao": a_idx, "data_pub": it.data_pub,
+                    "data_pub_bruta": it.data_pub_bruta, "data_pub_precisao": it.data_pub_precisao,
                     "janela": medida[0], "dias_alem_da_janela": medida[1], "r": round(r, 3),
                     "direcao": direcao,
                     "nats_antes": round(nats_antes, 4), "nats_depois": round(nats_depois, 4),
