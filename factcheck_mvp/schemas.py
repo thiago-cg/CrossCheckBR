@@ -1,10 +1,11 @@
 """Contratos do MVP (Pydantic v2). Valem para Telegram, API e futura web (RNF05)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 TipoEntrada = Literal["texto", "titulo", "link"]
 Propensao = Literal["baixa", "media", "alta", "indeterminada"]
@@ -12,6 +13,14 @@ StatusEtapa = Literal["ok", "parcial", "falha", "pulada"]
 Polaridade = Literal["afirma", "nega"]
 # Postura de uma fonte frente ao NÚCLEO da afirmação (juiz_llm)
 Postura = Literal["SUSTENTA", "REFUTA", "RELATA_SEM_ENDOSSO", "NAO_TRATA"]
+
+
+# M5: data de referência = YYYY-MM-DD, ou ISO com hora. Fração só com 3 ou 6 dígitos e fuso só como Z
+# ou ±HH:MM (formas que `datetime.fromisoformat` aceita em todas as versões suportadas).
+_DATA_REFERENCIA_RE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"(?:T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.(?:[0-9]{3}|[0-9]{6}))?)?(?:Z|[+-][0-9]{2}:[0-9]{2})?)?")
+_BRT = timezone(timedelta(hours=-3))  # o "hoje" do E4 é o dia em UTC−3
 
 
 def agora_iso() -> str:
@@ -26,14 +35,28 @@ class EntradaConsulta(BaseModel):
     idioma: str = "pt-BR"
     # E4: "hoje" do texto (YYYY-MM-DD); None = desconhecida (relógio via replay.*).
     data_referencia: Optional[str] = None
+    # E4 (A5): entrada por link cuja página não tem data: E4 desligado de forma explícita,
+    # sem cair no relógio de hoje. Exclusivo com `data_referencia`.
+    sem_referencia_temporal: bool = False
 
     @field_validator("data_referencia")
     @classmethod
     def _validar_data_referencia(cls, v: Optional[str]) -> Optional[str]:
+        """YYYY-MM-DD, ou ISO com hora (M5): a referência é a DATA, em UTC−3 quando há fuso."""
         if v is None:
             return None
-        datetime.strptime(v[:10], "%Y-%m-%d")
-        return v[:10]
+        if not _DATA_REFERENCIA_RE.fullmatch(v):
+            raise ValueError("data_referencia deve ser YYYY-MM-DD ou ISO com hora (ex.: 2026-10-09T10:00:00)")
+        dt = datetime.fromisoformat(v[:-1] + "+00:00" if v.endswith("Z") else v)  # ValueError: data/hora inexistente
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(_BRT)
+        return dt.date().isoformat()
+
+    @model_validator(mode="after")
+    def _referencia_unica(self) -> "EntradaConsulta":
+        if self.sem_referencia_temporal and self.data_referencia is not None:
+            raise ValueError("sem_referencia_temporal e data_referencia são excludentes")
+        return self
 
 
 class Afirmacao(BaseModel):
@@ -66,8 +89,9 @@ class FonteEvidencia(BaseModel):
     trecho_corpo: Optional[str] = None
     corpo_lido: bool = False
     # Clareza lado-a-lado (check #1): data + quote + tipo p/ tabela
-    data_pub: Optional[str] = None
-    data_pub_bruta: Optional[str] = None
+    data_pub: Optional[str] = None  # normalizada (UTC−3): a mesma que a decisão usou
+    data_pub_bruta: Optional[str] = None  # como veio da fonte (auditoria; não é exibida)
+    data_pub_precisao: Optional[str] = None  # dia | ano (aplicabilidade.normalizar_data)
     relevancia_temporal: Optional[float] = None
     quote: Optional[str] = None
     tipo_conteudo: Optional[str] = None  # noticia|checagem|opiniao|satira

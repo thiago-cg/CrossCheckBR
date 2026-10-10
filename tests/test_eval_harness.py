@@ -103,10 +103,10 @@ def test_rodar_metricas_artefatos_baseline_e_gate(amb):
     assert "acerto" in m["intervalos_wilson"]
     d = out["dir"]
     assert (d / "metricas.json").exists() and (d / "casos.jsonl").exists()
-    md = (d / "relatorio.md").read_text()
+    md = (d / "relatorio.md").read_text(encoding="utf-8")
     assert "cli trace" in md and "ATENÇÃO" in md and "🛑" in md
     assert "sempre_alta" in md and "balanceada" in md
-    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text().splitlines()]
+    casos = [json.loads(x) for x in (d / "casos.jsonl").read_text(encoding="utf-8").splitlines()]
     assert all(c["run_id"] and (amb / "runs" / c["run_id"] / "resultado.json").exists() for c in casos)
     ev.salvar_baseline(out["meta"], m, out["casos"], amb / "baseline.json")
 
@@ -213,6 +213,106 @@ def test_sem_e4_zera_desconto_e_recupera_modulo():
     assert abs(sem[0]["log_odds"]) > abs(base[0]["log_odds"])
 
 
+def test_snapshot_com_janela_null_ja_foi_calculada_e_sem_campo_e_legado():
+    """I-4: `janela: null` no snapshot = calculada sem marcador de fato (não recalcular pelo texto);
+    ausência do campo = snapshot antigo (caminho legado)."""
+    from eval.decisao import evidencias_de_dict
+    base = {"afirmacoes": [{"texto": "Ele caiu em 2019"}], "texto_usuario": "Hoje ele caiu",
+            "data_referencia": "2026-10-09", "itens": []}
+    nova = {"afirmacoes": [{"texto": "Ele caiu em 2019", "janela": None, "marco": None}],
+            "texto_usuario": "Hoje ele caiu", "data_referencia": "2026-10-09", "itens": []}
+    assert evidencias_de_dict(nova).afirmacoes[0].calculada is True
+    assert evidencias_de_dict(base).afirmacoes[0].calculada is False
+
+
+def _eventos_sem_evidencias(motivo_voto, veredito="FALSO", ignorado=None):
+    """Trace antigo (sem evento `evidencias`): só `fonte juiz` e `decisao`, como a reconstrução lê."""
+    votos = [] if motivo_voto is None else [
+        {"afirmacao": 0, "cluster": "lupa.test", "urls": ["https://lupa.test/x"], "motivo": motivo_voto}]
+    ignorados_l = [] if ignorado is None else [
+        {"url": "https://lupa.test/x", "veredito": veredito, "motivo": ignorado}]
+    return [
+        {"tipo": "fonte", "dados": {"url": "https://lupa.test/x", "estagio": "juiz", "classe": "REFUTA",
+                                     "afirmacao": 0, "veredito": veredito, "curada": True, "corpo_lido": True}},
+        {"tipo": "decisao", "dados": {"nivel": "alta", "travas": {"contagem": {"lidas": 1, "consultadas": 1}},
+                                       "decisao": {"votos": votos, "vereditos_ignorados": ignorados_l}}},
+    ]
+
+
+def test_reconstrucao_preserva_a_origem_do_selo_que_o_trace_registra():
+    from eval.decisao_gerar import evidencias_do_trace
+    it = evidencias_do_trace(_eventos_sem_evidencias("postura REFUTA; selo FALSO (indice)"))["itens"][0]
+    assert it["origem_veredito"] == "indice"
+    it = evidencias_do_trace(_eventos_sem_evidencias("selo FALSO (pagina)"))["itens"][0]
+    assert it["origem_veredito"] == "pagina"
+    ign = "selo extraído da página não vota (só o do índice)"
+    assert evidencias_do_trace(_eventos_sem_evidencias(None, ignorado=ign))["itens"][0]["origem_veredito"] == "pagina"
+
+
+def test_reconstrucao_sem_informacao_usa_pagina_so_quando_ha_selo():
+    """Sem registro da origem no trace, o default 'pagina' vale (documentado); sem selo, None."""
+    from eval.decisao_gerar import evidencias_do_trace
+    assert evidencias_do_trace(_eventos_sem_evidencias(None))["itens"][0]["origem_veredito"] == "pagina"
+    sem_selo = evidencias_do_trace(_eventos_sem_evidencias(None, veredito=None))["itens"][0]
+    assert sem_selo["origem_veredito"] is None
+
+
+def test_gerar_snapshot_conta_a_parte_os_reconstruidos(amb):
+    from eval.decisao import gerar_snapshot_de_resultado
+    res_dir = amb / "resultado_rec"
+    res_dir.mkdir()
+    runs = amb / "runs_rec"
+    (runs / "rid_rec").mkdir(parents=True)
+    linhas = [{"ts": "2026-10-09T00:00:00+00:00", "t_rel_ms": 1.0, "tipo": e["tipo"], "dados": e["dados"]}
+              for e in _eventos_sem_evidencias("postura REFUTA; selo FALSO (indice)")]
+    (runs / "rid_rec" / "trace.jsonl").write_text(
+        "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in linhas), encoding="utf-8")
+    (res_dir / "casos.jsonl").write_text(
+        json.dumps({"id": "rec", "rotulo": "falso", "esperado": ["alta"], "aceitavel": [], "tags": [],
+                    "run_id": "rid_rec"}) + "\n", encoding="utf-8")
+    n, pul, rec = gerar_snapshot_de_resultado(res_dir, amb / "snap_rec.jsonl", runs_dir=runs)
+    assert (n, pul, rec) == (1, 0, 1)
+    evd = json.loads((amb / "snap_rec.jsonl").read_text(encoding="utf-8"))["evidencias"]
+    assert "texto_usuario" not in evd and evd["itens"][0]["origem_veredito"] == "indice"
+
+
+def test_mensagem_do_gerar_snapshot_separa_os_reconstruidos(monkeypatch, capsys, tmp_path):
+    from eval import decisao as ed
+    monkeypatch.setattr(ed, "gerar_snapshot_de_resultado", lambda resultado, saida: (3, 1, 2))
+    assert ed.main(["--gerar-snapshot", "--resultado", str(tmp_path), "--saida", str(tmp_path / "s.jsonl")]) == 0
+    out = capsys.readouterr().out
+    assert "3 linha(s)" in out and "1 pulado(s) sem evento evidencias" in out and "2 reconstruída(s)" in out
+
+
+def test_e4_do_trace_marca_janela_do_texto_sem_try():
+    """`janela_temporal` só recebe texto (regex sobre str): a marca do texto sai direto."""
+    from eval.run import _e4_do_trace
+    eventos = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": "Bolsonaro recebeu alta do hospital hoje", "janela": None}],
+        "texto_usuario": "Bolsonaro recebeu alta do hospital hoje", "data_referencia": "2026-10-09"}}]
+    r = _e4_do_trace(eventos)
+    assert r["marcador"] is True and r["referencia_ausente"] is False
+    assert _e4_do_trace([{"tipo": "evidencias", "dados": {"afirmacoes": [], "texto_usuario": None}}])["marcador"] is False
+
+
+def test_e4_do_trace_conta_data_explicita_do_fato_como_marcador():
+    """Task 4b: caso só com data explícita (marco por afirmação, sem janela relativa) tem marcador de
+    E4. No trace o `marco` chega como lista [data_evento, folga] (ou null), não como tupla."""
+    from factcheck_mvp import aplicabilidade
+    from eval.run import _e4_do_trace
+    texto = "O jogo foi dia 8"
+    assert aplicabilidade.janela_temporal(texto) is None  # só o marco pode marcar este caso
+    com_marco = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": texto, "janela": None, "marco": ["2026-10-08", 2]}],
+        "texto_usuario": texto, "data_referencia": "2026-10-09"}}]
+    r = _e4_do_trace(com_marco)
+    assert r["marcador"] is True and r["referencia_ausente"] is False
+    sem_marco = [{"tipo": "evidencias", "dados": {
+        "afirmacoes": [{"texto": "Café cura câncer", "janela": None, "marco": None}],
+        "texto_usuario": "Café cura câncer", "data_referencia": "2026-10-09"}}]
+    assert _e4_do_trace(sem_marco)["marcador"] is False
+
+
 def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     from eval.decisao import gerar_snapshot_de_resultado
     res_dir = amb / "resultado"
@@ -226,8 +326,8 @@ def test_gerar_snapshot_de_resultado_le_casos_e_evidencias(amb):
     (res_dir / "casos.jsonl").write_text(
         json.dumps({"id": "e4-hoje", "rotulo": "falso", "esperado": ["alta"], "aceitavel": ["media"],
                     "tags": [], "run_id": "rid1"}) + "\n", encoding="utf-8")
-    n, pul = gerar_snapshot_de_resultado(res_dir, amb / "snap.jsonl", runs_dir=runs)
-    assert (n, pul) == (1, 0)
+    n, pul, rec = gerar_snapshot_de_resultado(res_dir, amb / "snap.jsonl", runs_dir=runs)
+    assert (n, pul, rec) == (1, 0, 0)  # com evento `evidencias`: nada reconstruído
     linha = json.loads((amb / "snap.jsonl").read_text(encoding="utf-8"))
     assert linha["id"] == "e4-hoje" and linha["evidencias"]["data_referencia"] == "2026-10-09"
 
@@ -242,3 +342,50 @@ def test_metricas_e4_agrega_por_caso():
                 "referencia_ausente": True}},
     ])["e4"] == {"casos_com_marcador": 1, "casos_com_desconto": 1, "casos_nivel_mudou": 1,
                  "bits_descartados_total": 1.5, "referencia_ausente": 1}
+
+
+# ------------------------------------------------------------------ I4: selo em conflito ou aplicado
+_AF_I4 = "Governo vai confiscar a poupança"
+
+
+def _ev_original_i4(veredito, origem):
+    from factcheck_mvp import decisao
+    return decisao.Evidencias(
+        afirmacoes=[decisao.AfirmacaoDecisao(texto=_AF_I4, nucleo=_AF_I4)],
+        itens=[decisao.ItemEvidencia(url="https://lupa.test/x", afirmacao=0, cluster="lupa.test",
+                                     classe="REFUTA", motor="llm-juiz:x", citacao_verificada=True,
+                                     curada=True, corpo_lido=True, veredito=veredito, origem_veredito=origem,
+                                     veiculo="Lupa")],
+        juiz_disponivel=True, n_lidas=1, n_consultadas=1)
+
+
+def _trace_como_o_pipeline_emite(dec, veredito):
+    """Trace de uma execução real: etapa afirmações, fonte juiz e decisao (travas + to_dict)."""
+    return [
+        {"tipo": "etapa", "dados": {"nome": "afirmacoes",
+                                    "detalhe": f"[afirma] '{_AF_I4}' (núcleo '{_AF_I4}')"}},
+        {"tipo": "fonte", "dados": {"url": "https://lupa.test/x", "estagio": "juiz", "classe": "REFUTA",
+                                     "afirmacao": 0, "veredito": veredito, "curada": True, "corpo_lido": True}},
+        {"tipo": "decisao", "dados": {"nivel": dec.nivel, "travas": dec.resumo_trace(), "decisao": dec.to_dict()}},
+    ]
+
+
+@pytest.mark.parametrize("veredito, origem", [("VERDADEIRO", "indice"), ("VERDADEIRO", None), ("FALSO", "indice")])
+def test_reconstrucao_reproduz_a_decisao_com_selo_em_conflito(veredito, origem):
+    """I4 (repro do revisor): REFUTA + selo VERDADEIRO do índice se anulam (indeterminada). A
+    reconstrução do trace tinha que reproduzir isso, e não lia o selo como de página (media)."""
+    from factcheck_mvp import decisao
+    from eval.decisao import evidencias_de_dict
+    from eval.decisao_gerar import evidencias_do_trace
+    orig = decisao.decidir(_ev_original_i4(veredito, origem))
+    evd = evidencias_do_trace(_trace_como_o_pipeline_emite(orig, veredito))
+    rec = decisao.decidir(evidencias_de_dict({**evd, "texto_usuario": "", "data_referencia": None}))
+    assert (rec.nivel, round(rec.log_odds, 6)) == (orig.nivel, round(orig.log_odds, 6))
+
+
+def test_origem_do_trace_reconhece_selo_que_entrou_em_conflito():
+    from eval.decisao_gerar import origem_do_trace
+    from factcheck_mvp import decisao
+    orig = decisao.decidir(_ev_original_i4("VERDADEIRO", "indice"))
+    assert orig.conflitos and not any("VERDADEIRO" in v.motivo for v in orig.votos)  # o voto some no conflito
+    assert origem_do_trace(_trace_como_o_pipeline_emite(orig, "VERDADEIRO"), "https://lupa.test/x", "VERDADEIRO") == "indice"

@@ -126,11 +126,23 @@ LLM (teto `AGENTE_MAX_BUSCAS` por caso). No trace: `cli trace <run_id> --eventos
 
 | campo | o quê |
 |---|---|
-| `casos_com_marcador` | casos cujo texto/afirmação tem marcador temporal ("hoje", "ontem"…) |
+| `casos_com_marcador` | casos cujo texto/afirmação tem marcador temporal relativo ("hoje", "ontem"…) ou data explícita do fato (marco, Task 4b: "dia 8", "8 de outubro") |
 | `casos_com_desconto` | casos com ≥1 fonte descontada (`descontos_temporais` não vazio) |
 | `casos_nivel_mudou` | casos em que o desconto mudou o nível (`nivel != nivel_sem_desconto`, só conta com desconto real) |
 | `bits_descartados_total` | soma dos `bits_descartados` (força da evidência removida por ser de outro episódio) |
 | `referencia_ausente` | casos sem `data_referencia` (E4 sem âncora: não mede) |
+
+Fallbacks do E4 no trace (contrato completo em `docs/TELEMETRIA.md`, §1):
+
+| `onde` | motivo | efeito |
+|---|---|---|
+| `relogio` | `data de referência não gravada` · `cassete sem data` | E4 desligado no caso (`referencia_ausente`) |
+| `data_pub` | `formato não reconhecido` · `sem âncora` (data relativa sem âncora) | a fonte fica sem data e sem desconto temporal |
+| `config` | aviso de `E4_*` inválido (não é inteiro > 0) | usa o default, com rastro |
+
+O evento `fonte` com `estagio=aplicabilidade` (1 por par peça × afirmação na fase base) traz `janela`,
+`marco`, `excedente` e `referencia`. `_e4_do_trace` lê `janela` e `marco` por afirmação do evento
+`evidencias`, o mesmo critério do `marcador` de `eval.decisao`.
 
 A/B honesto sem flag no código de produto — a perna controle zera `texto_usuario`/`janela`
 antes do `decidir` (o E4 desliga por construção, pois `dias_excedentes` não mede sem marcador):
@@ -148,6 +160,15 @@ python3 -m eval.decisao --gerar-snapshot --resultado eval/resultados/<ts>-nome \
 ```
 
 (lê `casos.jsonl` do resultado → `run_id` → evento `evidencias` do trace via
-`decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem o evento.)
+`decisao_gerar.evidencias_do_trace`; pula casos sem run ou sem evento `decisao`.)
+Trace antigo, sem `evidencias`: a linha é **reconstruída** do evento `decisao` (sem
+`texto_usuario`/`data_referencia`, então E4 não vale nela). A origem do selo vem do próprio trace
+(`selo X (pagina|indice)` no voto); selo que entrou em conflito ou foi aplicado sem aparecer no voto
+sai como `indice` (`conflitos`/`vereditos_aplicados`); sem registro, cai em `pagina` (default
+documentado). O comando informa os reconstruídos à parte.
+**Atenção:** a reconstrução de traces antigos pode DIVERGIR da decisão original. O trace não guarda a
+origem de todo selo (um selo de origem desconhecida vota igual a `indice`, mas o default `pagina` não
+vota) e não guarda `texto_usuario` nem `data_referencia` (o E4 não vale nela). Para medir decisão com
+fidelidade, use os snapshots de runs com evento `evidencias`.
 
 Testes do harness: `tests/test_eval_harness.py` (Pipeline falso, sem rede).

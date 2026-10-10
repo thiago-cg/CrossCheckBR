@@ -82,11 +82,9 @@ aceitar o selo quando vier no formato atribuído. Branch nova a partir da `main`
   aparece na lista como "não analisada integralmente"; se nenhuma fonte lida tiver postura → "evidência
   insuficiente". ⚠️ **Impacto medido (nível 0)**: 91 de 153 posturas do snapshot vêm só de título;
   indeterminada 39% → 65%, acerto+parcial 56,5% → 30,4%, graves 1 → 2. **Aguarda decisão da usuária** (§5.1).
-- [ ] **E4. Regra de data** (`aplicabilidade.py`, `config.py`): marcas "hoje/agora/ontem/nesta semana/acaba de"
-  × data de publicação (janelas 2/3/8 dias, configuráveis). Fonte com data incompatível não vota nem torna a
-  checagem aplicável; se ela CONFIRMA o mesmo fato antigo → sinal "possível notícia antiga fora de contexto"
-  que eleva a propensão. **A parte "eleva a propensão" aguarda decisão** (§5.2). Regressão obrigatória:
-  "Bolsonaro recebeu alta do hospital hoje" (o índice devolve uma checagem antiga do Boatos.org).
+- [x] **E4. Regra de data** (`aplicabilidade.py`, `config.py`) ✅ implementado (09/10, branch `feat/fase-eb-followup`): marcas "hoje/agora/ontem/nesta semana/acaba de"
+  × data de publicação (janelas 2/3/8 dias, configuráveis). Fonte com data incompatível perde peso (desconto em bits, sem zerar) e não torna a checagem aplicável no gate E1. **Não eleva a propensão** (decidido em 09/10, §5.2). Regressão obrigatória:
+  "Bolsonaro recebeu alta do hospital hoje" (o índice devolve uma checagem antiga do Boatos.org), coberta offline em `0ebcd57`. **Pendente:** medição em record (Task 8 Steps 3–7 do plano; aprovação e cassetes).
 - [ ] **E5. Selo atribuído** (`agregador.py`, bot, web): sempre "Selo d{o,a} <agência>: <SELO>";
   `verificar_neutralidade` ignora só esse formato, com agência cadastrada.
 - [ ] **Testes**: web pulada com checagem aplicável e chamada sem; aviso "não encontrado na base"; título que não
@@ -167,8 +165,8 @@ Números de referência já simulados estão em `REVIEW_2.md §3`.
 
 1. **E3**: seguir à risca "título nunca vota", mesmo com indeterminada ~65% no snapshot, ou antes ampliar a
    leitura (ex.: `crawl4ai` para páginas que exigem JavaScript)?
-2. **E4**: fonte antiga que CONFIRMA o fato apresentado como atual eleva a propensão ("possível notícia antiga
-   fora de contexto"), e a que REFUTA um episódio antigo só não vota — de acordo?
+2. ~~**E4**: fonte antiga que CONFIRMA o fato apresentado como atual eleva a propensão ("possível notícia antiga
+   fora de contexto"), e a que REFUTA um episódio antigo só não vota — de acordo?~~ **Resolvida em 09/10 pela usuária:** não há sinal que eleve a propensão por notícia antiga. Fonte de outro período perde peso nos dois sentidos (desconto simétrico); o nível só pode ficar mais extremo quando a fonte antiga de sinal oposto perde peso, desde que a direção venha de fontes dentro do período. Extremo sustentado só por fonte descontada fica vetado (trava `so_fontes_de_outro_periodo`).
 3. Política de `sem_evidencia`: `alta` para "boato sem prova" é erro ou acerto?
 4. Corrigir os rótulos de `cr_ibge_trafico_no_pib` e `cr_jn_soltura_vorcaro` (evidência em `review2/r_eval.md`)
    — com justificativa na `nota`, nunca em silêncio.

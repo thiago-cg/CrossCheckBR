@@ -222,3 +222,121 @@ Branch `feat/e1-base-primeiro`. Docs/metrificação, sem mudança de código de 
   `test_checagem_antiga_para_fato_de_hoje_nao_pula_web`). Sem run_ids novos de trace:
   nenhum `eval.run`/CLI `checar` foi executado nesta task (sem cassetes); os run_ids no
   snapshot (`20260930-...`) são dos traces antigos reutilizados.
+
+## Iteração Fase E/B follow-up + E4 (09/10 — 2026-10-09)
+
+Branch `feat/fase-eb-followup` @ `c7a8868` (base `main` @ `56c4b33`). Sem rede, sem cassetes e sem `runs/` neste ambiente: só medição de nível 0 (offline) e pytest. Nenhum `eval.run` foi executado.
+
+- Hipótese:
+  - **T6 (B1c):** página que o BERTimbau acha fake quase não deve votar, e selo ClaimReview de página não deve decidir o nível (só o selo do índice vota). Previsão: `cr_jn_soltura_vorcaro` (selo do template do SBT, erro grave) sai de baixa.
+  - **T7 (B2):** o máximo entre afirmações erra nas duas direções. Com conjunção (`p_texto = 1 − Π(1 − σ(L_a))`), A (L=+2) + B (L=−5) deve dar alta, e a parte falsa abaixo de τ não deve deixar a verdadeira decidir. Previsão: `cr_lula_acabar_bets_que_criou` sai de baixa.
+  - **E4:** fonte publicada fora da janela do texto ("hoje", "ontem", "nesta semana") perde peso, sem zerar e sem elevar a propensão. Fonte de outro episódio não deve decidir fato apresentado como atual. Previsão: nenhum efeito no a3-dev (snapshot sem datas).
+- Evidência (run_ids / eventos): nenhum run_id novo. Run_ids olhados: nenhum (sem `runs/` neste ambiente). Evidência = `eval/snapshots/a3-dev.jsonl` (69 casos) reexecutado com `eval.decisao` no HEAD e no `main` (56c4b33, exportado para uma pasta temporária).
+- Mudança:
+  - T6 (`6a4533c`): juiz combina avaliador e BERTimbau por página; peso da postura = `W_POSTURA × f_fonte × (1 − prob_fake_pagina)`; selo ClaimReview de página não vota. Sem o BERTimbau carregado o fator é 1,0 e o mock não entra na decisão.
+  - T7 (`f0e0959`, fix `7b955ca`): combinação por conjunção entre afirmações; afirmação só com evidência descontada (|L| < τ) fica fora da conjunção.
+  - E4 (plano `docs/superpowers/plans/2026-10-09-e4-relevancia-temporal.md`): `r` hiperbólica (Task 0); direção e bits medidos antes do desconto, com contrafactual `nivel_sem_desconto` (Task 1); `normalizar_data` e prioridade da fonte da data (Task 2: `b13087d`, `19170a5`, `4adac8f`); relógio gravado via `replay.hoje` (Task 3: `9436f01`, `7c691ee`); marcadores com exclusões e janela por afirmação (Task 4: `50bf6a7`, `15a444d`); marco da data do fato, com data explícita vencendo o marcador relativo (Task 4b: `0203bbb`); gate E1 com a mesma janela, referência e data (Task 5: `4b575ec`); aviso neutro no bot, na API e na web (Task 6: `762502e`, `2b5bbf4`); telemetria, `--sem-e4` e `--gerar-snapshot` (Task 7: `6761257`, `644c825`, `f494749`); trava `so_fontes_de_outro_periodo` (`a863228`).
+  - Raciocínio do avaliador (até ~240 caracteres, sem corte no código) no bot e na web: `17f385b`.
+  - Correções de review: `c86b6f8` (avaliador julga cada par uma vez, com cache por afirmação + URL canônica), `b74c4a4` (contagem de lidas inclui a fase base), `e868fd2` (contagem de fontes só das afirmações que pesaram), `b08a37a` (entrada por link usa a data da própria página; sem data o E4 fica desligado), `fbeba17` (sem exceções silenciosas nos descontos).
+- Métricas dev (antes → depois), nível 0: `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`, n=69, sem rede:
+
+| métrica | antes (main `56c4b33`) | só T6 | só T7 | final (HEAD `c7a8868`) |
+|---|---|---|---|---|
+| acerto | 0,1594 (11/69) | 0,1449 (10/69) | 0,1594 (11/69) | 0,1449 (10/69) |
+| acerto + parcial | 0,3043 (21/69) | 0,3188 (22/69) | 0,3188 (22/69) | 0,3333 (23/69) |
+| **erro grave** | **2** | **1** | **1** | **0** |
+| indeterminada | 0,6522 (45/69) | 0,6522 (45/69) | 0,6522 (45/69) | 0,6522 (45/69) |
+| níveis | indet 45 · média 14 · alta 6 · baixa 4 | indet 45 · média 16 · alta 5 · baixa 3 | indet 45 · média 15 · alta 6 · baixa 3 (derivado) | indet 45 · média 17 · alta 5 · baixa 2 |
+
+  - "Só T6" e "só T7" são ablações medidas nesta rodada, não reexecutadas no HEAD. "Antes" e "final" foram reexecutados e batem com a saída do comando.
+  - Casos que mudaram entre `main` e HEAD (só estes três; verificado caso a caso):
+    - `cr_jn_soltura_vorcaro` (enganoso): baixa (L=−1,60, **grave**) → média (L=−0,40). T6: o selo ClaimReview veio do template do SBT e deixa de votar.
+    - `cr_lula_acabar_bets_que_criou` (enganoso): baixa (L=−2,60, **grave**) → média (L=+0,709). T7: as partes "Lula quer acabar com as bets" (L=−2,60) e "Lula criou as bets" (L=+0,60) entram na conjunção e o resultado fica em média.
+    - `cr_lula_nao_acredita_em_deus` (falso): alta (L=+1,80, **acerto**) → média (L=+0,60, parcial). T6: mesmo mecanismo do selo de página. Trade-off aceito pela usuária (ver decisões).
+  - `eval.decisao` também confere contra `docs/review/review2/sondas/validos.json` (traces de 30/09) e imprime "reproduz N/69": `main` 42/69, HEAD 40/69. As duas divergências novas são vorcaro e nao_acredita (o `validos.json` tem baixa e alta). O restante já estava em `main`, sobretudo pelo E3 (indeterminada 27/69 no E1, 45/69 agora). O `validos.json` não é gabarito; o docstring de `eval/decisao.py` ("confere 69/69") está desatualizado.
+- Modo: nível 0 offline · buscas SerpAPI live: 0.
+- Decisão: mantida (aceita pela usuária em 09/10) · baseline atualizado? não (`eval/baseline.json` só muda depois do record).
+- Regressão Bolsonaro (base real do índice, offline, `r` stub = 0,05; teste em `0ebcd57`): REFUTA → sem E4 alta (L=+1,50), com E4 média (L=+0,16); SUSTENTA → sem E4 baixa (L=−3,00), com E4 média (L=−0,25).
+
+### Decisões da usuária (09/10)
+
+1. E4: aceito que o nível fique mais extremo quando a fonte antiga de sinal oposto perde peso, desde que a direção venha de fontes dentro do período. Extremo sustentado só por fonte descontada: não (trava `so_fontes_de_outro_periodo`).
+2. Task 4b: endurecer e ligar.
+3. Data explícita na afirmação vence o marcador relativo ("disse hoje que a ponte caiu em 2019").
+4. T6: aceito o trade-off `cr_jn_soltura_vorcaro` (grave corrigido) × `cr_lula_nao_acredita_em_deus` (acerto → parcial).
+5. T7: afirmação só com evidência descontada (|L| < τ) fica fora da conjunção; votos atuais que se anulam entram com 0,5; soma de partes fracas → alta aceita, acompanhar no record.
+
+### Não validado
+
+- Record da subamostra (~60 buscas SerpAPI) e replay: pendentes de aprovação da usuária e de cassetes (não existem nesta máquina). Os efeitos de T6 e T7 são só offline, sem busca real.
+- Holdout: pendente (aprovação e cassetes; ~60 buscas).
+- Cobertura de datas (Task 2, Step 5): não medida (sem `runs/`).
+- E4 não é medido no nível 0: o a3-dev não tem datas (`itens_com_data_pub` = 0; `e4.referencia_ausente` = 69). Só 4 casos dev têm 2 ou mais afirmações (`cr_bolsa_familia_15_aposentadoria_39`, `cr_codigo_fonte_urnas_moraes`, `cr_lula_acabar_bets_que_criou`, `cr_vorcaro_pagou_dino`), e são os únicos em que T7 pode mexer.
+- Marcadores temporais: 2 casos dev (`cr_hytalo_santos_morreu`, `cr_el_nino_catastrofe_setembro`) e 1 holdout (`cr_video_lula_ministros_stf_atual`). Amostra pequena.
+- Curva `r` hiperbólica não calibrada (escolha da usuária; calibrar com pares rotulados fica para depois).
+- Suíte: 688 passed, 0 failed, 0 xfail, com e sem `PYTHONUTF8=1` (`main`: 467 passed com `PYTHONUTF8=1`; 3 falhas de encoding sem ele).
+
+### Holdout (dev × holdout)
+
+| split | medição | acerto | acerto + parcial | erro grave | indeterminada |
+|---|---|---|---|---|---|
+| dev | nível 0 (a3-dev, final) | 0,1449 | 0,3333 | 0 | 0,6522 |
+| dev | record/replay da subamostra | pendente (aprovação + cassetes) | | | |
+| holdout | nível 4 | pendente (aprovação + cassetes) | | | |
+
+### Adendo: code review final (09/10)
+
+Base: `feat/fase-eb-followup` @ `62c6156`, 39 commits depois de `0c9267c` (o commit que registrou esta entrada). Entre `c7a8868` e `0c9267c` só mudaram docs, então o código medido aqui é o mesmo da entrada. Sem rede, sem record, sem holdout e sem `eval.run`. `eval/cassettes/`, `runs/` e `eval/resultados/` não existem nesta máquina.
+
+**Decisões da usuária (pós-review, 09/10)**
+
+1. **Conjunção (T7):** só partes com L_a ≥ 0 (contestadas, e divididas com L_a = 0) entram em `p = 1 − Π(1 − σ(L_a))`. Se nenhuma tem L_a ≥ 0, L = max(L_a). Motivo: pela fórmula antiga, 5 partes com 1 SUSTENTA curada cada davam alta (L = +1,33). Agora dão média (L = −1,00).
+2. **Parte só de outro período:** afirmação que só tem fonte fora da janela sai da conjunção. Se por isso o nível sairia baixa, o texto fica em média (trava `parte_sem_checagem_atual`, L = −0,99τ). A alta pelas partes contestadas atuais se mantém.
+3. **Postura quase toda descontada pelo BERT:** postura cujo fator (1 − prob_fake) fica abaixo de 5% do peso sem o modelo não vota (`FRACAO_MIN_VOTO = 0,05`, ou seja prob_fake > 0,95). Vai para `posturas_fracas` no trace.
+
+**Correções depois da entrada**
+
+- Trava `so_fontes_de_outro_periodo`: nunca extremo sustentado só por fonte descontada. Não tira afirmação que tem voto atual (C1).
+- `sem_fonte_confiavel` só conta fonte atual, isto é, dentro da janela.
+- Paridade gate × decisão: o gate E1 e `decidir` recebem o mesmo texto, a mesma referência e a mesma data normalizada, e medem com `marcas_da_afirmacao` (janela e marco) e `medida_da_afirmacao` (marco antes da janela). `AfirmacaoDecisao.calculada` marca que a medida veio do pipeline (pipeline.py:591 e 639-649).
+- Gate E1 não aceita selo de página (T6, `_selo_vota`). Consequência: selo de página também não encerra a busca do agente (pipeline.py:955). Em live, a busca pode gastar mais SerpAPI.
+- Task 4b endurecida: intervalos no início, frações ("8/10"), datas recorrentes ("todo dia 5"), comemorativas, verbo no futuro, D > referência e 2+ datas distintas não ancoram o marco.
+- Data explícita vence o marcador relativo: o marco vem antes da janela.
+- Normalização de datas: meia-noite local, formatos PT/EN/RFC, relativas medidas no fim do intervalo.
+- Relógio sem default escondido: sem `data_referencia` na entrada e sem relógio gravado, o E4 fica desligado (pipeline.py:305-311). Nunca usa o dia de hoje em silêncio.
+- Neutralidade: raciocínio com expressão proibida é omitido (`linha_raciocinio`, fallback `raciocinio`). A varredura normaliza NFKC e espaços, tira caracteres de formatação e compara também sem acento.
+- Web só cria link `http(s)`; outro esquema vira texto escapado (`api._link_html`).
+- Bot mede a mensagem em UTF-16, como o Telegram (`_len_telegram`).
+- Link usa a data da própria página; sem ela, a do encaminhamento; sem as duas, o E4 fica desligado (`entrada_de_link`, `ref_fallback`).
+- Os bugs "Lidas 0" e avaliador julgando cada par 2× já estavam corrigidos antes desta entrada (já registrados acima: `b74c4a4`, `c86b6f8`).
+
+**Números confirmados (HEAD `62c6156`)**
+
+- pytest: **889 passed, 0 failed**, com e sem `PYTHONUTF8=1` (`-p no:cacheprovider`).
+- `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl` (n=69): acerto 0,1449 · acerto+parcial 0,3333 · erro grave 0 · indeterminada 0,6522 · níveis {indeterminada 45, média 17, alta 5, baixa 2}. Reproduz 40/69 vs `validos.json`.
+- Caso a caso contra `0c9267c` (mesmo snapshot, mesmos 69 casos): só `cr_lula_acabar_bets_que_criou` muda, média L=+0,7089 → média L=+0,6000. Nenhum nível muda e nenhum erro grave aparece.
+- Cenários conferidos com `decidir` (fora do repo): REFUTA curada com prob_fake 0,94 → média (L=+0,06); com 0,96 → baixa (L=−2,00); 5 SUSTENTA curadas → média (L=−1,00); duas partes divididas → L=τ → alta.
+
+**Pendências (não validadas ou follow-ups)**
+
+- Record da subamostra (~60 buscas SerpAPI) e holdout (~60): aguardam aprovação e cassetes.
+- Descontinuidade D-a + D-c: REFUTA curada com prob_fake 0,94 dá média (+0,06); com 0,96 a postura some (fração abaixo de 5%) e as confirmações decidem (baixa). Conhecida, sem decisão.
+- Duas partes divididas (L_a = 0 cada) dão L = τ e alta. Documentado em teste; mantido pela decisão de 09/10.
+- Motivo impreciso: com a única postura descartada pelo BERT, `decidir` diz "as fontes com postura se anulam…" (ramo final do motivo).
+- Artigo do selo ("da"/"do") por heurística do primeiro nome (`_artigo_da_agencia`). A neutralidade não depende dele.
+- `decisao._citar_afirmacao` checa expressão proibida por substring crua em `texto.lower()`, sem normalizar acento: texto do usuário sem acento pode escapar da checagem.
+- `/checar --json` devolve o raciocínio bruto do avaliador. `linha_raciocinio` só age no bot e na web.
+- Reforçar o prompt do juiz para não usar "é falso" no raciocínio. Muda o prompt e invalida os cassetes LLM: fazer junto com o próximo record.
+- `pipeline` chama `motivo_data_ilegivel` sem âncora em 3 pontos (pipeline.py:278, 374, 737): uma relativa com âncora válida sai com o motivo "sem âncora".
+- `pipeline.py:22` importa `datetime` e `timezone` sem uso.
+- O docstring de `eval/decisao.py` diz "confere 69/69"; o número real é 40/69 (`validos.json`).
+
+### Adendo: pendências menores fechadas (09/10, itens 1-5)
+
+- `_citar_afirmacao` usa `verificar_neutralidade` (normaliza acento): "E falso que X" vira "a afirmação N".
+- `FRACAO_MIN_VOTO` (5%) vale também para o desconto temporal (E4): contribuição descontada abaixo de 5% do valor bruto não vota. A afirmação que fica sem voto por isso continua contando como "parte sem checagem atual" (D-b). Efeito colateral: com r = 0 (antes: sem voto e fora de D-b) o texto agora também limita baixa a média.
+- Motivo próprio e neutro quando a única postura é descartada pelo BERT.
+- `motivo_data_ilegivel` recebe a âncora da busca em `_peca_web` (`_ancora`). Em `pipeline.py` (índice, página lida) `normalizar_data` roda sem âncora, então "sem âncora" é o motivo correto ali.
+- Import sem uso removido de `pipeline.py`; docstring de `eval/decisao.py` corrigido.
+- Medição: pytest 894 passed; `eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`: acerto 0,1449, acerto+parcial 0,3333, erro grave 0 (igual ao anterior).
+- Item 6 (`/checar --json` devolve raciocínio bruto): decidido pela usuária em 09/10: a API continua devolvendo o texto bruto, sem omitir nem sinalizar. Nenhuma mudança de código.

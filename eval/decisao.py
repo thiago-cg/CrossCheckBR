@@ -8,7 +8,7 @@
   Avaliar (sem rede, determinístico):
     python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl
     python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl \
-      --validos docs/review/review2/sondas/validos.json   # confere 69/69 vs trace
+      --validos docs/review/review2/sondas/validos.json   # compara com traces antigos (referência velha: reproduz ~40/69)
 
   A/B do E4 (relevância temporal): a perna controle zera texto_usuario/janela
   antes do decidir (sem flag no código de produto):
@@ -20,10 +20,10 @@
 
 Formato do snapshot (1 linha por caso):
   {id, rotulo, esperado, aceitavel, run_id,
-   evidencias: {afirmacoes: [{texto, nucleo, polaridade}],
+   evidencias: {afirmacoes: [{texto, nucleo, polaridade[, janela, marco]}],
                 itens: [{url, afirmacao, cluster, classe, motor,
                          citacao_verificada, curada, corpo_lido,
-                         veredito, origem_veredito, veiculo}],
+                         veredito, origem_veredito, veiculo[, prob_fake_pagina]}],
                 vago, opiniao, rumor, juiz_disponivel, n_lidas, n_consultadas}}
 """
 from __future__ import annotations
@@ -48,6 +48,11 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         nucleo=a.get("nucleo", ""),
         polaridade=a.get("polaridade", "afirma"),
         janela=a.get("janela"),
+        # Task 4b: marco (data explícita do fato) é opcional; snapshots antigos não têm
+        marco=tuple(a["marco"]) if a.get("marco") else None,
+        # I-4: snapshot que traz `janela` (mesmo null) já foi calculado: null = sem marcador de fato,
+        # não "recalcular pelo texto". Ausente = snapshot antigo (caminho legado).
+        calculada=bool(a.get("calculada", "janela" in a)),
     ) for a in (d.get("afirmacoes") or [])]
     itens = [decisao.ItemEvidencia(
         url=i.get("url", ""),
@@ -62,6 +67,7 @@ def evidencias_de_dict(d: Dict[str, Any]) -> decisao.Evidencias:
         origem_veredito=i.get("origem_veredito"),
         veiculo=i.get("veiculo") or "",
         data_pub=i.get("data_pub"),
+        prob_fake_pagina=i.get("prob_fake_pagina"),  # T6: opcional (snapshots antigos não têm)
     ) for i in (d.get("itens") or [])]
     return decisao.Evidencias(
         afirmacoes=afs, itens=itens,
@@ -107,6 +113,7 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
             ev.texto_usuario = ""
             for a in ev.afirmacoes:
                 a.janela = None
+                a.marco = None
         d = decisao.decidir(ev)
         nivel = d.nivel
         ok = nivel in esp
@@ -119,7 +126,7 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
              "n_llm": 0, "n_fallbacks": 0, "fallbacks_por_onde": {},
              "descartes_por_motivo": {}, "descoberta": "snapshot", "dur_ms": 0,
              "serpapi_live": 0, "http_miss": 0,
-             "e4": {"marcador": any(a.janela is not None for a in ev.afirmacoes)
+             "e4": {"marcador": any(a.janela is not None or a.marco is not None for a in ev.afirmacoes)
                     or aplicabilidade.janela_temporal(ev.texto_usuario) is not None,
                     "desconto": bool(d.descontos_temporais),
                     # só conta com desconto real: sem evidência o contrafactual dá
@@ -134,16 +141,20 @@ def avaliar_snapshot(linhas: List[Dict[str, Any]], sem_e4: bool = False) -> List
 
 
 def gerar_snapshot_de_resultado(resultado: Path, saida: Path,
-                                runs_dir: Optional[Path] = None) -> Tuple[int, int]:
+                                runs_dir: Optional[Path] = None) -> Tuple[int, int, int]:
     """Snapshot nível 0 a partir de um eval de pipeline: lê `casos.jsonl` do diretório
     de resultado (id, rotulo, esperado, aceitavel, tags, run_id), busca o evento
     `evidencias` no trace de cada run (via `decisao_gerar.evidencias_do_trace`) e
-    escreve 1 linha de snapshot por caso com evidência. Devolve (n, pulados)."""
+    escreve 1 linha de snapshot por caso com evidência.
+
+    Devolve (n, pulados, reconstruidos). `reconstruidos` (⊆ n) são as linhas montadas a
+    partir do evento `decisao` porque o trace não tem `evidencias` (sem texto_usuario nem
+    data_referencia): a medição de E4 nessas linhas não vale."""
     from eval.decisao_gerar import _ler_trace
     import eval.decisao_gerar as _dg
     _dg.RAIZ_RUNS = Path(runs_dir) if runs_dir else RAIZ / "runs"
     from eval.decisao_gerar import evidencias_do_trace
-    n = pul = 0
+    n = pul = rec = 0
     saida.parent.mkdir(parents=True, exist_ok=True)
     with open(Path(resultado) / "casos.jsonl", encoding="utf-8") as fh, \
             open(saida, "w", encoding="utf-8") as out:
@@ -164,13 +175,15 @@ def gerar_snapshot_de_resultado(resultado: Path, saida: Path,
             if evd is None:
                 pul += 1
                 continue
+            if not any(e.get("tipo") == "evidencias" for e in evs):
+                rec += 1  # reconstruída a partir do evento decisao (trace antigo)
             out.write(json.dumps({"id": c["id"], "rotulo": c["rotulo"],
                                   "esperado": c.get("esperado") or [],
                                   "aceitavel": c.get("aceitavel") or [],
                                   "tags": c.get("tags") or [], "run_id": c["run_id"],
                                   "evidencias": evd}, ensure_ascii=False) + "\n")
             n += 1
-    return n, pul
+    return n, pul, rec
 
 
 def main(argv=None) -> int:
@@ -178,7 +191,7 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--snapshot", help="snapshot JSONL para avaliar")
     ap.add_argument("--sem-e4", action="store_true",
-                    help="zera texto_usuario/janela antes do decidir (perna controle do A/B, sem flag no produto)")
+                    help="zera texto_usuario/janela/marco antes do decidir (perna controle do A/B, sem flag no produto)")
     ap.add_argument("--gerar-snapshot", action="store_true", help="gera snapshot a partir de validos.json")
     ap.add_argument("--resultado", help="diretório eval/resultados/<ts> p/ --gerar-snapshot a partir de traces")
     ap.add_argument("--validos", default="docs/review/review2/sondas/validos.json")
@@ -190,8 +203,9 @@ def main(argv=None) -> int:
         if a.resultado:
             if not a.saida:
                 ap.error("--gerar-snapshot --resultado exige --saida")
-            n, pulados = gerar_snapshot_de_resultado(Path(a.resultado), Path(a.saida))
-            print(f"snapshot: {n} linha(s) em {a.saida} ({pulados} pulado(s) sem evento evidencias)")
+            n, pulados, reconstruidos = gerar_snapshot_de_resultado(Path(a.resultado), Path(a.saida))
+            print(f"snapshot: {n} linha(s) em {a.saida} ({pulados} pulado(s) sem evento evidencias; "
+                  f"{reconstruidos} reconstruída(s) a partir do evento decisao, sem texto_usuario/data_referencia)")
             return 0
         from eval.decisao_gerar import gerar_snapshot
         if not a.saida:

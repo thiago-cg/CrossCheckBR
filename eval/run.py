@@ -239,11 +239,13 @@ def _e4_do_trace(eventos: List[Dict[str, Any]]) -> Dict[str, Any]:
     evd = next((e.get("dados") or {} for e in eventos if e.get("tipo") == "evidencias"), {}) or {}
     if evd:
         afs = evd.get("afirmacoes") or []
-        try:
-            marcado = aplicabilidade.janela_temporal(evd.get("texto_usuario") or "") is not None
-        except Exception:
-            marcado = False
-        base["marcador"] = (any((a or {}).get("janela") is not None for a in afs) or marcado)
+        # `janela_temporal` só faz regex e normalização sobre texto: com str() não há exceção a
+        # tratar (um try silencioso aqui apagaria o marcador sem rastro).
+        marcado = aplicabilidade.janela_temporal(str(evd.get("texto_usuario") or "")) is not None
+        # Task 4b: a data explícita do fato também é marcador (`marco` por afirmação: [data_evento,
+        # folga] ou null no trace), como em eval.decisao: janela OU marco por afirmação, ou o texto.
+        base["marcador"] = (any((a or {}).get("janela") is not None or (a or {}).get("marco") is not None
+                                for a in afs) or marcado)
         base["referencia_ausente"] = not evd.get("data_referencia")
     decev = next((e.get("dados") or {} for e in eventos if e.get("tipo") == "decisao"), {}) or {}
     if decev:

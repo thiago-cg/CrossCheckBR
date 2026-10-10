@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
 import re
 import unicodedata
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
@@ -27,7 +26,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tupl
 from . import (afirmacoes, aplicabilidade, avaliador, confiabilidade, config, corroboracao, decisao, juiz_llm,
                padroes_llm, replay, selos, telemetria)
 from . import agente as _agente
-from .agregador import perguntas_guia
+from .agregador import perguntas_guia, texto_de_linha
 from .aprofundar import aprofundar
 from .catalogo import Catalogo
 from .indice import Indice
@@ -128,6 +127,30 @@ def _veredito_tipado(valor: Optional[str], selo: Optional[str], agencia: Optiona
     return selos.normalizar(selo or valor, agencia) if (selo or valor) else None
 
 
+def _selo_vota(p: Dict[str, Any]) -> bool:
+    """T6: o selo que conta como veredito NOSSO é o do ÍNDICE (ou sem origem, como antes). O
+    ClaimReview extraído da página não vota: mesma regra de `decisao` (origem_veredito "pagina")."""
+    return bool(p.get("veredito")) and p.get("origem_veredito") != "pagina"
+
+
+# Campos que `avaliador.avaliar` lê da peça: se nenhum mudou, a entrada do LLM é a mesma.
+_CAMPOS_JULGAMENTO = ("titulo", "corpo", "texto_completo", "trecho_juiz", "corpo_lido", "veiculo", "dominio",
+                      "tipo_fonte", "data_pub", "data", "veredito", "selo_original", "afirmacao_checada",
+                      "veredito_pagina")
+# Julgamentos válidos da fase base, reaproveitados no passo 8: (afirmação, URL canônica) -> (assinatura, resultado)
+CacheJulgamento = Dict[Tuple[int, str], Tuple[tuple, Dict[str, Any]]]
+
+
+def _assinatura_julgamento(peca: Dict[str, Any]) -> tuple:
+    return tuple(peca.get(c) for c in _CAMPOS_JULGAMENTO)
+
+
+def _contar_lidas(pecas: List[Dict[str, Any]]) -> int:
+    """Páginas lidas na lista FINAL de peças (fase base + passadas da web). A lista tem uma peça por
+    URL canônica (fundir_por_url), então a página lida na base não se soma de novo na web."""
+    return sum(1 for p in pecas if p.get("corpo_lido"))
+
+
 class Pipeline:
     def __init__(self, catalogo: Catalogo, indice_vereditos: Indice, indice_noticias: Indice,
                  serpapi: Optional[SerpAPIClient] = None, detector: Optional[DetectorFake] = None):
@@ -223,6 +246,7 @@ class Pipeline:
             for item in (bruto or {}).get(self.serpapi.result_key(q), [])[:6]:
                 d = rotear_fonte(normalizar_item(item, engine=eng, ancora=ancora), self.catalogo)
                 d["_afirmacao"] = consulta
+                d["_ancora"] = ancora
                 saida.append(d)
             return saida
         try:
@@ -251,7 +275,7 @@ class Pipeline:
                 "scholar": bool(d.get("_scholar"))}
         bruta = peca.get("data_pub_bruta")
         if bruta and not peca.get("data_pub"):
-            telemetria.fallback("data_pub", "formato não reconhecido", valor=str(bruta)[:40])
+            telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta, d.get("_ancora")), valor=str(bruta)[:40])
         return peca
 
     # ------------------------------------------------------------------ principal
@@ -260,6 +284,8 @@ class Pipeline:
         from . import indice as _indice
         etapas: List[EtapaRecibo] = []
         limitacoes: List[str] = []
+        for aviso in config.AVISOS_CONFIG:  # E4: valor inválido no env cai no default, com rastro
+            telemetria.fallback("config", aviso)
 
         def etapa(nome: str, status: str, detalhe: str = "", fontes_urls: Optional[List[str]] = None):
             etapas.append(EtapaRecibo(nome=nome, status=status, detalhe=detalhe, fontes=fontes_urls or []))
@@ -274,12 +300,18 @@ class Pipeline:
 
         # 1. Recebimento + marcas de rumor/opinião/vago
         texto_base = entrada.conteudo.strip()
-        # E4: data de referência explícita (entrada) ou relógio gravado (replay.*).
-        ref = entrada.data_referencia or replay.hoje(contexto=texto_base)
-        origem_ref = "entrada" if entrada.data_referencia else ("relogio" if ref else "ausente")
+        # E4: referência explícita (entrada) > relógio gravado (replay.*) > nenhuma. Link sem data
+        # (A5) desliga o E4 de forma explícita: nunca cai no relógio de hoje.
+        if entrada.sem_referencia_temporal:
+            ref, origem_ref = None, "ausente (link sem data)"
+        elif entrada.data_referencia:
+            ref, origem_ref = entrada.data_referencia, "entrada"
+        else:
+            ref = replay.hoje(contexto=texto_base)
+            origem_ref = "relogio" if ref else "ausente"
+        marcador = aplicabilidade.marcador_temporal(texto_base)
         janela_ref = aplicabilidade.janela_temporal(texto_base)
-        marcador_ref = (f"presente (janela {janela_ref}d)" if janela_ref is not None
-                        else "ausente")
+        marcador_ref = f"{marcador} (janela {janela_ref}d)" if marcador is not None else "ausente"
         eh_rumor = bool(RUMOR_RE.search(texto_base))
         eh_opiniao = bool(OPINIAO_SATIRA_RE.search(texto_base[:500]))
         eh_vago = (bool(VAGO_RE.search(texto_base[:500]))
@@ -339,7 +371,7 @@ class Pipeline:
                     norm_base = (aplicabilidade.normalizar_data(bruta_base)
                                  if isinstance(bruta_base, str) and bruta_base.strip() else None)
                     if bruta_base and not norm_base:
-                        telemetria.fallback("data_pub", "formato não reconhecido",
+                        telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta_base),
                                             valor=str(bruta_base)[:40])
                     pecas_base.append({"url": h["url"], "titulo": h.get("titulo") or h.get("afirmacao_checada") or "",
                                    "veiculo": h.get("agencia_nome") or h.get("agencia") or "",
@@ -373,8 +405,12 @@ class Pipeline:
             _uteis_base.append(p)
         pecas_base = _uteis_base
 
-        # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1)
-        julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar)
+        # 3c. Fase base: julga só a base e testa aplicabilidade (gate E1). O que ela julga vai para
+        # `cache_julg`; o passo 8 reaproveita, em vez de chamar o avaliador de novo no mesmo par.
+        cache_julg: CacheJulgamento = {}
+        julg_base, houve_aplicavel = await self._fase_base(afs, pecas_base, usar_llm, avisar,
+                                                           texto_usuario=texto_base, referencia=ref,
+                                                           cache=cache_julg)
 
         # Gate (E1): checagem aplicável na base → pula web e ondas extras.
         # Telemetria do gate é evento("etapa"), nunca fallback. Com SERPAPI_KEY ausente
@@ -384,7 +420,7 @@ class Pipeline:
             pecas = pecas_base
             julg: Dict[Tuple[int, int], Dict[str, Any]] = julg_base
             selecionados = list(julg.keys())
-            n_lidas = sum(1 for p in pecas if p.get("corpo"))
+            n_lidas = _contar_lidas(pecas)
             juiz_ok = any(r.get("classe") is not None for r in julg.values())
             etapa("descoberta", "pulada", "web pulada: checagem aplicável na base",
                   [p["url"] for p in pecas[:5]])
@@ -460,8 +496,10 @@ class Pipeline:
                         limitacoes.append("SerpAPI sem resultados para as afirmações.")
 
             # 6. Crawl-primeiro: deep crawl de TODAS as relevantes, depois a seleção só ordena
-            n_lidas, n_alvo = await self._ler(afs, pecas, avisar)
+            await self._ler(afs, pecas, avisar)
             selecionados = self._selecionar(afs, pecas)
+            # M3: o recibo conta a consulta toda (base lida na fase base + web), como `contagem.lidas`
+            n_alvo, n_lidas = sum(1 for p in pecas if p.get("_tentada")), _contar_lidas(pecas)
             if n_alvo:
                 etapa("deep-crawl", "ok" if n_lidas == n_alvo else "parcial",
                       f"{n_lidas}/{n_alvo} página(s) com corpo lido; "
@@ -490,7 +528,7 @@ class Pipeline:
             juiz_ok = False
             if selecionados:
                 await avisar("Julgando o que cada fonte diz sobre a afirmação…")
-                julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm)
+                julg, juiz_ok = await self._julgar(afs, pecas, selecionados, usar_llm, cache=cache_julg)
                 n = {k: sum(1 for r in julg.values() if r.get("classe") == k) for k in juiz_llm.CLASSES}
                 n_sem = sum(1 for r in julg.values() if r.get("classe") is None)
                 n_reb = sum(1 for r in julg.values() if r.get("rebaixado"))
@@ -518,8 +556,8 @@ class Pipeline:
 
         # 8b. Agente: crítico PÓS-JUIZ decide, por afirmação, se gasta uma onda extra
         if estado_agente is not None:
-            n_lidas += await self._ondas_extras(afs, pecas, julg, selecionados, juiz_ok, estado_agente,
-                                                usar_llm, avisar, etapa, limitacoes)
+            await self._ondas_extras(afs, pecas, julg, selecionados, juiz_ok, estado_agente,
+                                     usar_llm, avisar, etapa, limitacoes)
             juiz_ok = juiz_ok or any(r.get("classe") is not None for r in julg.values())
             if pecas and "SerpAPI sem resultados para as afirmações." in limitacoes:
                 limitacoes.remove("SerpAPI sem resultados para as afirmações.")  # a onda extra achou
@@ -535,20 +573,29 @@ class Pipeline:
         itens = []
         for (pi, ai), r in julg.items():
             p = pecas[pi]
+            # T6/B1c: P(fake) da página (credibilidade do BERTimbau). O mock é placeholder: devolve 0,5
+            # sem sinal, o que cortaria a postura pela metade; por isso não entra no nível (o valor
+            # segue no trace, evento bert_pagina).
+            bert = p.get("bert") or {}
+            prob_fake = None if bert.get("mock", True) else bert.get("prob_fake")
             itens.append(decisao.ItemEvidencia(
                 url=p["url"], afirmacao=ai, cluster=p.get("cluster") or p["url"], classe=r.get("classe"),
                 motor=r.get("motor") or "", citacao_verificada=r.get("citacao_verificada"),
                 curada=bool(p.get("curada")), corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
                 veredito=p.get("veredito"),
                 origem_veredito=p.get("origem_veredito"), veiculo=p.get("veiculo") or p.get("dominio") or "",
-                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub")))
+                confiabilidade=p.get("confiabilidade"), data_pub=p.get("data_pub"),
+                prob_fake_pagina=prob_fake,
+                data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao")))
+        # E4 (I-4): janela e marco de cada afirmação saem da MESMA função do gate (`_fase_base`).
+        marcas_af = [aplicabilidade.marcas_da_afirmacao(a.texto, texto_base, len(afs), ref) for a in afs]
         ev = decisao.Evidencias(
             afirmacoes=[decisao.AfirmacaoDecisao(
                 texto=a.texto, nucleo=a.alvo(), polaridade=a.polaridade,
-                janela=aplicabilidade.janela_da_afirmacao(a.texto, texto_base, len(afs)))
-                        for a in afs],
+                janela=janela, marco=marco, calculada=True)
+                        for a, (janela, marco) in zip(afs, marcas_af)],
             itens=itens, vago=eh_vago, opiniao=eh_opiniao, rumor=eh_rumor, juiz_disponivel=juiz_ok,
-            n_lidas=n_lidas, n_consultadas=len(pecas), texto_usuario=texto_base,
+            n_lidas=_contar_lidas(pecas), n_consultadas=len(pecas), texto_usuario=texto_base,
             data_referencia=ref)
         telemetria.evento("evidencias", **asdict(ev))
         dec = decisao.decidir(ev)
@@ -562,17 +609,22 @@ class Pipeline:
 
     # ------------------------------------------------------------------ seleção / juiz
     async def _fase_base(self, afs: List[Afirmacao], pecas_base: List[Dict[str, Any]],
-                         usar_llm: bool = True, avisar=None
+                         usar_llm: bool = True, avisar=None,
+                         texto_usuario: str = "", referencia: Optional[str] = None,
+                         cache: Optional[CacheJulgamento] = None
                          ) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], bool]:
         """Fase base (E1): seleciona/lê/julga SÓ a base e testa aplicabilidade.
 
-        Para cada par (peça, afirmação) chama
-        `aplicabilidade.e_aplicavel(classe, citacao_verificada, corpo_lido, veredito,
-        afs[ai].texto, data_pub)` e emite `telemetria.evento("fonte",
-        estagio="aplicabilidade", decisao=...)` por decisão. O gate (pular a web) é
+        Para cada par (peça, afirmação) chama `aplicabilidade.e_aplicavel` com as mesmas
+        entradas da decisão (E4): janela e marco da afirmação (`janela_da_afirmacao` e
+        `marco_da_afirmacao` sobre `texto_usuario` e nº de afirmações), `referencia` já resolvida em `_executar`
+        (a mesma de `Evidencias.data_referencia`) e `data_pub` normalizada. Emite
+        `telemetria.evento("fonte", estagio="aplicabilidade", decisao=..., motivo=...,
+        janela=..., excedente=..., referencia=...)` por decisão. O gate (pular a web) é
         evento("etapa"), nunca fallback — fallback só em erro real.
 
-        -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido).
+        -> (julg_base, houve_aplicavel). Mutaciona `pecas_base` (corpo lido). `cache` recebe os
+        julgamentos feitos aqui (ver `_julgar`), para o passo 8 não julgar o mesmo par de novo.
         Base vazia (INDICE_CHECAGENS=0) → ({}, False): fluxo web normal.
         """
         if not pecas_base:
@@ -583,17 +635,24 @@ class Pipeline:
         selecionados = self._selecionar(afs, pecas_base)
         if not selecionados:
             return {}, False
-        julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm)
+        julg, _ = await self._julgar(afs, pecas_base, selecionados, usar_llm, cache=cache)
+        marcas = [aplicabilidade.marcas_da_afirmacao(a.texto, texto_usuario, len(afs), referencia) for a in afs]
         houve = False
         for (pi, ai), r in julg.items():
             p = pecas_base[pi]
+            janela, marco = marcas[ai]
+            # I3/T6: só o selo do ÍNDICE fecha o gate; o ClaimReview da página não vota na decisão.
             aplicavel, motivo = aplicabilidade.e_aplicavel(
                 r.get("classe"), r.get("citacao_verificada"), bool(p.get("corpo")),
-                p.get("veredito"), afs[ai].texto, p.get("data_pub"))
+                p.get("veredito") if _selo_vota(p) else None, texto_usuario, p.get("data_pub"),
+                referencia=referencia, janela=janela, marco=marco)
+            medida = aplicabilidade.medida_da_afirmacao(janela, marco, p.get("data_pub"), referencia)
             telemetria.evento("fonte", url=p.get("url"), estagio="aplicabilidade",
                               decisao="aplicavel" if aplicavel else "inaplicavel",
                               motivo=motivo, afirmacao=ai, classe=r.get("classe"),
-                              corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"))
+                              corpo_lido=bool(p.get("corpo")), veredito=p.get("veredito"),
+                              janela=janela, marco=marco, excedente=medida[1] if medida else None,
+                              referencia=referencia)
             if aplicavel:
                 houve = True
         return julg, houve
@@ -610,6 +669,8 @@ class Pipeline:
         espúrio); `por_afirm` segue intacto em cada chamada.
         Preenche corpo/trecho_juiz/metodo/titulo/data_pub/veredito_pagina; peças não
         lidas seguem adiante marcadas com corpo_lido=False (nunca excluídas aqui).
+        M2: peça já tentada (`_tentada`, lida ou não) não é relida; a página já analisada
+        pelo BERT não passa de novo.
         Timeout/cap (URLs sem resposta, ausentes do dict): parcial preservado +
         `fallback deep-crawl`. Marca `_generica` nas homepages/seções reveladas
         genéricas após a leitura.
@@ -617,7 +678,9 @@ class Pipeline:
         alvo_crawl: List[Dict[str, Any]] = []
         vistos = set()
         for p in pecas:
-            if p["url"] not in vistos and not p.get("corpo"):
+            # M2: peça já tentada (lida ou não) não volta ao aprofundar: a base é lida na fase base e
+            # não se relê na passada da web (nem a que falhou).
+            if p["url"] not in vistos and not p.get("corpo") and not p.get("_tentada"):
                 vistos.add(p["url"])
                 ai0 = next((ai for ai in sorted(p.get("afs") or {0}) if ai < len(afs)), None)
                 alvo_crawl.append({"url": p["url"], "titulo": p.get("titulo", ""),
@@ -625,6 +688,9 @@ class Pipeline:
         por_afirm = max(1, int(getattr(config, "AGENTE_MAX_POR_AFIRMACAO", 12) or 12))
         teto_total = max(1, int(getattr(config, "DEEP_CRAWL_TOTAL", 0) or 0), 3 * por_afirm)
         alvo_crawl = alvo_crawl[: teto_total]
+        por_url = {p["url"]: p for p in pecas}
+        for d in alvo_crawl:  # marcada antes da leitura: falha ou timeout também conta como tentativa
+            por_url[d["url"]]["_tentada"] = True
         n_lidas = 0
         if alvo_crawl:
             await avisar("Lendo o corpo das fontes…")
@@ -646,7 +712,6 @@ class Pipeline:
                 telemetria.fallback("deep-crawl",
                                     f"teto {budget:.0f}s/cap: {len(faltantes)}/{len(alvo_crawl)} "
                                     "sem resposta, parcial preservado")
-            por_url = {p["url"]: p for p in pecas}
             for url, c in corpos.items():
                 p = por_url.get(url)
                 if not p or c is None:
@@ -669,27 +734,17 @@ class Pipeline:
                 norm_pagina = (aplicabilidade.normalizar_data(bruta_pagina)
                                if isinstance(bruta_pagina, str) and bruta_pagina.strip() else None)
                 if bruta_pagina and not norm_pagina:
-                    telemetria.fallback("data_pub", "formato não reconhecido",
+                    telemetria.fallback("data_pub", aplicabilidade.motivo_data_ilegivel(bruta_pagina),
                                         valor=str(bruta_pagina)[:40])
                 elif norm_pagina is not None:
                     nova, prec_nova = norm_pagina
-                    metodo = getattr(c, "metodo", "") or ""
-                    fonte_nova = {"jsonld": "jsonld", "readerlm": "readerlm",
-                                  "falha": "readerlm"}.get(metodo, "trafilatura")
-                    tier_nova = (1 if fonte_nova == "readerlm" else
-                                 2 if prec_nova == "ano" else
-                                 6 if fonte_nova == "jsonld" else 4)
-                    bruta_atual = p.get("data_pub_bruta")
-                    if not p.get("data_pub"):
-                        tier_atual = -1
-                    elif (isinstance(bruta_atual, str) and bruta_atual.strip()
-                          and aplicabilidade.normalizar_data(bruta_atual) is None):
-                        tier_atual = 3  # SerpAPI relativa: só resolveu com âncora
-                    else:
-                        tier_atual = 2 if p.get("data_pub_precisao") == "ano" else 5
-                    if tier_nova > tier_atual:
+                    # Tier pela FONTE da data (jsonld|trafilatura|readerlm), não pelo método do texto:
+                    # falha/seletor/regex não rebaixam uma data que veio do JSON-LD (revisão I-3).
+                    tier_nova = corroboracao.tier_data(getattr(c, "data_pub_fonte", None), prec_nova)
+                    if tier_nova > corroboracao.tier_da_peca(p):
+                        # I1: a data inteira troca junto, com o tier da fonte real da página gravado
                         p["data_pub"], p["data_pub_precisao"] = nova, prec_nova
-                        p["data_pub_bruta"] = bruta_pagina
+                        p["data_pub_bruta"], p["data_pub_tier"] = bruta_pagina, tier_nova
                 vp = getattr(c, "veredito_pagina", None)
                 if vp and not p.get("veredito"):
                     v = _veredito_tipado(vp.get("veredito"), vp.get("selo_original"), vp.get("agencia"))
@@ -703,7 +758,7 @@ class Pipeline:
         # B1b (T5/D1): BERTimbau/mock mede a CREDIBILIDADE da página (prob_fake);
         # a direção vem do avaliador (T6 consome p["bert"]). Só páginas lidas.
         for p in pecas:
-            if not p.get("corpo_lido"):
+            if not p.get("corpo_lido") or p.get("bert") is not None:  # M2: página já analisada não passa de novo
                 continue
             try:
                 r = self.detector.analisar_pagina(p.get("titulo") or "", p.get("corpo") or "")
@@ -712,7 +767,8 @@ class Pipeline:
                 continue
             p["bert"] = {"prob_fake": r.get("prob_fake"),
                          "modelo": r.get("modelo") or getattr(self.detector, "nome",
-                                                              type(self.detector).__name__)}
+                                                              type(self.detector).__name__),
+                         "mock": bool(r.get("mock", True))}
             telemetria.evento("bert_pagina", url=p.get("url"), prob_fake=p["bert"]["prob_fake"])
         # Homepage/seção que só se revela depois de lida (corpo de boilerplate): fora do juiz
         for p in pecas:
@@ -742,7 +798,7 @@ class Pipeline:
             cands = [i for i, p in enumerate(pecas)
                      if ai in (p.get("afs") or {0}) and (i, ai) not in excluir and not p.get("_generica")]
             cands.sort(key=lambda i: (_overlap(ref, f"{pecas[i].get('titulo','')} {pecas[i].get('snippet','')}")
-                                      + (0.3 if pecas[i].get("veredito") else 0)
+                                      + (0.3 if _selo_vota(pecas[i]) else 0)
                                       + (0.15 if pecas[i].get("curada") else 0)
                                       + (0.1 if pecas[i].get("tipo_portal") == "checagem" else 0)
                                       + confiabilidade.BONUS_SELECAO.get(pecas[i].get("confiabilidade") or "", 0.0)),
@@ -757,7 +813,8 @@ class Pipeline:
             k += 1
         return saida
 
-    async def _julgar(self, afs, pecas, selecionados, usar_llm) -> Tuple[Dict[Tuple[int, int], Dict], bool]:
+    async def _julgar(self, afs, pecas, selecionados, usar_llm,
+                      cache: Optional[CacheJulgamento] = None) -> Tuple[Dict[Tuple[int, int], Dict], bool]:
         """Julga 1× por par (peça, afirmação) via `avaliador.avaliar` (manchete+corpo).
 
         `julg[(pi, ai)] = {"classe": posicao, "citacao", "citacao_score",
@@ -768,7 +825,12 @@ class Pipeline:
         preservado (nunca descartado) + `fallback juiz/avaliador`. Por peça emite
         `fonte` com `estagio="avaliador"` (posicao, n_chars_trecho, corpo_lido,
         metodo) e depois `estagio="juiz"` (agregação). Ondas extras e fase base
-        reutilizam este caminho."""
+        reutilizam este caminho.
+
+        `cache` (um por execução: a fase base grava, o passo 8 lê): par já julgado com a MESMA
+        entrada do avaliador (`_assinatura_julgamento`) reaproveita o resultado, sem nova chamada
+        ao LLM e sem novo evento `avaliador` (o da base já está no trace). Só entra no cache o
+        julgamento válido (`classe` não None): falha de LLM e par sem corpo são avaliados de novo."""
         por_af: Dict[int, List[int]] = {}
         for pi, ai in selecionados:
             por_af.setdefault(ai, []).append(pi)
@@ -818,6 +880,11 @@ class Pipeline:
                 for ai in sorted(por_af):
                     alvo = afs[ai].alvo()
                     for pi in por_af[ai]:
+                        chave = (ai, corroboracao.url_canonica(pecas[pi].get("url") or ""))
+                        assinatura = _assinatura_julgamento(pecas[pi])
+                        if cache is not None and chave in cache and cache[chave][0] == assinatura:
+                            resultados[(pi, ai)] = dict(cache[chave][1])  # já julgado na fase base
+                            continue
                         try:
                             a = await asyncio.to_thread(avaliador.avaliar, alvo, pecas[pi])
                         except Exception as e:  # 1 par falhou: registra e segue (parcial preservado)
@@ -828,6 +895,8 @@ class Pipeline:
                                  "erro": f"{type(e).__name__}: {e}"[:300], "corpo_lido": False}
                         resultados[(pi, ai)] = _normalizar(a)
                         _evento_avaliador(pi, ai, a)
+                        if cache is not None and resultados[(pi, ai)]["classe"] is not None:
+                            cache[chave] = (assinatura, dict(resultados[(pi, ai)]))
 
             try:
                 await asyncio.wait_for(_todos(), timeout=budget)
@@ -869,11 +938,11 @@ class Pipeline:
         return julg, juiz_ok
 
     async def _ondas_extras(self, afs, pecas, julg, selecionados, juiz_ok, estado, usar_llm,
-                            avisar, etapa, limitacoes) -> int:
+                            avisar, etapa, limitacoes) -> None:
         """Laço pós-juiz do agente. Muta `pecas` (só acrescenta: índices estáveis) e `julg`.
-        -> páginas lidas a mais. Nunca levanta."""
+        As páginas lidas são contadas depois, pela lista final de `pecas` (`_contar_lidas`).
+        Nunca levanta."""
         alvos = _agente.alvos_de(afs)
-        n_lidas = 0
         # Juiz "disponível" p/ o crítico: rodou e classificou algo, ou não havia o que julgar.
         juiz_disp = bool(usar_llm) and (juiz_ok or not selecionados)
         try:
@@ -883,7 +952,8 @@ class Pipeline:
                 pedidos = []
                 for ai in range(len(afs)):
                     itens = [{"classe": r.get("classe"), "cluster": pecas[pi].get("cluster"), "url": pecas[pi]["url"],
-                              "veredito": pecas[pi].get("veredito"), "titulo": pecas[pi].get("titulo"),
+                              "veredito": pecas[pi].get("veredito") if _selo_vota(pecas[pi]) else None,
+                              "titulo": pecas[pi].get("titulo"),
                               "dominio": pecas[pi].get("dominio")}
                              for (pi, a), r in julg.items() if a == ai]
                     res = _agente.resumir_julgamento(ai, itens)
@@ -926,8 +996,7 @@ class Pipeline:
                     idx[k] = len(pecas) - 1
                     n_novas += 1
                 alvo_afs = {ai for ai, _, _ in pedidos_q}
-                lidas, _ = await self._ler(afs, pecas, avisar)
-                n_lidas += lidas
+                await self._ler(afs, pecas, avisar)
                 sel = self._selecionar(afs, pecas, excluir=set(julg), afs_alvo=alvo_afs)
                 if sel:
                     corroboracao.agrupar(pecas)  # clusters com as peças novas (1 voto por cluster)
@@ -951,7 +1020,6 @@ class Pipeline:
             etapa("agente-critico", "ok",
                   " | ".join(f"af{c['afirmacao']}: {c['decisao']} ({c['motivo']})" for c in estado.criticas)
                   + f". Total: {estado.resumo()}.")
-        return n_lidas
 
     async def _propor_catalogo(self, pecas, julg, etapa) -> None:
         teto = getattr(config, "DISCOVERY_MAX_SITES", 2) or 0
@@ -1024,14 +1092,14 @@ class Pipeline:
                               valor=v.motivo, confianca=None, direcao=v.direcao, peso=v.peso,
                               evidencias=v.urls[:3])
         # E4: uma fonte descontada por item de dec.descontos_temporais (decidir segue puro,
-        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao ficam None
-        # quando o desconto não as carrega (compat com traces antigos).
+        # sem telemetria: o pipeline lê o objeto pronto). data_pub_bruta/precisao vêm do próprio
+        # desconto; ficam None só em traces anteriores a elas.
         for d in dec.descontos_temporais:
             telemetria.evento("fonte", url=d.get("url"), estagio="data", decisao="descontada",
                               motivo=f"{d.get('dias_alem_da_janela')} dias além da janela "
                                      f"de {d.get('janela')}",
                               afirmacao=d.get("afirmacao"), data_pub=d.get("data_pub"),
-                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("precisao"),
+                              data_pub_bruta=d.get("data_pub_bruta"), precisao=d.get("data_pub_precisao"),
                               r=d.get("r"), bits=d.get("bits_descartados"))
         telemetria.evento("decisao", nivel=dec.nivel, nivel_agregador=dec.nivel, score=dec.log_odds,
                           sinais=[f"af{v.afirmacao}:{v.cluster}:{v.valor:+.2f}" for v in dec.votos],
@@ -1073,15 +1141,16 @@ class Pipeline:
             corpo = p.get("corpo") or p.get("trecho") or ""
             fontes.append((ordem[classe] if pi in melhor else 4, not bool(p.get("corpo")), not p.get("curada"),
                            FonteEvidencia(
-                url=p["url"], titulo=p.get("titulo") or "", portal_id=p.get("portal_id"),
+                url=p["url"], titulo=texto_de_linha(p.get("titulo")), portal_id=p.get("portal_id"),
                 portal_nome=p.get("veiculo") or p.get("dominio") or "",
-                tipo_fonte="veredito" if p.get("veredito") else "corroboracao",
+                tipo_fonte="veredito" if _selo_vota(p) else "corroboracao",
                 veredito=p.get("veredito"), selo_original=p.get("selo_original"),
                 veredito_normalizado=p.get("veredito"),
                 confianca=round(min(1.0, pesos.get(p["url"], 0.0) / decisao.W_VEREDITO), 3) if p["url"] in pesos else None,
                 trecho_corpo=corpo[:500] or None, corpo_lido=bool(p.get("corpo_lido", p.get("corpo"))),
-                data_pub=p.get("data_pub"), quote=(r.get("citacao") or (p.get("snippet") or corpo)[:140] or None),
-                data_pub_bruta=p.get("data_pub_bruta"),
+                data_pub=p.get("data_pub"),
+                quote=texto_de_linha(r.get("citacao") or (p.get("snippet") or corpo)[:140]) or None,
+                data_pub_bruta=p.get("data_pub_bruta"), data_pub_precisao=p.get("data_pub_precisao"),
                 relevancia_temporal=_r_por_url.get(p["url"]),
                 tipo_conteudo="checagem" if (p.get("veredito") or p.get("tipo_portal") == "checagem") else "noticia",
                 relevante=juiz_llm.postura_para_relevante(classe) if pi in melhor else None,
@@ -1107,10 +1176,10 @@ class Pipeline:
         priorizar_data = bool(getattr(dec, "travas", {}).get("data_incompativel")
                               and getattr(dec, "descontos_temporais", None))
         if priorizar_data:
-            n_dt = len(dec.descontos_temporais or [])
-            lims.append(f"Datas: {n_dt} fonte(s) anteriores ao período do texto tiveram o peso reduzido.")
+            # No início: o bot mostra só as 3 primeiras limitações (telegram_bot.formatar).
+            lims.insert(0, dec.limitacao_datas())
         return RelatorioChecagem(propensao=dec.nivel, justificativa=dec.justificativa(), sinais=sinais,
                                  fontes=fontes, etapas=etapas, limitacoes=lims,
-                                 perguntas_guia=perguntas_guia(priorizar_data=priorizar_data), consulta=entrada,
+                                 perguntas_guia=perguntas_guia(), consulta=entrada,
                                  header=dec.header(), why_1linha=dec.why_1linha(), decisao=dec.to_dict(),
                                  onde_encontrado=onde_encontrado)

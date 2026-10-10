@@ -1,4 +1,6 @@
 """Dedupe canônico e clusters de independência (antes do juiz)."""
+import pytest
+
 from factcheck_mvp import corroboracao as co
 
 CORPO_ESTADAO = (
@@ -91,3 +93,41 @@ def test_divergencia_de_data_usa_data_pub():
              {"url": "https://b.com/y", "cluster": "b.com", "data_pub": "2026-09-01T10:00:00"}]
     div = co.divergencias(pecas)
     assert div and div[0]["campo"] == "data"
+
+
+# --- Revisão I1: a data viaja inteira (valor, precisão, bruta, tier) na fusão por URL ---
+_URL_I1 = "https://www.jornal-exemplo.com.br/politica/2026/10/caso-x.html"
+
+
+def _peca_com_data(url, data, precisao, bruta):
+    return {"url": url, "titulo": "Caso X", "afs": {0}, "origens": {"web"},
+            "data_pub": data, "data_pub_precisao": precisao, "data_pub_bruta": bruta}
+
+
+@pytest.mark.parametrize("duplicada, esperado", [
+    # A1: relativa ancorada (dia, tier 3) substitui a peça sem data, com precisão e bruta juntas
+    (_peca_com_data(_URL_I1 + "?utm_source=news", "2026-10-07", "dia", "há 2 dias"),
+     ("2026-10-07", "dia", "há 2 dias")),
+    # A2: só ano (tier 2) substitui a peça sem data, com a precisão junto
+    (_peca_com_data(_URL_I1 + "?utm_source=news", "2021-12-31", "ano", "2021"),
+     ("2021-12-31", "ano", "2021")),
+])
+def test_fusao_copia_a_data_inteira_da_duplicata(duplicada, esperado):
+    unicas, _ = co.fundir_por_url([_peca_com_data(_URL_I1, None, None, None), duplicada])
+    assert (unicas[0]["data_pub"], unicas[0]["data_pub_precisao"], unicas[0]["data_pub_bruta"]) == esperado
+
+
+def test_fusao_relativa_sem_ancora_cede_a_data_absoluta_da_duplicata():
+    """A3: a peça mantida só tem a data relativa sem âncora; a duplicata traz a absoluta."""
+    unicas, _ = co.fundir_por_url([
+        _peca_com_data(_URL_I1, None, None, "há 3 dias"),
+        _peca_com_data(_URL_I1 + "?utm_source=news", "2026-10-06", "dia", "6 de out. de 2026")])
+    assert (unicas[0]["data_pub"], unicas[0]["data_pub_precisao"], unicas[0]["data_pub_bruta"]) == (
+        "2026-10-06", "dia", "6 de out. de 2026")
+
+
+def test_fusao_mantem_a_data_de_maior_tier_quando_a_duplicata_e_relativa():
+    unicas, _ = co.fundir_por_url([
+        _peca_com_data(_URL_I1, "2026-10-06", "dia", "6 de out. de 2026"),
+        _peca_com_data(_URL_I1 + "?utm_source=news", "2026-10-07", "dia", "há 2 dias")])
+    assert (unicas[0]["data_pub"], unicas[0]["data_pub_bruta"]) == ("2026-10-06", "6 de out. de 2026")

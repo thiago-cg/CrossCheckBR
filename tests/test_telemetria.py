@@ -15,7 +15,7 @@ def tdir(tmp_path, monkeypatch):
 
 
 def _eventos(tdir, rid):
-    return [json.loads(x) for x in (tdir / rid / "trace.jsonl").read_text().splitlines()]
+    return [json.loads(x) for x in (tdir / rid / "trace.jsonl").read_text(encoding="utf-8").splitlines()]
 
 
 def test_evento_sem_run_e_noop(tdir):
@@ -44,7 +44,7 @@ def test_run_grava_trace_e_resultado(tdir):
     assert ev[0]["tipo"] == "run_inicio" and ev[0]["dados"]["tipo"] == "titulo"
     assert ev[-1]["tipo"] == "run_fim" and ev[-1]["dados"]["nivel"] == "baixa"
     assert all({"ts", "t_rel_ms", "tipo", "dados"} <= set(e) for e in ev)
-    res = json.loads((tdir / rid / "resultado.json").read_text())
+    res = json.loads((tdir / rid / "resultado.json").read_text(encoding="utf-8"))
     m = res["metricas"]
     assert res["relatorio"]["propensao"] == "baixa"
     assert m["n_llm"] == 1 and m["fallbacks_por_onde"] == {"juiz": 1}
@@ -59,7 +59,7 @@ def test_redacao_de_segredos_e_truncamento(tdir, monkeypatch):
                t="https://api.telegram.org/bot123456:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/getMe",
                bruto="valor segredoSuperLongo123 no meio", grande="x" * 5000)
     tel.finalizar_run(None)
-    txt = (tdir / rid / "trace.jsonl").read_text()
+    txt = (tdir / rid / "trace.jsonl").read_text(encoding="utf-8")
     for s in ("abc123", "zzz", "abcdefghijklmnop", "AAHdqTcv", "segredoSuperLongo123"):
         assert s not in txt
     assert "REDACTED" in txt
@@ -93,7 +93,7 @@ def test_run_aninhado_reusa_id(tdir):
     tel.finalizar_run({"propensao": "alta"})  # fecha só o aninhado
     assert tel.run_atual() == externo
     tel.finalizar_run(None)  # fecha de verdade, com o resultado guardado
-    res = json.loads((tdir / externo / "resultado.json").read_text())
+    res = json.loads((tdir / externo / "resultado.json").read_text(encoding="utf-8"))
     assert res["relatorio"]["propensao"] == "alta"
     assert [e["tipo"] for e in _eventos(tdir, externo)].count("run_fim") == 1
 
@@ -142,7 +142,7 @@ def test_run_context_manager_registra_erro(tdir):
     with pytest.raises(RuntimeError):
         with tel.run({"entrada": "x"}) as rid:
             raise RuntimeError("falhou")
-    res = json.loads((tdir / rid / "resultado.json").read_text())
+    res = json.loads((tdir / rid / "resultado.json").read_text(encoding="utf-8"))
     assert "falhou" in res["erro"]
 
 
@@ -167,14 +167,14 @@ def test_trace_avaliador_por_peca_tem_campos(tdir):
 _JUIZ_E4 = "llm-juiz:llm-local"
 
 
-def _dec_e4_com_desconto(monkeypatch):
+def _dec_e4_com_desconto(monkeypatch, data_pub="2021-01-01", bruta=None, precisao=None):
     from factcheck_mvp import decisao
     from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, ItemEvidencia, decidir
     monkeypatch.setattr(decisao, "relevancia_temporal", lambda e, j: 0.05)
     texto = "Bolsonaro recebeu alta do hospital hoje"
     it = ItemEvidencia(url="https://g1.globo.com/noticia-sobre-alta-do-hospital-hoje", cluster="g1",
                        classe="REFUTA", motor=_JUIZ_E4, citacao_verificada=True, curada=True,
-                       corpo_lido=True, data_pub="2021-01-01")
+                       corpo_lido=True, data_pub=data_pub, data_pub_bruta=bruta, data_pub_precisao=precisao)
     ev = Evidencias(afirmacoes=[AfirmacaoDecisao(texto=texto, nucleo=texto)], itens=[it],
                     texto_usuario=texto, data_referencia="2026-10-09")
     d = decidir(ev)
@@ -192,9 +192,31 @@ def test_e4_resumo_trace_traz_contrafactual_e_descontos(tdir, monkeypatch):
     assert r["descontos"][0] == f"{x['url'][:60]} +{x['dias_alem_da_janela']}d r={x['r']} −{x['bits_descartados']}b"
 
 
+def test_resumo_trace_nao_tem_chave_repetida():
+    """Chave repetida num dict literal some em silêncio (L, p e motivo estavam duas vezes):
+    confere a fonte, porque em tempo de execução a duplicata já não aparece."""
+    import ast
+    import inspect
+    import textwrap
+    from factcheck_mvp.decisao import Decisao
+    arvore = ast.parse(textwrap.dedent(inspect.getsource(Decisao.resumo_trace)))
+    retorno = next(n for n in ast.walk(arvore) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict))
+    chaves = [k.value for k in retorno.value.keys if isinstance(k, ast.Constant)]
+    assert len(chaves) == len(set(chaves)), sorted({c for c in chaves if chaves.count(c) > 1})
+    # M7: em runtime, `**self.travas` sobrescreve em silêncio uma chave literal de mesmo nome (a fonte
+    # não acusa). Com as travas que `decidir` de fato produz, o resumo precisa ter as literais e as
+    # travas todas, sem perda.
+    from factcheck_mvp.decisao import AfirmacaoDecisao, Evidencias, decidir
+    d = decidir(Evidencias(afirmacoes=[AfirmacaoDecisao(texto="Governo vai confiscar a poupança")]))
+    r = d.resumo_trace()
+    assert not (set(chaves) & set(d.travas)), sorted(set(chaves) & set(d.travas))
+    assert len(r) == len(set(chaves)) + len(d.travas)
+
+
 def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
     from factcheck_mvp.pipeline import Pipeline
-    d = _dec_e4_com_desconto(monkeypatch)
+    # Peça com placeholder de ano: a bruta vem como "2021-01-01" e a normalizada é o fim do ano.
+    d = _dec_e4_com_desconto(monkeypatch, data_pub="2021-12-31", bruta="2021-01-01", precisao="ano")
     with tel.run({"entrada": "Bolsonaro recebeu alta do hospital hoje"}):
         Pipeline._emitir_decisao(d)
     ev = _eventos(tdir, tel.ultimo_run_id())
@@ -204,5 +226,6 @@ def test_e4_emitir_decisao_emite_fonte_data(tdir, monkeypatch):
     x = d.descontos_temporais[0]
     assert f["decisao"] == "descontada"
     assert f["motivo"] == f"{x['dias_alem_da_janela']} dias além da janela de {x['janela']}"
-    assert f["afirmacao"] == 0 and f["data_pub"] == "2021-01-01"
+    assert f["afirmacao"] == 0 and f["data_pub"] == "2021-12-31"
+    assert f["data_pub_bruta"] == "2021-01-01" and f["precisao"] == "ano"
     assert f["r"] == x["r"] and f["bits"] == x["bits_descartados"]

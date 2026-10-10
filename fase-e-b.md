@@ -74,7 +74,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - um teste com o detector mock confirma que só as páginas lidas recebem `bert`;
     - `cli trace last --eventos bert_pagina` mostra os valores.
 
-- [ ] **T6. B1c: o juiz combina avaliador e BERTimbau** (`decisao.py`). ⏳ IMPLEMENTADO MAS NÃO COMMITADO (09/10): hunks em `decisao.py`/`pipeline.py`/`eval/decisao.py`/testes sobrevivem no working tree, mas o arquivo está com syntax break do WIP concorrente do E4 e sem review — vai em follow-up, não neste PR. Medição offline já feita: `cr_jn_soltura_vorcaro` baixa-GRAVE→media; grave restante é de postura, fora do escopo.
+- [x] **T6. B1c: o juiz combina avaliador e BERTimbau** (`decisao.py`). ✅ FEITO (commit `6a4533c`, branch `feat/fase-eb-followup`). O que mudou: `ItemEvidencia.prob_fake_pagina`; peso da postura = `W_POSTURA × f_fonte × (1 − prob_fake_pagina)`; selo ClaimReview de **página** não vota (só o selo do índice). Sem o BERTimbau carregado o fator é 1,0 e o mock não entra na decisão. No nível 0 (`eval.decisao`, a3-dev): `cr_jn_soltura_vorcaro` baixa (GRAVE) → média; `cr_lula_nao_acredita_em_deus` alta (acerto) → média (parcial), trade-off aceito pela usuária em 09/10.
   - Adicionar `ItemEvidencia.prob_fake_pagina`.
   - Peso da postura = `W_POSTURA × f_fonte × (1 − prob_fake_pagina)`. Página que o modelo acha fake quase não vota.
   - Selo ClaimReview **de página** deixa de votar. Isso corrige `cr_jn_soltura_vorcaro`, cujo selo vinha do template do SBT.
@@ -85,7 +85,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - novo teste: página com prob_fake 0,9 e REFUTA pesa ≤ 0,1 de uma com prob_fake 0;
     - teste: selo de página sem índice não aparece em `vereditos_aplicados`.
 
-- [ ] **T7. B2: combinação por conjunção** (D2 decidida: alta; `decisao.decidir`, bloco "combinação entre afirmações"). ⏳ NÃO INICIADO → follow-up.
+- [x] **T7. B2: combinação por conjunção** (D2 decidida: alta; `decisao.decidir` e `_combinar_afirmacoes`). ✅ FEITO (commits `f0e0959` e `7b955ca`; regra final no code review de 09/10). Regra final: `p_texto = 1 − Π(1 − σ(L_a))` **só sobre as partes contestadas** (L_a ≥ 0; partes divididas com L_a = 0 entram com σ = 0,5). Partes só confirmadas (L_a < 0) não somam, então confirmações nunca dão alta; se nenhuma parte é contestada, L = max(L_a). Afirmação sem voto fica fora do produto. Com 2+ afirmações com voto, afirmação só com fonte de outro período e |L_a| < τ fica fora da conjunção (`fora_da_conjuncao`). Travas sobre o resultado: `so_fontes_de_outro_periodo` (nenhum extremo só por fonte descontada; não tira afirmação com voto atual) e `parte_sem_checagem_atual` (se a parte excluída deixaria o nível baixa, o texto fica em média, L = −0,99τ). Consequências aceitas: soma de partes fracas contestadas dá alta (acompanhar no record); duas partes divididas dão L = τ e alta. No nível 0: `cr_lula_acabar_bets_que_criou` baixa (GRAVE) → média: "Lula quer acabar com as bets" (L=−2,60) não soma; "Lula criou as bets" (L=+0,60) decide; conjunto L=+0,60 (era +0,709 antes da regra final).
   - Trocar a regra de máximo por `p_texto = 1 − Π(1 − σ(L_a))` e `L = logit(p_texto)`.
   - Afirmação sem voto entra com p = 0,5? **Não.** Ela fica fora do produto: ausência de evidência não é evidência.
   - Escrever os 2 testes antes de implementar:
@@ -93,7 +93,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - (b) parte falsa abaixo de τ (p≈0,70) com parte verdadeira (p≈0,10) → **não** baixa (caso `cr_lula_acabar_bets_que_criou`).
   - → Verify: os dois testes passam, e `test_mutacao_*` continua passando.
 
-- [ ] **T8. B5 e B6 (decisão e independência).** ✅ FEITO (commit `6453b3f` + fix `54c6d67` plural `imagens`; review + re-review clean; delta `eval.decisao` zero por construção).
+- [x] **T8. B5 e B6 (decisão e independência).** ✅ FEITO (commit `6453b3f` + fix `54c6d67` plural `imagens`; review + re-review clean; delta `eval.decisao` zero por construção).
   - B5: a trava VAGO (`pipeline.py:54`, `VAGO_RE`) só dispara quando o sujeito é genérico (economia, país, governo).
   - B6: em `corroboracao.py` / `catalogo.py`:
     - a assinatura de agência não casa com crédito de foto ("Folhapress");
@@ -102,7 +102,7 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
     - "Ibuprofeno piora o quadro de dengue" não é vago;
     - `comentarios1.folha.uol.com.br` não é curada.
 
-- [ ] **T9. Medição e registro.** ⏳ PARCIAL: `eval.decisao` antes/depois feito offline para T6 e T8 (deltas nos reports); `eval/ITERACOES.md` ainda sem a entrada desta rodada; **record (~60 buscas) e holdout (~60) PENDENTES de aprovação** (custo SerpAPI).
+- [ ] **T9. Medição e registro.** ⏳ PARCIAL: nível 0 antes/depois feito offline para T6, T7 e E4 (a3-dev, sem datas: o E4 não move este snapshot); `eval/ITERACOES.md` com a entrada desta rodada (dev, nível 0) ✅, tabela de holdout pendente; **record (~60 buscas) e holdout (~60) PENDENTES** de aprovação e de cassetes (custo SerpAPI; `eval/cassettes/` não existe nesta máquina).
   - `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`: antes e depois de cada task de decisão (T6, T7, T8).
   - **Depois da T4 e com aprovação** (cerca de 60 buscas): `python3 -m eval.run --modo record --ids "$(cat eval/subamostra20.txt)" --max-buscas-serpapi 60 --nome fase-eb`, seguido de replay (`llm_miss=0`).
   - Registrar em `eval/ITERACOES.md`: hipótese, mudança, métricas antes/depois e run_ids.
@@ -117,16 +117,18 @@ O E4 tem plano próprio em `docs/superpowers/plans/2026-10-09-e4-relevancia-temp
 
 **Caminho crítico:** T4 → T5 → T6 → T9 (record).
 
-## Status 09/10 (PR parcial)
+## Status 09/10 (follow-up, branch `feat/fase-eb-followup`)
 - ✅ Commitados e revisados (spec ✅): T0, T1, T2, T3(+fix), T4(+fix), T5, T8(+fix).
 - ➕ Extra emergencial commitado (`d06ebce`): `replay.hoje()` (relógio via cassete, spec E4-Task-3 verbatim) — sem ele o stack T0–T5 não era autocontido (32 falhas `AttributeError`); E4-Task-3 deve rebasar/estender a partir daqui.
-- ⏳ Follow-up (fora deste PR): T6 (implementado, sem commit/review), T7 (não iniciado), T9-record/holdout (aguardando aprovação).
+- ✅ Concluídos no follow-up: T6 (`6a4533c`), T7 (`f0e0959`, fix `7b955ca`) e o raciocínio do avaliador no bot e na web (`17f385b`). Suíte em 09/10, antes do code review final: 688 passed, 0 failed.
+- ✅ Code review final (09/10, HEAD `62c6156`): regra final da T7 e travas acima. Suíte: **889 passed, 0 failed**, com e sem `PYTHONUTF8=1`. Detalhes e pendências no adendo de `eval/ITERACOES.md`.
+- ⏳ Pendente: T9-record e holdout (aguardando aprovação e cassetes). Status final: T0–T8 feitos; T9 parcial (nível 0 dev feito; record e holdout pendentes).
 
 ## Done When
-- [x] pytest verde (421 passed no worktree limpo do PR), e nenhum erro grave novo no eval de decisão (T8 delta zero; T6 −1 grave; T4/T5 sem mudança de nível).
-- [ ] `cr_jn_soltura_vorcaro` e `cr_lula_acabar_bets_que_criou` deixam de ser erro grave. ⏳ PARCIAL: vorcaro corrigido pelo T6 (fora deste PR); bets continua grave por posturas (caso T7).
-- [x] Bot e web mostram: onde foi encontrado (T2); selo atribuído (T3); fontes não analisadas integralmente (T1). Raciocínio do avaliador no bot/web: ⏳ pendente (T4 fia até `Fonte`; render é follow-up).
-- [ ] `eval/ITERACOES.md` tem números de dev e de holdout. ⏳ pendente (T9).
+- [x] pytest verde (889 passed, 0 failed, 0 xfail, com e sem `PYTHONUTF8`, code review final em `62c6156`), e nenhum erro grave novo no eval de decisão (nível 0, a3-dev: erro grave 2 → 0; T6 −1 e T7 −1).
+- [x] `cr_jn_soltura_vorcaro` e `cr_lula_acabar_bets_que_criou` deixam de ser erro grave **no nível 0** ✅ (vorcaro via T6, bets via T7). Confirmação no record: pendente (aprovação e cassetes).
+- [x] Bot e web mostram: onde foi encontrado (T2); selo atribuído (T3); fontes não analisadas integralmente (T1). Raciocínio do avaliador no bot/web: ✅ (`17f385b`).
+- [ ] `eval/ITERACOES.md` tem números de dev e de holdout. ⏳ dev ✅ (entrada 09/10, nível 0); holdout pendente (aprovação e cassetes).
 
 ## Notes
 - **B4** ("agência sozinha nunca chega a alta") foi absorvido pela T6. Reavalie depois de medir.

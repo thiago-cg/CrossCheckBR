@@ -3,8 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fonte publicada fora da janela do "hoje/ontem/nesta semana…" do texto perde peso de evidência
-(mistura de razões de verossimilhança), sem nunca elevar a propensão por si; o desconto é medido em bits,
-determinístico no eval e visível ao usuário como aviso neutro.
+(mistura de razões de verossimilhança); E4 só remove informação de fonte de outro episódio (ver Global
+Constraints); o desconto é medido em bits, determinístico no eval e visível ao usuário como aviso neutro.
 
 **Architecture:** `aplicabilidade.py` (puro) mede a janela do texto e normaliza datas; `decisao.decidir` (puro)
 desconta cada contribuição com `r = relevancia_temporal(e, janela)` → `sinal·ln(r·e^|c| + 1 − r)`;
@@ -15,32 +15,33 @@ o pipeline resolve a **data de referência** (entrada explícita → relógio gr
 `runs/<id>/trace.jsonl`, eval nível 0 (`python3 -m eval.decisao`).
 
 **Spec:** `docs/PROXIMOS_PASSOS.md` §4 E4 + §5.2, **substituído** pelas decisões da usuária de 09/10:
-E4 **não eleva** a propensão; desconto informacional simétrico; bits descartados reportados
+E4 só remove informação de fonte de outro episódio (formulação de 09/10, Global Constraints); desconto informacional simétrico; bits descartados reportados
 (`Decisao.descontos_temporais`, `travas['data_incompativel']`); motivo "podem tratar de outro episódio —
 verifique se não é notícia antiga recirculando" quando o nível fica `media` por isso. E3 aprovado e já no código.
 
-## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`)
+## Estado de implementação (09/10, fim do dia — branch `feat/e4-relevancia-temporal`; atualizado no follow-up `feat/fase-eb-followup` @ `c7a8868`; code review final em `62c6156`)
 
 | Task | Estado | Evidência |
 |---|---|---|
 | 0 | ✅ feita | hiperbólica no HEAD + `test_e4_relevancia_temporal_contrato` verde |
 | 1 | ✅ implementada + review Approved | 4 testes novos; review sem Critical/Important (só minors diferidos) |
-| 2 | ✅ implementada (review pendente) | 17 casos `normalizar_data` + prioridade da data; cobertura 90,7% (era ~20%) |
-| 3 | ✅ implementada (review pendente) | relógio `replay.hoje` (live/record/replay-miss→None+fallback); 40+10 testes |
-| 4 | ✅ implementada (review pendente) | exclusões/extensões + `janela_da_afirmacao`; check eval: só `cr_el_nino` 2→32 |
-| 4b | ✅ implementada (review pendente) | `marco_do_evento` + `marco=(D,folga)`; 5 testes TDD, frases fora do eval |
-| 5 | ⬜ não iniciada | gate E1 ainda usa janela/referência/data antigas |
-| 6 | ✅ implementada (review pendente) | aviso neutro em `justificativa`/`why_1linha` + 📅 por fonte; `verificar_neutralidade == []` |
-| 7 | ✅ implementada (review pendente) | `fonte estagio=data`, `resumo_trace`, `--sem-e4`, `--gerar-snapshot`, `metricas.e4` |
-| 8 | ⬜ não iniciada | sem regressão Bolsonaro REFUTA→"não alta"; sem record (precisa aprovação); `ITERACOES.md`/`PROXIMOS_PASSOS.md` intactos |
+| 2 | ✅ implementada e revisada | 17 casos `normalizar_data` + prioridade da data; cobertura 90,7% (era ~20%) |
+| 3 | ✅ implementada e revisada | relógio `replay.hoje` (live/record/replay-miss→None+fallback); 40+10 testes |
+| 4 | ✅ implementada e revisada | exclusões/extensões + `janela_da_afirmacao`; check eval: só `cr_el_nino` 2→32 |
+| 4b | ✅ implementada e revisada | `marco_do_evento` + `marco=(D,folga)`; 5 testes TDD, frases fora do eval |
+| 5 | ✅ feita | gate E1 alinhado e binário (`4b575ec`): mesma janela, referência e data da decisão |
+| 6 | ✅ implementada e revisada | aviso neutro em `justificativa`/`why_1linha` + 📅 por fonte; `verificar_neutralidade == []` |
+| 7 | ✅ implementada e revisada | `fonte estagio=data`, `resumo_trace`, `--sem-e4`, `--gerar-snapshot`, `metricas.e4` |
+| 8 | Steps 1–2 ✅ (Step 2 com ressalva); Steps 3–7 ⬜ (record e holdout: aprovação e cassetes) | regressão Bolsonaro nas duas direções (`0ebcd57`); a3-dev no HEAD difere do estado de partida só por T6/T7 (ver Step 2); `ITERACOES.md` atualizado (dev, nível 0); `PROXIMOS_PASSOS.md` (E4 e §5.2) atualizado |
 
-- Suite no commit: **467 passed, 0 failed** (`python3 -m pytest tests -q`).
+- Suite no HEAD `c7a8868` (09/10, follow-up): **688 passed, 0 failed, 0 xfail** (`python3 -m pytest tests -q`, com e sem `PYTHONUTF8`). Antes, no `main` `56c4b33`: 467 passed.
+- Suite no HEAD `62c6156` (code review final, 09/10): **889 passed, 0 failed** (com e sem `PYTHONUTF8=1`). As regras finais estão em Global Constraints e Review Focus.
 - Incidentes revertidos (comportamento fora deste plano, introduzido 2x, revertido 2x — R6 no ledger):
   peso `f_fake`, filtro "selo de página não vota", testes `test_t6_*`, reescrita do teste pinado do selo.
   Árvore limpa confirmada por grep no commit.
 - Flaky conhecido (ambiental, sem relação com E4): `test_orcamento_parcial_preservado`
   (budget 0,15s; contagem 4-vs-5 eventos; passa intermitente).
-- Pendente após o commit: reviews das Tasks 4b/6/7, Task 5, Task 8, final whole-branch review.
+- Pendente: Task 8 Steps 3–7 (record e replay da subamostra, holdout; com aprovação e cassetes) e o final whole-branch review.
 
 ## Global Constraints
 
@@ -52,6 +53,13 @@ verifique se não é notícia antiga recirculando" quando o nível fica `media` 
   (`data_referencia`) só com justificativa na `nota` + registro em `eval/ITERACOES.md`, decidido **antes** de rodar.
 - Não ajustar janelas/curva para acertar um caso do eval; marcadores novos precisam de razão linguística geral e
   teste próprio (frases fora do eval).
+- **Guarda do sinal (decisão da usuária, 09/10, após review):** E4 só remove informação de fonte de outro
+  episódio. O nível pode ficar mais extremo apenas na direção de fontes dentro do período, nunca sustentado só
+  por fonte descontada. Consequência aceita: quando uma fonte antiga de sinal oposto perde peso, o nível pode
+  subir (ou descer) se o resultado vier de fontes atuais. Testes em `tests/test_decisao.py`
+  (`test_e4_guarda_*`: sinais opostos em clusters distintos e no mesmo cluster; só fontes descontadas). Contraexemplo
+  conhecido (era xfail estrito; hoje teste normal): 14 posturas ou 7 selos FALSO do índice descontados (r = 0,05)
+  somam ≥ τ e viram alta sem voto do período. **Corrigido em 09/10** pela trava `so_fontes_de_outro_periodo` (ver Review Focus).
 - Todo fallback novo → `telemetria.fallback(onde, motivo)`; todo I/O novo (inclusive relógio) → `replay.*`.
 - Sem rede live; **sem eval `--modo record`** neste plano sem aprovação explícita (Task 8 só *pede*; custo
   estimado ~50 buscas SerpAPI, nível 3 da escada de custo em `PROXIMOS_PASSOS.md` §3).
@@ -147,14 +155,25 @@ O teste existente só cobre a direção SUSTENTA→"não baixa"; falta a direç�
 
 ## Review Focus
 
-- E4 nunca eleva nem baixa o nível sozinho: `|L|` só diminui item a item; teste de simetria + teste de que o
-  contrafactual sem desconto tem `|L|` ≥ com desconto.
+- E4 só remove informação de fonte de outro episódio: o nível pode ficar mais extremo apenas na direção de
+  fontes dentro do período, nunca sustentado só por fonte descontada (decisão da usuária, 09/10, após review;
+  ver Global Constraints). Testes: `test_e4_guarda_*` (sinais opostos em clusters distintos e no mesmo cluster;
+  só fontes descontadas) e `test_e4_simetrico_nao_eleva_propensao` (uma fonte descontada não empurra sozinha).
+- Regra imposta por trava (09/10): `decidir`/`_agregar` cortam para 0,99τ o L_a de uma afirmação com desconto, com
+  |L_a| ≥ τ e nenhum voto na direção de L_a com contribuição de item não descontado (`travas["so_fontes_de_outro_periodo"]`);
+  a afirmação cortada sai da conjunção (T7). Testes: `test_e4_trava_*`, `test_t7_so_descontada_forte_e_cortada_*` e o
+  antigo xfail `test_e4_guarda_so_fontes_descontadas_nao_viram_alta_com_muitas_fontes`, agora teste normal.
 - Datas: precisão conservadora (usar o **fim** do intervalo: "2021" → 2021-12-31; "há 3 dias" ancorado na data
   da busca), nunca descontar mais do que a data permite afirmar.
 - Determinismo: replay de outro dia dá o mesmo nível; relógio ausente no cassete → `fallback onde=relogio` e E4
   desligado (nunca "data de hoje" silenciosa).
 - Gate E1 e decisão usam a **mesma** janela, referência e data normalizada.
 - Neutralidade: o aviso não contém nada de `agregador.EXPRESSOES_PROIBIDAS` ("notícia falsa", "é falso"…).
+- Parte sem checagem atual (D-b, 09/10): afirmação que sai da conjunção por ter só fonte de outro período limita o texto a média quando o nível sairia baixa (`travas["parte_sem_checagem_atual"]`, L = −0,99τ). A alta pelas partes contestadas atuais se mantém.
+- Paridade gate × decisão: o gate E1 e `decidir` recebem o mesmo texto, a mesma referência e a mesma data normalizada, e medem com `marcas_da_afirmacao` (janela e marco) e `medida_da_afirmacao` (marco antes da janela). `AfirmacaoDecisao.calculada` marca que a medida veio do pipeline.
+- Confiabilidade: `sem_fonte_confiavel` só conta fonte atual (dentro da janela). Fonte confiável de outro período não destrava a trava.
+- Selo de página (T6) não vota na decisão nem no gate, e também não encerra a busca do agente (`pipeline.py:955`). Em live, pode gastar mais SerpAPI: acompanhar no record.
+- Postura com fator BERT abaixo de 5% do peso não vota (`FRACAO_MIN_VOTO`; vai para `posturas_fracas` no trace). Descontinuidade conhecida: prob_fake 0,94 dá média (L=+0,06); 0,96 some a postura e as confirmações decidem (baixa).
 
 ---
 
@@ -602,14 +621,15 @@ def test_e4_aviso_chega_ao_usuario_e_e_neutro(monkeypatch):
 **Files:** `tests/test_pipeline.py` (regressão com a base real), `eval/ITERACOES.md`, `eval/snapshots/` (snapshot
 novo), `docs/PROXIMOS_PASSOS.md` (E4 ✅, §5.2 resolvida pela decisão de 09/10).
 
-- [ ] **Step 1: Regressão Bolsonaro nas duas direções (offline, sem rede):**
+- [x] **Step 1: Regressão Bolsonaro nas duas direções (offline, sem rede):** feito (`0ebcd57`). REFUTA: sem E4 alta (L=+1,50), com E4 média (L=+0,16); SUSTENTA: sem E4 baixa (L=−3,00), com E4 média (L=−0,25) (base real do índice, `r` stub = 0,05).
   teste com `Indice.de_checagens()` **real**, `FakeSerp([])`, juiz falso que devolve REFUTA com citação para as
   checagens Boatos.org (FALSO, 2026-01-14 e 2025-04-23, A8), `data_referencia="2026-10-09"`,
   entrada "Bolsonaro recebeu alta do hospital hoje" → `propensao != "alta"`,
   `decisao["travas"]["data_incompativel"] is True`, aviso no `justificativa`, web **não** pulada.
   Complementa `test_e4_fonte_antiga_que_confirma_nao_crava_baixa` (direção SUSTENTA). Stub de `r` = 0.05.
-- [ ] **Step 2: Nível 0, guarda de regressão:** `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`
+- [x] **Step 2: Nível 0, guarda de regressão (feito em 09/10, com ressalva):** `python3 -m eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`
   → Expected: **idêntico** ao estado de partida (15,9% / 30,4% / grave 2 / indet 65,2%) — snapshot sem datas.
+  **Resultado (09/10):** `main` 56c4b33 reproduz o estado de partida (15,9% / 30,4% / 2 / 65,2%); HEAD `c7a8868` dá 14,5% / 33,3% / 0 / 65,2%. A diferença vem de T6 e T7 (três casos: `cr_jn_soltura_vorcaro`, `cr_lula_nao_acredita_em_deus`, `cr_lula_acabar_bets_que_criou`), aceitos pela usuária em 09/10; o E4 não move este snapshot (sem datas: `referencia_ausente` 69). Ou seja, "idêntico" vale para o `main`, não para o HEAD.
   Qualquer diferença = E4 vazando para casos sem marcador → investigar antes de seguir.
 - [ ] **Step 3: Pedir aprovação** à usuária para o record da subamostra (nível 3, ~50 buscas SerpAPI; reusa
   cassetes existentes e grava o que falta, inclusive o relógio):
@@ -628,11 +648,11 @@ novo), `docs/PROXIMOS_PASSOS.md` (E4 ✅, §5.2 resolvida pela decisão de 09/10
   - sub20: **nenhum erro grave novo** com E4 vs `--sem-e4`; todo caso que mudou de nível tem desconto
     explicado no trace (data da fonte, janela, r) e foi para `media`/`indeterminada` ou para a direção das
     fontes **dentro** da janela — nunca para um extremo sustentado só por fonte descontada;
-  - `|L|` com E4 ≤ `|L_sem_desconto|` em todos os casos (simetria na prática);
+  - `|L|` com E4 só excede `|L_sem_desconto|` na direção de um voto não descontado (guarda de 09/10, Global Constraints);
   - replay determinístico (Step 4);
   - regressão Bolsonaro nas duas direções verde.
 - [ ] **Step 7: Registrar em `eval/ITERACOES.md`:** "Iteração E3+E4" com hipótese (fonte de outro episódio
-  não deve decidir fato apresentado como atual; desconto informacional não eleva propensão), mudanças
+  não deve decidir fato apresentado como atual; E4 só remove informação de fonte de outro episódio), mudanças
   (Tasks 0-7), métricas antes/depois (a3-dev; sub20 com/sem E4), cobertura de datas (Task 2 Step 5), `run_ids`
   olhados, e o que **não** foi validado: holdout (nível 4; só `cr_video_lula_ministros_stf_atual` tem
   marcador), amostra pequena (2 casos dev com marcador), curva `r` não calibrada.

@@ -33,7 +33,7 @@ class FakeResp:
 
 
 def _eventos(tmp, rid, tipo):
-    linhas = (tmp / "runs" / rid / "trace.jsonl").read_text().splitlines()
+    linhas = (tmp / "runs" / rid / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(x)["dados"] for x in linhas if json.loads(x)["tipo"] == tipo]
 
 
@@ -64,7 +64,7 @@ def test_record_grava_e_replay_reproduz_sem_rede(amb, monkeypatch):
         r = replay.http_get("http://exemplo.test/api", params={"q": "a", "api_key": "SEGREDO"}, timeout=5)
     assert r.json() == {"ok": 1} and r.cache == "live" and chamadas[0]["params"]["q"] == "a"
     arqs = list((amb / "cass").glob("*.json"))
-    assert len(arqs) == 1 and "SEGREDO" not in arqs[0].read_text()
+    assert len(arqs) == 1 and "SEGREDO" not in arqs[0].read_text(encoding="utf-8")
     # replay: rede proibida, mesma resposta
     monkeypatch.setattr(_curl, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rede!")))
     with replay.modo("replay"):
@@ -106,7 +106,7 @@ def test_llm_post_emite_evento_llm(amb, monkeypatch):
     ev = _eventos(amb, rid, "llm")[0]
     assert ev["motor"] == "llm-local" and ev["modelo"] == "m1" and ev["finalidade"] == "afirmacoes"
     assert ev["saida"] == "Café cura câncer" and ev["cache"] == "live" and ev["prompt_sha"]
-    assert "segredosegredo" not in (amb / "runs" / rid / "trace.jsonl").read_text()
+    assert "segredosegredo" not in (amb / "runs" / rid / "trace.jsonl").read_text(encoding="utf-8")
 
 
 def test_finalidade_inferida_do_chamador(amb, monkeypatch):
@@ -196,7 +196,7 @@ def test_orcamento_serpapi_bloqueia_live_e_cassete_nao_conta(amb, monkeypatch):
         with pytest.raises(replay.OrcamentoSerpAPIEsgotado):
             replay.http_get(url, params={"q": "b", "api_key": "k"})
     tel.finalizar_run(None)
-    uso = json.loads((amb / "uso.json").read_text())
+    uso = json.loads((amb / "uso.json").read_text(encoding="utf-8"))
     assert uso["total_live"] == 3 and uso["chamadas"][-1]["q"] == "a"
     assert replay.uso_serpapi()["restantes"] == 0
     fb = _eventos(amb, rid, "fallback")
@@ -295,3 +295,87 @@ def test_relogio_replay_grava_e_reproduz(tmp_path, monkeypatch):
     with replay.modo("replay"):
         assert replay.hoje("Bolsonaro recebeu alta do hospital hoje") == d1
         assert replay.hoje("texto nunca gravado") is None   # + fallback onde=relogio
+
+
+# --- E4 revisão (item 5): relógio valida a data gravada; cassete sem data = None + fallback ---
+def _capturar_fallbacks(monkeypatch):
+    capturados = []
+    monkeypatch.setattr(replay.telemetria, "fallback",
+                        lambda onde, motivo="", /, **extra: capturados.append((onde, motivo)))
+    return capturados
+
+
+def _cassete_relogio(contexto, corpo):
+    """Grava no cassete do relógio um corpo arbitrário (cassete bom ou ruim)."""
+    k = replay.chave("GET", replay.RELOGIO_URL, contexto)
+    resp = replay.Resposta(200, {"content-type": "application/json"},
+                           json.dumps(corpo).encode("utf-8"), replay.RELOGIO_URL, cache="live")
+    replay._gravar(k, "GET", replay.RELOGIO_URL, contexto, resp, 0.0)
+
+
+@pytest.mark.parametrize("corpo", [{}, {"data": None}, {"data": "2026-1-9"}, {"data": "amanhã"},
+                                   {"data": "2026-10-09T10:00"}, {"data": "2026-02-30"}])
+def test_relogio_cassete_sem_data_valida_vira_none_com_fallback(tmp_path, monkeypatch, corpo):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_relogio("texto X", corpo)
+    with replay.modo("replay"):
+        assert replay.hoje("texto X") is None  # nunca a string "None" nem data inventada
+    assert fb == [("relogio", "cassete sem data")]
+
+
+def test_relogio_replay_sem_cassete_registra_nao_gravada(tmp_path, monkeypatch):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    with replay.modo("replay"):
+        assert replay.hoje("nunca gravado") is None
+    assert fb == [("relogio", "data de referência não gravada")]
+
+
+def test_relogio_record_refaz_cassete_sem_data_e_reproduz(tmp_path, monkeypatch):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    _cassete_relogio("texto Y", {"outra": 1})
+    with replay.modo("record"):
+        assert replay.hoje("texto Y") == "2026-10-09"  # grava o que falta (cassete ruim é refeito)
+    with replay.modo("replay"):
+        assert replay.hoje("texto Y") == "2026-10-09"
+
+
+def test_relogio_live_devolve_a_data_de_hoje_brt(monkeypatch):
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    with replay.modo("live"):
+        assert replay.hoje("qualquer texto") == "2026-10-09"
+
+
+# --- Revisão I2/M7: cassete do relógio com estrutura inválida = "cassete sem data", nunca exceção ---
+def _cassete_bruto(contexto, bruto):
+    k = replay.chave("GET", replay.RELOGIO_URL, contexto)
+    replay._caminho(k).parent.mkdir(parents=True, exist_ok=True)
+    replay._caminho(k).write_bytes(bruto)
+
+
+_CASSETES_INVALIDOS = [b"null", b"[]", b'{"resp": "x"}', b'{"resp": 5}', b'{"resp": {"texto": 7}}', b"{nao json"]
+
+
+@pytest.mark.parametrize("bruto", _CASSETES_INVALIDOS)
+def test_relogio_cassete_invalido_em_replay_vira_none_com_fallback(tmp_path, monkeypatch, bruto):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_bruto("texto Z", bruto)
+    with replay.modo("replay"):
+        assert replay.hoje("texto Z") is None
+    assert fb == [("relogio", "cassete sem data")]  # M7: o arquivo existe, então não é "não gravada"
+
+
+@pytest.mark.parametrize("bruto", _CASSETES_INVALIDOS)
+def test_relogio_cassete_invalido_em_record_e_refeito(tmp_path, monkeypatch, bruto):
+    monkeypatch.setenv("CASSETES_DIR", str(tmp_path))
+    monkeypatch.setattr(replay, "_hoje_brt_iso", lambda: "2026-10-09")
+    fb = _capturar_fallbacks(monkeypatch)
+    _cassete_bruto("texto Z", bruto)
+    with replay.modo("record"):
+        assert replay.hoje("texto Z") == "2026-10-09"  # refaz o cassete
+    with replay.modo("replay"):
+        assert replay.hoje("texto Z") == "2026-10-09"
+    assert fb == []  # em record o cassete é refeito na hora: sem fallback
