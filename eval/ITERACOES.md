@@ -339,4 +339,4 @@ Base: `feat/fase-eb-followup` @ `62c6156`, 39 commits depois de `0c9267c` (o com
 - `motivo_data_ilegivel` recebe a âncora da busca em `_peca_web` (`_ancora`). Em `pipeline.py` (índice, página lida) `normalizar_data` roda sem âncora, então "sem âncora" é o motivo correto ali.
 - Import sem uso removido de `pipeline.py`; docstring de `eval/decisao.py` corrigido.
 - Medição: pytest 894 passed; `eval.decisao --snapshot eval/snapshots/a3-dev.jsonl`: acerto 0,1449, acerto+parcial 0,3333, erro grave 0 (igual ao anterior).
-- Item 6 (`/checar --json` devolve raciocínio bruto): aguarda decisão da usuária.
+- Item 6 (`/checar --json` devolve raciocínio bruto): decidido pela usuária em 09/10: a API continua devolvendo o texto bruto, sem omitir nem sinalizar. Nenhuma mudança de código.
